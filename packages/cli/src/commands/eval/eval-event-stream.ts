@@ -1,3 +1,7 @@
+import * as Effect from 'effect/Effect';
+import * as Stream from 'effect/Stream';
+import * as Exit from 'effect/Exit';
+import * as Cause from 'effect/Cause';
 import {
   parseWithSchemaSync,
   parseWithSchema,
@@ -153,100 +157,112 @@ const recoverFailedJsonlStream = (
  * human progress while it runs. `run_completed` is printed only together with the result, so a
  * source failure can still replace it.
  */
-const collectEvalEvents = async (
-  source: EvalEventSource,
-  options: CollectEvalEventsOptions,
-): Promise<EvalEventStream> => {
-  const events: EvalEvent[] = [];
-  let printed = 0;
+const collectEvalEvents = (source: EvalEventSource, options: CollectEvalEventsOptions) =>
+  Effect.gen(function* () {
+    const events: EvalEvent[] = [];
+    let printed = 0;
 
-  const print = (event: EvalEvent): void => {
-    options.io.output(serializeEvalEvent(event));
-    printed += 1;
-  };
-
-  const complete = (terminal: readonly EvalEvent[]): void => {
-    const publish = (failure?: SerializedCliFailure): void => {
-      for (const event of terminal) {
-        const settled =
-          failure === undefined
-            ? event
-            : event.event === 'run_completed'
-              ? { ...event, data: { ...event.data, status: 'failed' } }
-              : event.event === 'result'
-                ? {
-                    ...event,
-                    data: {
-                      exit_code: failure.exitCode,
-                      result: createCliFailureResult('eval.run', failure.error),
-                    },
-                  }
-                : event;
-
-        if (options.streamJsonl) options.io.output(JSON.stringify(settled));
-
-        if (options.watch && failure === undefined) {
-          const rendered = renderHumanProgress(event);
-
-          if (rendered !== undefined) options.io.output(rendered);
-        }
-      }
+    const print = (event: EvalEvent): void => {
+      options.io.output(serializeEvalEvent(event));
+      printed += 1;
     };
 
-    if (options.deferTerminal !== undefined) options.deferTerminal(publish);
-    else publish();
-  };
+    const complete = (terminal: readonly EvalEvent[]): void => {
+      const publish = (failure?: SerializedCliFailure): void => {
+        for (const event of terminal) {
+          const settled =
+            failure === undefined
+              ? event
+              : event.event === 'run_completed'
+                ? { ...event, data: { ...event.data, status: 'failed' } }
+                : event.event === 'result'
+                  ? {
+                      ...event,
+                      data: {
+                        exit_code: failure.exitCode,
+                        result: createCliFailureResult('eval.run', failure.error),
+                      },
+                    }
+                  : event;
 
-  try {
-    for await (const value of source) {
-      const event = parseWithSchemaSync(evalEventSchema, value);
+          if (options.streamJsonl) options.io.output(JSON.stringify(settled));
 
-      if (event.sequence !== events.length) {
-        throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
-          path: `/events/${events.length}/sequence`,
-          hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
+          if (options.watch && failure === undefined) {
+            const rendered = renderHumanProgress(event);
+
+            if (rendered !== undefined) options.io.output(rendered);
+          }
+        }
+      };
+
+      if (options.deferTerminal !== undefined) options.deferTerminal(publish);
+      else publish();
+    };
+
+    try {
+      const stream =
+        Symbol.asyncIterator in source
+          ? Stream.fromAsyncIterable(source, (cause: unknown) => cause)
+          : Stream.fromIterable(source);
+
+      const consumed = yield* Effect.exit(
+        Stream.runForEach(stream, (value) =>
+          Effect.sync(() => {
+            const event = parseWithSchemaSync(evalEventSchema, value);
+
+            if (event.sequence !== events.length) {
+              throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
+                path: `/events/${events.length}/sequence`,
+                hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
+              });
+            }
+
+            events.push(event);
+
+            if (options.streamJsonl && event.event !== 'run_completed' && event.event !== 'result')
+              print(event);
+
+            if (options.watch && event.event !== 'run_completed' && event.event !== 'result') {
+              const rendered = renderHumanProgress(event);
+
+              if (rendered !== undefined) options.io.output(rendered);
+            }
+          }),
+        ),
+      );
+
+      if (Exit.isFailure(consumed)) {
+        if (Cause.hasInterrupts(consumed.cause)) return yield* Effect.failCause(consumed.cause);
+        throw Cause.squash(consumed.cause);
+      }
+
+      const parsed = parseWithSchema(evalEventStreamSchema, events);
+
+      if (!parsed.ok) {
+        throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
+          hint: 'Repair dispatcher event ordering and terminal result metadata.',
+          details: { diagnostics: issueDiagnostics(parsed.error.issues) },
         });
       }
 
-      events.push(event);
+      complete(
+        parsed.value.filter((event) => event.event === 'run_completed' || event.event === 'result'),
+      );
 
-      if (options.streamJsonl && event.event !== 'run_completed' && event.event !== 'result')
-        print(event);
+      return parsed.value;
+    } catch (error: unknown) {
+      if (!options.streamJsonl || events.length === 0) throw error;
+      const recovered = recoverFailedJsonlStream(events, error, options.now);
+      const remaining = recovered.slice(printed);
+      remaining
+        .filter((event) => event.event !== 'run_completed' && event.event !== 'result')
+        .forEach(print);
+      complete(
+        remaining.filter((event) => event.event === 'run_completed' || event.event === 'result'),
+      );
 
-      if (options.watch && event.event !== 'run_completed' && event.event !== 'result') {
-        const rendered = renderHumanProgress(event);
-
-        if (rendered !== undefined) options.io.output(rendered);
-      }
+      return recovered;
     }
-
-    const parsed = parseWithSchema(evalEventStreamSchema, events);
-
-    if (!parsed.ok) {
-      throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
-        hint: 'Repair dispatcher event ordering and terminal result metadata.',
-        details: { diagnostics: issueDiagnostics(parsed.error.issues) },
-      });
-    }
-
-    complete(
-      parsed.value.filter((event) => event.event === 'run_completed' || event.event === 'result'),
-    );
-
-    return parsed.value;
-  } catch (error: unknown) {
-    if (!options.streamJsonl || events.length === 0) throw error;
-    const recovered = recoverFailedJsonlStream(events, error, options.now);
-    const remaining = recovered.slice(printed);
-    remaining
-      .filter((event) => event.event !== 'run_completed' && event.event !== 'result')
-      .forEach(print);
-    complete(
-      remaining.filter((event) => event.event === 'run_completed' || event.event === 'result'),
-    );
-
-    return recovered;
-  }
-};
+  });
 
 export { collectEvalEvents, evalEvent, serializeEvalEvent };

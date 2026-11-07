@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import {
   METRIC_PRESETS,
@@ -91,40 +90,46 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--pass-pointer <pointer>', 'HTTP result pass pointer; defaults to /pass')
     .option('--rationale-pointer <pointer>', 'HTTP result rationale pointer')
     .option('--details-pointer <pointer>', 'HTTP result details pointer')
-    .action(async (metricId: string | undefined, options: MetricAddOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
+    .action((metricId: string | undefined, options: MetricAddOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
 
-      const request = await readOrBuildRequest({
-        command: 'metric.add',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const id = await requiredInput(
-            metricId,
-            { path: '<metric-id>', question: 'Metric id: ' },
-            { interactive, prompt: context.interaction.prompt },
-          );
+          const request = yield* readOrBuildRequest({
+            command: 'metric.add',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                const id = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(
+                      metricId,
+                      { path: '<metric-id>', question: 'Metric id: ' },
+                      { interactive, prompt: context.interaction.prompt },
+                    ),
+                  catch: (cause) => cause,
+                });
 
-          const selected = await selectGuidedMetricFields(options, interactive, context);
-          const guided = await fillGuidedMetricFields(selected, interactive, context);
+                const selected = yield* selectGuidedMetricFields(options, interactive, context);
+                const guided = yield* fillGuidedMetricFields(selected, interactive, context);
 
-          const resource = await // EFFECT-BRIDGE(S9b)
-          Effect.runPromiseExit(
-            createMetricResource({
-              ...guided,
-              metricId: id,
-              readStdin: context.interaction.readStdin,
-              workingDirectory: context.workingDirectory,
-            }),
-          ).then((exit) => valueFromExit(exit));
+                const resource = yield* createMetricResource({
+                  ...guided,
+                  metricId: id,
+                  readStdin: context.interaction.readStdin,
+                  workingDirectory: context.workingDirectory,
+                });
 
-          return { ...mutationRequestFields('metric.add', options), metric: resource };
-        },
-      });
+                return { ...mutationRequestFields('metric.add', options), metric: resource };
+              }),
+          });
 
-      await runMetricMutation(request, options, interactive, context);
-    });
+          yield* runMetricMutation(request, options, interactive, context);
+        }),
+      ),
+    );
 
   setMutationHelp(add, {
     examples: [

@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import { runMetricMutationCommand, type MetricAuthoringRequest } from '@attest/local/metric';
 
@@ -7,25 +6,23 @@ import type { CommandContext } from '../shared/command-context.js';
 import { renderCommandResult } from '../shared/command-result.js';
 
 /** Runs one metric mutation through local and prints its result. */
-const runMetricMutation = async (
+const runMetricMutation = (
   request: MetricAuthoringRequest,
   options: MutationCliOptions,
   interactive: boolean,
   context: CommandContext,
-): Promise<void> => {
-  const result = await // EFFECT-BRIDGE(S9b)
-  Effect.runPromiseExit(
-    runMetricMutationCommand({
+) =>
+  Effect.gen(function* () {
+    const result = yield* runMetricMutationCommand({
       interactive,
       project: options.project,
       prompt: context.interaction.prompt,
       readStdin: context.interaction.readStdin,
       request,
       workingDirectory: context.workingDirectory,
-    }),
-  ).then((exit) => valueFromExit(exit));
+    });
 
-  context.io.output(renderCommandResult(request.command, outputFormat(options), result));
-};
+    context.io.output(renderCommandResult(request.command, outputFormat(options), result));
+  });
 
 export { runMetricMutation };

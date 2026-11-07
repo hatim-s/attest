@@ -121,21 +121,19 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
 
   for (const { description, name, run } of inspections) {
     addCommonOptions(project.command(name).description(description)).action(
-      async (options: CommonCliOptions) => {
-        const result = await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit<
-          | Awaited<Effect.Success<ReturnType<typeof runProjectShowCommand>>>
-          | Effect.Success<ReturnType<typeof runProjectValidateCommand>>,
-          Effect.Error<ReturnType<typeof runProjectShowCommand>>
-        >(
-          run({
-            project: options.project,
-            workingDirectory: context.workingDirectory,
-          }),
-        ).then((exit) => valueFromExit(exit));
+      (options: CommonCliOptions) =>
+        context.submit(
+          Effect.gen(function* () {
+            const result = yield* run({
+              project: options.project,
+              workingDirectory: context.workingDirectory,
+            });
 
-        context.io.output(renderCommandResult(`project.${name}`, outputFormat(options), result));
-      },
+            context.io.output(
+              renderCommandResult(`project.${name}`, outputFormat(options), result),
+            );
+          }),
+        ),
     );
   }
 
@@ -153,18 +151,19 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
         'runs',
       ]),
     )
-    .action(async (resourceType: ListResourceType, options: CommonCliOptions) => {
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runListCommand({
-          project: options.project,
-          resourceType,
-          workingDirectory: context.workingDirectory,
-        }),
-      ).then((exit) => valueFromExit(exit));
+    .action((resourceType: ListResourceType, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runListCommand({
+            project: options.project,
+            resourceType,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('list', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('list', outputFormat(options), result));
+        }),
+      ),
+    );
 
   addCommonOptions(context.program.command('show').description('Show one project resource.'))
     .addArgument(
@@ -177,19 +176,20 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
       ]),
     )
     .argument('<id>', 'resource id')
-    .action(async (resourceType: ShowResourceType, id: string, options: CommonCliOptions) => {
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runShowCommand({
-          id,
-          project: options.project,
-          resourceType,
-          workingDirectory: context.workingDirectory,
-        }),
-      ).then((exit) => valueFromExit(exit));
+    .action((resourceType: ShowResourceType, id: string, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runShowCommand({
+            id,
+            project: options.project,
+            resourceType,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('show', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('show', outputFormat(options), result));
+        }),
+      ),
+    );
 
   const schema = context.program
     .command('schema')

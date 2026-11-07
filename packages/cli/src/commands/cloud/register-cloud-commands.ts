@@ -1,4 +1,3 @@
-import { readExitValue } from '../../errors/read-exit-value.js';
 import * as Effect from 'effect/Effect';
 import { randomUUID } from 'node:crypto';
 import * as cloudAdapter from '@attest/local/cloud';
@@ -8,7 +7,6 @@ import { renderResult } from '../shared/command-result.js';
 import { addCommonOptions, collect } from '../shared/cli-options.js';
 import type { CommonCliOptions } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
-import { withProcessSignals } from '../shared/process-signals.js';
 
 type LoginOptions = CommonCliOptions & {
   url: Parameters<typeof cloudAdapter.loginCloud>[0]['baseUrl'];
@@ -37,6 +35,8 @@ type EventsOptions = CommonCliOptions & {
 
 /** Registers terminal translation only; the local cloud adapter owns authentication and state. */
 const registerCloudCommands = ({
+  signal: commandSignal,
+  submit,
   program,
   io,
   workingDirectory,
@@ -78,34 +78,41 @@ const registerCloudCommands = ({
     );
   };
 
-  const projectContext = async (options: CommonCliOptions) => ({
-    workingDirectory,
-    project: options.project,
-    client: await // EFFECT-BRIDGE(S9b)
-    Effect.runPromiseExit(authenticatedCloudClient(credentialPath)).then(readExitValue),
-  });
+  const projectContext = (options: CommonCliOptions) =>
+    Effect.gen(function* () {
+      return {
+        workingDirectory,
+        project: options.project,
+        client: yield* authenticatedCloudClient(credentialPath),
+      };
+    });
 
   addCommonOptions(
     cloud
       .command('upload')
       .description('Upload a finished local run and print its dashboard URL.')
       .argument('[run-id]'),
-  ).action(async (runId: string | undefined, options: CommonCliOptions) => {
-    const result = await withProcessSignals(async (signal) =>
-      // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        uploadCloudRun({
-          ...(await // EFFECT-BRIDGE(S9b)
-          Effect.runPromiseExit(
-            resolveCloudUploadProject({ ...(await projectContext(options)), signal }),
-          ).then(readExitValue)),
-          runId,
-        }),
-      ).then(readExitValue),
-    );
+  ).action((runId: string | undefined, options: CommonCliOptions) =>
+    submit(
+      Effect.gen(function* () {
+        const result = yield* Effect.gen(function* () {
+          const signal = commandSignal;
 
-    io.output(renderResult('cloud.upload', options.output ?? 'human', result, ({ url }) => url));
-  });
+          return yield* uploadCloudRun({
+            ...(yield* resolveCloudUploadProject({
+              ...(yield* projectContext(options)),
+              signal,
+            })),
+            runId,
+          });
+        });
+
+        io.output(
+          renderResult('cloud.upload', options.output ?? 'human', result, ({ url }) => url),
+        );
+      }),
+    ),
+  );
 
   const tokens = cloud
     .command('token')
@@ -117,57 +124,61 @@ const registerCloudCommands = ({
       .description('Print a new upload token once.')
       .requiredOption('--name <name>', 'token name'),
   ).action(
-    async (
+    (
       options: CommonCliOptions & {
         name: string;
       },
     ) =>
-      output(
-        'token.create',
-        options,
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          createCloudProjectToken({ ...(await projectContext(options)), name: options.name }),
-        ).then(readExitValue),
+      submit(
+        Effect.gen(function* () {
+          return output(
+            'token.create',
+            options,
+            yield* createCloudProjectToken({
+              ...(yield* projectContext(options)),
+              name: options.name,
+            }),
+          );
+        }),
       ),
   );
   addCommonOptions(tokens.command('list').description('List project token metadata.')).action(
-    async (options: CommonCliOptions) =>
-      output(
-        'token.list',
-        options,
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(listCloudProjectTokens(await projectContext(options))).then(
-          readExitValue,
-        ),
+    (options: CommonCliOptions) =>
+      submit(
+        Effect.gen(function* () {
+          return output(
+            'token.list',
+            options,
+            yield* listCloudProjectTokens(yield* projectContext(options)),
+          );
+        }),
       ),
   );
   addCommonOptions(
     tokens.command('revoke').description('Revoke a project upload token.').argument('<id>'),
-  ).action(async (tokenId: string, options: CommonCliOptions) =>
-    output(
-      'token.revoke',
-      options,
-      await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        revokeCloudProjectToken({ ...(await projectContext(options)), tokenId }),
-      ).then(readExitValue),
+  ).action((tokenId: string, options: CommonCliOptions) =>
+    submit(
+      Effect.gen(function* () {
+        return output(
+          'token.revoke',
+          options,
+          yield* revokeCloudProjectToken({ ...(yield* projectContext(options)), tokenId }),
+        );
+      }),
     ),
   );
   const projects = cloud.command('project').description('List or create cloud projects.');
   addCommonOptions(
     projects.command('list').description('List projects available to this account.'),
-  ).action(async (options: CommonCliOptions) =>
-    output(
-      'project.list',
-      options,
-      await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        listCloudProjects(
-          await // EFFECT-BRIDGE(S9b)
-          Effect.runPromiseExit(authenticatedCloudClient(credentialPath)).then(readExitValue),
-        ),
-      ).then(readExitValue),
+  ).action((options: CommonCliOptions) =>
+    submit(
+      Effect.gen(function* () {
+        return output(
+          'project.list',
+          options,
+          yield* listCloudProjects(yield* authenticatedCloudClient(credentialPath)),
+        );
+      }),
     ),
   );
   addCommonOptions(
@@ -175,48 +186,47 @@ const registerCloudCommands = ({
       .command('create')
       .description('Create a project before linking a local directory.')
       .argument('<name>'),
-  ).action(async (name: string, options: CommonCliOptions) =>
-    output(
-      'project.create',
-      options,
-      await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        createCloudProject(
-          await // EFFECT-BRIDGE(S9b)
-          Effect.runPromiseExit(authenticatedCloudClient(credentialPath)).then(readExitValue),
-          name,
-        ),
-      ).then(readExitValue),
+  ).action((name: string, options: CommonCliOptions) =>
+    submit(
+      Effect.gen(function* () {
+        return output(
+          'project.create',
+          options,
+          yield* createCloudProject(yield* authenticatedCloudClient(credentialPath), name),
+        );
+      }),
     ),
   );
   addCommonOptions(
     cloud.command('login').description('Approve a revocable CLI session in your cloud account.'),
   )
     .requiredOption('--url <origin>', 'cloud HTTPS origin')
-    .action(async (options: LoginOptions) => {
-      const result = await withProcessSignals((signal) =>
-        // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          loginCloud({
-            baseUrl: options.url,
-            credentialPath,
-            signal,
-            onDevice: ({ verification_uri, user_code }) =>
-              io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
-          }),
-        ).then(readExitValue),
-      );
+    .action((options: LoginOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const result = yield* Effect.gen(function* () {
+            const signal = commandSignal;
 
-      output('login', options, result);
-    });
+            return yield* loginCloud({
+              baseUrl: options.url,
+              credentialPath,
+              signal,
+              onDevice: ({ verification_uri, user_code }) =>
+                io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
+            });
+          });
+
+          output('login', options, result);
+        }),
+      ),
+    );
   addCommonOptions(
     cloud.command('logout').description('Revoke the cloud session and remove its local token.'),
-  ).action(async (options: CommonCliOptions) =>
-    output(
-      'logout',
-      options,
-      await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(logoutCloud(credentialPath)).then(readExitValue),
+  ).action((options: CommonCliOptions) =>
+    submit(
+      Effect.gen(function* () {
+        return output('logout', options, yield* logoutCloud(credentialPath));
+      }),
     ),
   );
   addCommonOptions(
@@ -224,14 +234,15 @@ const registerCloudCommands = ({
       .command('link')
       .description('Link this local project to a cloud project.')
       .argument('<project-id>'),
-  ).action(async (projectId: string, options: CommonCliOptions) =>
-    output(
-      'link',
-      options,
-      await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        linkCloudProject({ ...(await projectContext(options)), projectId }),
-      ).then(readExitValue),
+  ).action((projectId: string, options: CommonCliOptions) =>
+    submit(
+      Effect.gen(function* () {
+        return output(
+          'link',
+          options,
+          yield* linkCloudProject({ ...(yield* projectContext(options)), projectId }),
+        );
+      }),
     ),
   );
   addCommonOptions(
@@ -242,34 +253,36 @@ const registerCloudCommands = ({
       ),
   )
     .option('--no-secrets', 'confirm the project contains no secrets')
-    .action(async (options: PushOptions) =>
-      output(
-        'push',
-        options,
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          pushCloudProject({
-            ...(await projectContext(options)),
-            acknowledgeNoSecrets: options.secrets === false,
-          }),
-        ).then(readExitValue),
+    .action((options: PushOptions) =>
+      submit(
+        Effect.gen(function* () {
+          return output(
+            'push',
+            options,
+            yield* pushCloudProject({
+              ...(yield* projectContext(options)),
+              acknowledgeNoSecrets: options.secrets === false,
+            }),
+          );
+        }),
       ),
     );
   addCommonOptions(
     cloud.command('pull').description('Pull a cloud revision with local conflict checks.'),
   )
     .option('--revision <id>', 'specific immutable revision; default current')
-    .action(async (options: PullOptions) =>
-      output(
-        'pull',
-        options,
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          pullCloudProject({
-            ...(await projectContext(options)),
-            revisionId: options.revision,
-          }),
-        ).then(readExitValue),
+    .action((options: PullOptions) =>
+      submit(
+        Effect.gen(function* () {
+          return output(
+            'pull',
+            options,
+            yield* pullCloudProject({
+              ...(yield* projectContext(options)),
+              revisionId: options.revision,
+            }),
+          );
+        }),
       ),
     );
   addCommonOptions(
@@ -292,59 +305,63 @@ const registerCloudCommands = ({
       '--idempotency-key <key>',
       'stable retry key; retain it when reconnecting after submission',
     )
-    .action(async (testIds: string[], options: RunOptions) => {
-      if (options.all && testIds.length)
-        throw new AttestCliError('cli_usage', 'Pass --all or test ids.');
+    .action((testIds: string[], options: RunOptions) =>
+      submit(
+        Effect.gen(function* () {
+          if (options.all && testIds.length)
+            throw new AttestCliError('cli_usage', 'Pass --all or test ids.');
 
-      if (!options.all && !testIds.length)
-        throw new AttestCliError('cli_missing_input', 'Pass --all or test ids.');
-      const context = await projectContext(options);
+          if (!options.all && !testIds.length)
+            throw new AttestCliError('cli_missing_input', 'Pass --all or test ids.');
+          const context = yield* projectContext(options);
 
-      const project = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(resolveCloudProject(context)).then(readExitValue);
+          const project = yield* resolveCloudProject(context);
 
-      const revisionId = options.revision ?? project.revisionId;
+          const revisionId = options.revision ?? project.revisionId;
 
-      if (!revisionId)
-        throw new AttestCliError(
-          'cli_missing_input',
-          'Push the project before running it in the cloud.',
-        );
+          if (!revisionId)
+            throw new AttestCliError(
+              'cli_missing_input',
+              'Push the project before running it in the cloud.',
+            );
 
-      const request = await createEvalRunRequest(
-        {
-          all: options.all,
-          testIds,
-          caseIds: options.case,
-          tags: options.tag,
-          folders: options.folder,
-          datasetIds: options.dataset,
-          sample: options.sample,
-          seed: options.seed,
-          concurrency: options.concurrency,
-          timeout: options.timeout,
-          output: 'json',
-        },
-        { interactive: false, prompt: interaction.prompt },
-      );
+          const request = yield* Effect.tryPromise({
+            try: () =>
+              createEvalRunRequest(
+                {
+                  all: options.all,
+                  testIds,
+                  caseIds: options.case,
+                  tags: options.tag,
+                  folders: options.folder,
+                  datasetIds: options.dataset,
+                  sample: options.sample,
+                  seed: options.seed,
+                  concurrency: options.concurrency,
+                  timeout: options.timeout,
+                  output: 'json',
+                },
+                { interactive: false, prompt: interaction.prompt },
+              ),
+            catch: (cause) => cause,
+          });
 
-      const idempotencyKey = options.idempotencyKey ?? randomUUID();
-      // Print the key before submission so a lost response can be retried safely.
-      io.error(`Cloud submission retry key: ${idempotencyKey}`);
+          const idempotencyKey = options.idempotencyKey ?? randomUUID();
+          // Print the key before submission so a lost response can be retried safely.
+          io.error(`Cloud submission retry key: ${idempotencyKey}`);
 
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runCloud({
-          client: context.client,
-          projectId: project.projectId,
-          revisionId,
-          request,
-          idempotencyKey,
+          const result = yield* runCloud({
+            client: context.client,
+            projectId: project.projectId,
+            revisionId,
+            request,
+            idempotencyKey,
+          });
+
+          output('run', options, { idempotency_key: idempotencyKey, ...result });
         }),
-      ).then(readExitValue);
-
-      output('run', options, { idempotency_key: idempotencyKey, ...result });
-    });
+      ),
+    );
 
   for (const action of ['status', 'cancel', 'result'] as const) {
     addCommonOptions(
@@ -354,25 +371,23 @@ const registerCloudCommands = ({
           `${action === 'cancel' ? 'Cancel' : 'Read'} a hosted run.${action === 'result' ? ' Raw evidence expires after five days; summaries persist.' : ''}`,
         )
         .argument('<run-id>'),
-    ).action(async (runId: string, options: CommonCliOptions) => {
-      const context = await projectContext(options);
+    ).action((runId: string, options: CommonCliOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const context = yield* projectContext(options);
 
-      const project = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(resolveCloudProject(context)).then(readExitValue);
+          const project = yield* resolveCloudProject(context);
 
-      const operation = { status: getCloudRun, cancel: cancelCloudRun, result: getCloudRunResult }[
-        action
-      ];
+          const operation = {
+            status: getCloudRun,
+            cancel: cancelCloudRun,
+            result: getCloudRunResult,
+          }[action];
 
-      output(
-        action,
-        options,
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(operation(context.client, project.projectId, runId)).then(
-          readExitValue,
-        ),
-      );
-    });
+          output(action, options, yield* operation(context.client, project.projectId, runId));
+        }),
+      ),
+    );
   }
 
   addCommonOptions(
@@ -382,26 +397,26 @@ const registerCloudCommands = ({
       .argument('<run-id>'),
   )
     .option('--after <sequence>', 'last received sequence', '0')
-    .action(async (runId: string, options: EventsOptions) => {
-      const context = await projectContext(options);
+    .action((runId: string, options: EventsOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const context = yield* projectContext(options);
 
-      const project = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(resolveCloudProject(context)).then(readExitValue);
+          const project = yield* resolveCloudProject(context);
 
-      output(
-        'events',
-        options,
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          cloudEvents({
-            client: context.client,
-            projectId: project.projectId,
-            runId,
-            after: Number(options.after),
-          }),
-        ).then(readExitValue),
-      );
-    });
+          output(
+            'events',
+            options,
+            yield* cloudEvents({
+              client: context.client,
+              projectId: project.projectId,
+              runId,
+              after: Number(options.after),
+            }),
+          );
+        }),
+      ),
+    );
 };
 
 export { registerCloudCommands };

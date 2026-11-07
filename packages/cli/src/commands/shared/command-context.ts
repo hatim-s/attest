@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type * as Context from 'effect/Context';
 import type { EvalApplication, CancellationRegistry } from '@attest/local/eval';
 import { realpath } from 'node:fs/promises';
@@ -36,10 +37,16 @@ type CliServices = {
 
 /** What every command registration needs: the root program, terminal I/O, and invocation facts. */
 type CommandContext = {
+  /** Selects the native command program executed by the application root. */
+  submit: (
+    program: Effect.Effect<unknown, unknown, EvalApplication | CancellationRegistry>,
+  ) => void;
   /** Publishes the terminal result after resources close and returns its selected exit code. */
   complete: (publish: (failure?: SerializedCliFailure) => number) => void;
   evalContext: Context.Context<EvalApplication | CancellationRegistry>;
   argv: readonly string[];
+  /** Process cancellation shared by prompts and native command operations. */
+  signal: AbortSignal;
   /** Cloud credentials file under the Attest home, resolved once per invocation. */
   credentialPath: string;
   services?: CliServices;

@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import {
   agentTransportSchema,
@@ -193,45 +192,50 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--ping-interval <duration>', 'WebSocket ping interval')
     .option('--close-timeout <duration>', 'WebSocket graceful close timeout')
     .option('--trace', 'declare trace support')
-    .action(async (agentId: string | undefined, options: AddOptions, leaf: Command) => {
-      const fields = agentAddFields(agentId, options);
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const prompt = { interactive, prompt: context.interaction.prompt };
+    .action((agentId: string | undefined, options: AddOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const fields = agentAddFields(agentId, options);
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = { interactive, prompt: context.interaction.prompt };
 
-      const request = await readOrBuildRequest({
-        command: 'agent.add',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const id = await requiredInput(
-            agentId,
-            { path: '<agent-id>', question: 'Agent id: ' },
-            prompt,
-          );
+          const request = yield* readOrBuildRequest({
+            command: 'agent.add',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                const id = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(agentId, { path: '<agent-id>', question: 'Agent id: ' }, prompt),
+                  catch: (cause) => cause,
+                });
 
-          const guided = await promptTransportFields({ ...fields, agentId: id }, prompt);
+                const guided = yield* Effect.tryPromise({
+                  try: () => promptTransportFields({ ...fields, agentId: id }, prompt),
+                  catch: (cause) => cause,
+                });
 
-          return {
-            ...mutationRequestFields('agent.add', options),
-            agent: createAgentResource(guided),
-          };
-        },
-      });
+                return {
+                  ...mutationRequestFields('agent.add', options),
+                  agent: createAgentResource(guided),
+                };
+              }),
+          });
 
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runAgentAddCommand({
-          interactive,
-          project: options.project,
-          prompt: context.interaction.prompt,
-          request,
-          workingDirectory: context.workingDirectory,
+          const result = yield* runAgentAddCommand({
+            interactive,
+            project: options.project,
+            prompt: context.interaction.prompt,
+            request,
+            workingDirectory: context.workingDirectory,
+          });
+
+          context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
         }),
-      ).then((exit) => valueFromExit(exit));
-
-      context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
-    });
+      ),
+    );
 
   setMutationHelp(add, {
     examples: [

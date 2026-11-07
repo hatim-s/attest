@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { runAgentRemoveCommand, runAgentRenameCommand } from '@attest/local/agent';
@@ -28,48 +27,59 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
       .argument('[agent-id]', 'current agent id')
       .argument('[new-id]', 'new agent id'),
   ).action(
-    async (
+    (
       agentId: string | undefined,
       newId: string | undefined,
       options: MutationCliOptions,
       leaf: Command,
-    ) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const prompt = { interactive, prompt: context.interaction.prompt };
+    ) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = { interactive, prompt: context.interaction.prompt };
 
-      const request = await readOrBuildRequest({
-        command: 'agent.rename',
-        context,
-        leaf,
-        options,
-        build: async () => ({
-          ...mutationRequestFields('agent.rename', options),
-          agent_id: await requiredInput(
-            agentId,
-            { path: '<agent-id>', question: 'Agent id: ' },
-            prompt,
-          ),
-          new_id: await requiredInput(
-            newId,
-            { path: '<new-id>', question: 'New agent id: ' },
-            prompt,
-          ),
+          const request = yield* readOrBuildRequest({
+            command: 'agent.rename',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                return {
+                  ...mutationRequestFields('agent.rename', options),
+                  agent_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        agentId,
+                        { path: '<agent-id>', question: 'Agent id: ' },
+                        prompt,
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                  new_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        newId,
+                        { path: '<new-id>', question: 'New agent id: ' },
+                        prompt,
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                };
+              }),
+          });
+
+          const result = yield* runAgentRenameCommand({
+            interactive,
+            project: options.project,
+            prompt: context.interaction.prompt,
+            request,
+            workingDirectory: context.workingDirectory,
+          });
+
+          context.io.output(renderCommandResult('agent.rename', outputFormat(options), result));
         }),
-      });
-
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runAgentRenameCommand({
-          interactive,
-          project: options.project,
-          prompt: context.interaction.prompt,
-          request,
-          workingDirectory: context.workingDirectory,
-        }),
-      ).then((exit) => valueFromExit(exit));
-
-      context.io.output(renderCommandResult('agent.rename', outputFormat(options), result));
-    },
+      ),
   );
 
   setMutationHelp(rename, { examples: ['attest agent rename support support-renamed'] });
@@ -81,45 +91,51 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
       .argument('[agent-id]', 'agent id'),
   )
     .option('--detach', 'also remove tests that require this agent')
-    .action(async (agentId: string | undefined, options: RemoveOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
+    .action((agentId: string | undefined, options: RemoveOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
 
-      const request = await readOrBuildRequest({
-        command: 'agent.remove',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          let request: Extract<CommandRequest, { command: 'agent.remove' }> = {
-            ...mutationRequestFields('agent.remove', options),
-            agent_id: await requiredInput(
-              agentId,
-              { path: '<agent-id>', question: 'Agent id: ' },
-              { interactive, prompt: context.interaction.prompt },
-            ),
-          };
+          const request = yield* readOrBuildRequest({
+            command: 'agent.remove',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                let request: Extract<CommandRequest, { command: 'agent.remove' }> = {
+                  ...mutationRequestFields('agent.remove', options),
+                  agent_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        agentId,
+                        { path: '<agent-id>', question: 'Agent id: ' },
+                        { interactive, prompt: context.interaction.prompt },
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                };
 
-          if (options.detach !== undefined) {
-            request = { ...request, detach: options.detach };
-          }
+                if (options.detach !== undefined) {
+                  request = { ...request, detach: options.detach };
+                }
 
-          return request;
-        },
-      });
+                return request;
+              }),
+          });
 
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runAgentRemoveCommand({
-          interactive,
-          project: options.project,
-          prompt: context.interaction.prompt,
-          request,
-          workingDirectory: context.workingDirectory,
+          const result = yield* runAgentRemoveCommand({
+            interactive,
+            project: options.project,
+            prompt: context.interaction.prompt,
+            request,
+            workingDirectory: context.workingDirectory,
+          });
+
+          context.io.output(renderCommandResult('agent.remove', outputFormat(options), result));
         }),
-      ).then((exit) => valueFromExit(exit));
-
-      context.io.output(renderCommandResult('agent.remove', outputFormat(options), result));
-    });
+      ),
+    );
 
   setMutationHelp(remove, { examples: ['attest agent remove support --dry-run'] });
 };

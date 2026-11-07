@@ -827,3 +827,20 @@ content hash. Rollback or directory-removal failure reports `project_recovery_re
 the primary verification failure, with both Causes retained. Agent and metric command error
 channels preserve dependency failures for CLI redaction and `cause_code` classification.
 Rejected init prompts likewise reach the CLI serializer unchanged.
+## S9b native CLI application programs
+
+Commander actions submit one Effect through `CommandContext.submit`; `run-cli.ts` executes
+that program inside the existing eval application scope. Request builders, authoring helpers,
+cloud commands and eval event collection now compose native Effects. `readOrBuildRequest`
+requires an Effect-returning builder. `readJsonRequest`, metric guided loading, mutation helpers
+and `collectEvalEvents` return Effects. These are intentional internal TypeScript API breaks.
+The process-facing `runCli` API still returns `Promise<number>`.
+
+The root owns one process cancellation signal and supplies it to terminal prompts and command
+operations. Ordinary native commands interrupt and join their scoped resources before reporting
+cancellation. Eval retains business cancellation so accepted evidence and its validated JSONL
+terminal sequence can finish. Completed eval upload failures remain advisory. Terminal eval output
+still waits for application release, and an earlier infrastructure or command error keeps its
+catalog identity and exit code when cleanup fails. No wire, hash, schema, environment or script
+changes are made. The two execution-test calls remain Promise operations owned by S8b phase B;
+only their request building and application handoff are converted here.

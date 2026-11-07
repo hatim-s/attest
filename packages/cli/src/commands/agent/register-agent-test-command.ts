@@ -1,5 +1,5 @@
-import * as Effect from 'effect/Effect';
 import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import { readAgentTestInput, runAgentTestCommand } from '@attest/local/agent';
@@ -16,7 +16,6 @@ import {
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
 import { renderCommandResult } from '../shared/command-result.js';
-import { withProcessSignals } from '../shared/process-signals.js';
 import { requiredInput } from '../shared/required-input.js';
 
 type TestOptions = CommonCliOptions & {
@@ -42,64 +41,87 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
     .option('--from-json <path|->', 'read one agent.test request')
     .option('--record', 'persist this probe as an eval run')
     .option('--watch', 'show human transport progress')
-    .action(async (agentId: string | undefined, options: TestOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
+    .action((agentId: string | undefined, options: TestOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
 
-      if (options.watch === true && !interactive) {
-        throw new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
-          path: '--watch',
-        });
-      }
+          if (options.watch === true && !interactive) {
+            throw new AttestCliError(
+              'cli_usage',
+              '--watch requires an interactive human terminal.',
+              {
+                path: '--watch',
+              },
+            );
+          }
 
-      await withProcessSignals(async (signal) => {
-        const request = await readOrBuildRequest({
-          command: 'agent.test',
-          context,
-          leaf,
-          options,
-          build: async () => {
-            let request: Extract<CommandRequest, { command: 'agent.test' }> = {
-              schema: COMMAND_REQUEST_SCHEMA_ID,
+          yield* Effect.gen(function* () {
+            const signal = context.signal;
+
+            const request = yield* readOrBuildRequest({
               command: 'agent.test',
-              agent_id: await requiredInput(
-                agentId,
-                { path: '<agent-id>', question: 'Agent id: ' },
-                { interactive, prompt: context.interaction.prompt, signal },
-              ),
-              input: await // EFFECT-BRIDGE(S9b)
-              Effect.runPromiseExit(
-                readAgentTestInput({
-                  input: options.input,
-                  inputFile: options.inputFile,
-                  readStdin: context.interaction.readStdin,
-                  workingDirectory: context.workingDirectory,
-                }).pipe(Effect.provideContext(context.evalContext)),
-              ).then(valueFromExit),
-            };
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  let request: Extract<CommandRequest, { command: 'agent.test' }> = {
+                    schema: COMMAND_REQUEST_SCHEMA_ID,
+                    command: 'agent.test',
+                    agent_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          agentId,
+                          { path: '<agent-id>', question: 'Agent id: ' },
+                          { interactive, prompt: context.interaction.prompt, signal },
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    input: yield* Effect.tryPromise({
+                      try: () =>
+                        // EFFECT-BRIDGE(S9b)
+                        Effect.runPromiseExit(
+                          readAgentTestInput({
+                            input: options.input,
+                            inputFile: options.inputFile,
+                            readStdin: context.interaction.readStdin,
+                            workingDirectory: context.workingDirectory,
+                          }).pipe(Effect.provideContext(context.evalContext)),
+                        ).then(valueFromExit),
+                      catch: (cause) => cause,
+                    }),
+                  };
 
-            if (options.record !== undefined) {
-              request = { ...request, record: options.record };
-            }
+                  if (options.record !== undefined) {
+                    request = { ...request, record: options.record };
+                  }
 
-            return request;
-          },
-        });
+                  return request;
+                }),
+            });
 
-        const result = await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          runAgentTestCommand({
-            onProgress: (message) => context.io.error(message),
-            project: options.project,
-            request,
-            signal,
-            watch: options.watch,
-            workingDirectory: context.workingDirectory,
-          }).pipe(Effect.provideContext(context.evalContext)),
-        ).then(valueFromExit);
+            const result = yield* Effect.tryPromise({
+              try: () =>
+                // EFFECT-BRIDGE(S9b)
+                Effect.runPromiseExit(
+                  runAgentTestCommand({
+                    onProgress: (message) => context.io.error(message),
+                    project: options.project,
+                    request,
+                    signal,
+                    watch: options.watch,
+                    workingDirectory: context.workingDirectory,
+                  }).pipe(Effect.provideContext(context.evalContext)),
+                ).then(valueFromExit),
+              catch: (cause) => cause,
+            });
 
-        context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
-      });
-    });
+            context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
+          });
+        }),
+      ),
+    );
 
   setCliCommandHelpMetadata(test, {
     examples: [

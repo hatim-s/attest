@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '@attest/contracts';
@@ -43,46 +42,54 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     .argument('[dataset-id]', 'new dataset id')
     .option('--name <name>', 'dataset display name')
     .action(
-      async (
+      (
         testId: string | undefined,
         datasetId: string | undefined,
         options: DatasetAddOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.dataset.add',
-          context,
-          leaf,
-          options,
-          build: async () => {
-            const id = await requiredInput(
-              datasetId,
-              { path: '<dataset-id>', question: 'Dataset id: ' },
-              prompt,
-            );
+            const request = yield* readOrBuildRequest({
+              command: 'test.dataset.add',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  const id = yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        datasetId,
+                        { path: '<dataset-id>', question: 'Dataset id: ' },
+                        prompt,
+                      ),
+                    catch: (cause) => cause,
+                  });
 
-            return {
-              ...mutationRequestFields('test.dataset.add', options),
-              test_id: await requiredInput(
-                testId,
-                { path: '<test-id>', question: 'Test id: ' },
-                prompt,
-              ),
-              dataset: {
-                schema: DATASET_SCHEMA_ID,
-                case_schema: CASE_SCHEMA_ID,
-                id,
-                name: options.name?.trim() || id,
-                case_count: 0,
-              },
-            };
-          },
-        });
+                  return {
+                    ...mutationRequestFields('test.dataset.add', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    dataset: {
+                      schema: DATASET_SCHEMA_ID,
+                      case_schema: CASE_SCHEMA_ID,
+                      id,
+                      name: options.name?.trim() || id,
+                      case_count: 0,
+                    },
+                  };
+                }),
+            });
 
-        await runTestMutation(request, options, context);
-      },
+            yield* runTestMutation(request, options, context);
+          }),
+        ),
     );
 
   setMutationHelp(datasetAdd, { examples: ['attest test dataset add smoke regression'] });
@@ -97,68 +104,80 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     .option('--as <dataset-id>', 'new dataset id')
     .option('--name <name>', 'dataset display name')
     .action(
-      async (
+      (
         testId: string | undefined,
         source: string | undefined,
         options: DatasetImportOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.dataset.import',
-          context,
-          leaf,
-          options,
-          build: async () => {
-            let request: Extract<CommandRequest, { command: 'test.dataset.import' }> = {
-              ...mutationRequestFields('test.dataset.import', options),
-              test_id: await requiredInput(
-                testId,
-                { path: '<test-id>', question: 'Test id: ' },
-                prompt,
-              ),
-              source: await requiredInput(
-                source,
-                { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
-                prompt,
-              ),
-              as: await requiredInput(
-                options.as,
-                { path: '--as', question: 'Dataset id: ' },
-                prompt,
-              ),
-              import: importRequestFields(options),
-            };
+            const request = yield* readOrBuildRequest({
+              command: 'test.dataset.import',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  let request: Extract<CommandRequest, { command: 'test.dataset.import' }> = {
+                    ...mutationRequestFields('test.dataset.import', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    source: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          source,
+                          { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    as: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          options.as,
+                          { path: '--as', question: 'Dataset id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    import: importRequestFields(options),
+                  };
 
-            if (options.name !== undefined) {
-              request = { ...request, name: options.name };
+                  if (options.name !== undefined) {
+                    request = { ...request, name: options.name };
+                  }
+
+                  return request;
+                }),
+            });
+
+            if (request.dry_run === true) {
+              yield* runTestMutation(request, options, context);
+
+              return;
             }
 
-            return request;
-          },
-        });
+            if (request.yes === true) {
+              yield* runConfirmedDatasetImport(request, options, context);
 
-        if (request.dry_run === true) {
-          await runTestMutation(request, options, context);
+              return;
+            }
 
-          return;
-        }
+            if (prompt.interactive) {
+              yield* runGuidedImport(request, options, context);
 
-        if (request.yes === true) {
-          await runConfirmedDatasetImport(request, options, context);
+              return;
+            }
 
-          return;
-        }
-
-        if (prompt.interactive) {
-          await runGuidedImport(request, options, context);
-
-          return;
-        }
-
-        await runTestMutation(request, options, context);
-      },
+            yield* runTestMutation(request, options, context);
+          }),
+        ),
     );
 
   setMutationHelp(datasetImport, {
@@ -183,44 +202,52 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     .argument('[dataset-id]', 'dataset id')
     .option('--tag <tag>', 'all-tags attachment filter', collect)
     .action(
-      async (
+      (
         testId: string | undefined,
         datasetId: string | undefined,
         options: DatasetAttachOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.dataset.attach',
-          context,
-          leaf,
-          options,
-          build: async () => {
-            let request: Extract<CommandRequest, { command: 'test.dataset.attach' }> = {
-              ...mutationRequestFields('test.dataset.attach', options),
-              test_id: await requiredInput(
-                testId,
-                { path: '<test-id>', question: 'Test id: ' },
-                prompt,
-              ),
-              dataset_id: await requiredInput(
-                datasetId,
-                { path: '<dataset-id>', question: 'Dataset id: ' },
-                prompt,
-              ),
-            };
+            const request = yield* readOrBuildRequest({
+              command: 'test.dataset.attach',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  let request: Extract<CommandRequest, { command: 'test.dataset.attach' }> = {
+                    ...mutationRequestFields('test.dataset.attach', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    dataset_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          datasetId,
+                          { path: '<dataset-id>', question: 'Dataset id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                  };
 
-            if (options.tag !== undefined) {
-              request = { ...request, tags: options.tag };
-            }
+                  if (options.tag !== undefined) {
+                    request = { ...request, tags: options.tag };
+                  }
 
-            return request;
-          },
-        });
+                  return request;
+                }),
+            });
 
-        await runTestMutation(request, options, context);
-      },
+            yield* runTestMutation(request, options, context);
+          }),
+        ),
     );
 
   setMutationHelp(datasetAttach, { examples: ['attest test dataset attach smoke regression'] });
@@ -231,36 +258,46 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     .argument('[test-id]', 'test id')
     .argument('[dataset-id]', 'dataset id')
     .action(
-      async (
+      (
         testId: string | undefined,
         datasetId: string | undefined,
         options: MutationCliOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.dataset.detach',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('test.dataset.detach', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            dataset_id: await requiredInput(
-              datasetId,
-              { path: '<dataset-id>', question: 'Dataset id: ' },
-              prompt,
-            ),
+            const request = yield* readOrBuildRequest({
+              command: 'test.dataset.detach',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('test.dataset.detach', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    dataset_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          datasetId,
+                          { path: '<dataset-id>', question: 'Dataset id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                  };
+                }),
+            });
+
+            yield* runTestMutation(request, options, context);
           }),
-        });
-
-        await runTestMutation(request, options, context);
-      },
+        ),
     );
 
   setMutationHelp(datasetDetach, { examples: ['attest test dataset detach smoke regression'] });
@@ -271,36 +308,50 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     .argument('[dataset-id]', 'current dataset id')
     .argument('[new-id]', 'new dataset id')
     .action(
-      async (
+      (
         datasetId: string | undefined,
         newId: string | undefined,
         options: MutationCliOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.dataset.rename',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('test.dataset.rename', options),
-            dataset_id: await requiredInput(
-              datasetId,
-              { path: '<dataset-id>', question: 'Current dataset id: ' },
-              prompt,
-            ),
-            new_id: await requiredInput(
-              newId,
-              { path: '<new-id>', question: 'New dataset id: ' },
-              prompt,
-            ),
+            const request = yield* readOrBuildRequest({
+              command: 'test.dataset.rename',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('test.dataset.rename', options),
+                    dataset_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          datasetId,
+                          { path: '<dataset-id>', question: 'Current dataset id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    new_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          newId,
+                          { path: '<new-id>', question: 'New dataset id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                  };
+                }),
+            });
+
+            yield* runTestMutation(request, options, context);
           }),
-        });
-
-        await runTestMutation(request, options, context);
-      },
+        ),
     );
 
   setMutationHelp(datasetRename, {
@@ -311,39 +362,52 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     dataset.command('remove').description('Remove an unattached dataset.'),
   )
     .argument('[dataset-id]', 'dataset id')
-    .action(async (datasetId: string | undefined, options: MutationCliOptions, leaf: Command) => {
-      const request = await readOrBuildRequest({
-        command: 'test.dataset.remove',
-        context,
-        leaf,
-        options,
-        build: async () => ({
-          ...mutationRequestFields('test.dataset.remove', options),
-          dataset_id: await requiredInput(
-            datasetId,
-            { path: '<dataset-id>', question: 'Dataset id: ' },
-            promptContext(options, context.interaction),
-          ),
+    .action((datasetId: string | undefined, options: MutationCliOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const request = yield* readOrBuildRequest({
+            command: 'test.dataset.remove',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                return {
+                  ...mutationRequestFields('test.dataset.remove', options),
+                  dataset_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        datasetId,
+                        { path: '<dataset-id>', question: 'Dataset id: ' },
+                        promptContext(options, context.interaction),
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                };
+              }),
+          });
+
+          if (request.dry_run !== true) {
+            yield* runTestDatasetRemovePreflight({
+              datasetId: request.dataset_id,
+              project: options.project,
+              workingDirectory: context.workingDirectory,
+            });
+          }
+
+          if (
+            !(yield* Effect.tryPromise({
+              try: () => confirmRemoval(request, `dataset ${request.dataset_id}`, options, context),
+              catch: (cause) => cause,
+            }))
+          ) {
+            return;
+          }
+
+          yield* runTestMutation(request, options, context);
         }),
-      });
-
-      if (request.dry_run !== true) {
-        await // EFFECT-BRIDGE(S9b)
-        Effect.runPromiseExit(
-          runTestDatasetRemovePreflight({
-            datasetId: request.dataset_id,
-            project: options.project,
-            workingDirectory: context.workingDirectory,
-          }),
-        ).then((exit) => valueFromExit(exit));
-      }
-
-      if (!(await confirmRemoval(request, `dataset ${request.dataset_id}`, options, context))) {
-        return;
-      }
-
-      await runTestMutation(request, options, context);
-    });
+      ),
+    );
 
   setMutationHelp(datasetRemove, { examples: ['attest test dataset remove regression --yes'] });
 

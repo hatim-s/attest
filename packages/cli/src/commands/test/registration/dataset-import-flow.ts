@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import type { DatasetImportMapping } from '@attest/contracts';
 import {
@@ -28,84 +27,82 @@ const runPreparedImport = (
   context: CommandContext,
   preparedImportSource: Uint8Array,
 ) =>
-  // EFFECT-BRIDGE(S9b)
-  Effect.runPromiseExit(
-    runTestMutationCommand({
-      preparedImportSource,
-      project: options.project,
-      readImportStdin: context.interaction.readImportStdin,
-      readStdin: context.interaction.readStdin,
-      request,
-      workingDirectory: context.workingDirectory,
-    }),
-  ).then((exit) => valueFromExit(exit));
+  runTestMutationCommand({
+    preparedImportSource,
+    project: options.project,
+    readImportStdin: context.interaction.readImportStdin,
+    readStdin: context.interaction.readStdin,
+    request,
+    workingDirectory: context.workingDirectory,
+  });
 
 /**
  * Applies a `--yes` dataset import bound to its own dry run: the commit must match the previewed
  * project hash. When the dataset is shared by two or more tests, the preview is printed with it.
  */
-const runConfirmedDatasetImport = async (
+const runConfirmedDatasetImport = (
   request: DatasetImportRequest,
   options: MutationCliOptions,
   context: CommandContext,
-): Promise<void> => {
-  const prepared = await // EFFECT-BRIDGE(S9b)
-  Effect.runPromiseExit(
-    prepareImportSource(
+) =>
+  Effect.gen(function* () {
+    const prepared = yield* prepareImportSource(
       request.source,
       context.workingDirectory,
       context.interaction.readImportStdin,
       request.import.format,
-    ),
-  ).then((exit) => valueFromExit(exit));
+    );
 
-  const preview = await runPreparedImport(
-    validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
-    options,
-    context,
-    prepared.source,
-  );
+    const preview = yield* runPreparedImport(
+      validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
+      options,
+      context,
+      prepared.source,
+    );
 
-  const { projectHashAfter, projectHashBefore } = preview;
+    const { projectHashAfter, projectHashBefore } = preview;
 
-  if (
-    projectHashBefore === null ||
-    projectHashBefore === undefined ||
-    projectHashAfter === null ||
-    projectHashAfter === undefined
-  ) {
-    throw new AttestCliError('internal_error', 'Dataset import preview returned no project hash.');
-  }
+    if (
+      projectHashBefore === null ||
+      projectHashBefore === undefined ||
+      projectHashAfter === null ||
+      projectHashAfter === undefined
+    ) {
+      throw new AttestCliError(
+        'internal_error',
+        'Dataset import preview returned no project hash.',
+      );
+    }
 
-  const confirmed = validateCommandRequest('test.dataset.import', {
-    ...request,
-    dry_run: false,
-    if_project_hash: projectHashBefore,
-    yes: true,
-  });
+    const confirmed = validateCommandRequest('test.dataset.import', {
+      ...request,
+      dry_run: false,
+      if_project_hash: projectHashBefore,
+      yes: true,
+    });
 
-  const committed = await runPreparedImport(confirmed, options, context, prepared.source);
-  const affectedTests = preview.result.affected_tests ?? [];
+    const committed = yield* runPreparedImport(confirmed, options, context, prepared.source);
+    const affectedTests = preview.result.affected_tests ?? [];
 
-  const result =
-    affectedTests.length < 2
-      ? committed
-      : {
-          ...committed,
-          result: {
-            ...committed.result,
-            shared_dataset_preview: {
-              affected_tests: affectedTests,
-              import: preview.result.import ?? null,
-              operations: preview.result.operations,
-              project_hash_after: projectHashAfter,
-              project_hash_before: projectHashBefore,
+    const result =
+      affectedTests.length < 2
+        ? committed
+        : {
+            ...committed,
+            result: {
+              ...committed.result,
+              shared_dataset_preview: {
+                affected_tests: affectedTests,
+                import: preview.result.import ?? null,
+                operations: preview.result.operations,
+                project_hash_after: projectHashAfter,
+                project_hash_before: projectHashBefore,
+              },
             },
-          },
-        };
+          };
 
-  context.io.output(renderCommandResult('test.dataset.import', outputFormat(options), result));
-};
+    context.io.output(renderCommandResult('test.dataset.import', outputFormat(options), result));
+  });
 
 /** Proposes mappings only from CSV headers that exactly match a well-known field name. */
 const suggestedCsvMappings = (headers: readonly string[]): DatasetImportMapping[] => {
@@ -130,89 +127,99 @@ const confirmed = (answer: string): boolean => {
 };
 
 /** Fills in CSV mappings from the headers after the user accepts them; null when declined. */
-const withSuggestedMappings = async (
+const withSuggestedMappings = (
   request: ImportRequest,
   csvHeaders: readonly string[],
   context: CommandContext,
-): Promise<ImportRequest | null> => {
-  const suggestions = suggestedCsvMappings(csvHeaders);
+) =>
+  Effect.gen(function* () {
+    const suggestions = suggestedCsvMappings(csvHeaders);
 
-  if (suggestions.length === 0) {
-    throw new AttestCliError('cli_missing_input', 'No safe CSV field mappings were detected.', {
-      path: '--map',
-      hint: `Detected headers: ${csvHeaders.join(', ') || '<none>'}. Pass explicit --map destination=header options.`,
+    if (suggestions.length === 0) {
+      throw new AttestCliError('cli_missing_input', 'No safe CSV field mappings were detected.', {
+        path: '--map',
+        hint: `Detected headers: ${csvHeaders.join(', ') || '<none>'}. Pass explicit --map destination=header options.`,
+      });
+    }
+
+    const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);
+
+    const answer = (yield* Effect.tryPromise({
+      try: () =>
+        context.interaction.prompt(
+          `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
+        ),
+      catch: (cause) => cause,
+    }))
+      .trim()
+      .toLowerCase();
+
+    if (answer === 'n' || answer === 'no') {
+      context.io.output(
+        'No changes made; pass explicit --map options to choose different mappings.',
+      );
+
+      return null;
+    }
+
+    return validateCommandRequest(request.command, {
+      ...request,
+      import: { ...request.import, mapping: suggestions },
     });
-  }
-
-  const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);
-
-  const answer = (
-    await context.interaction.prompt(
-      `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
-    )
-  )
-    .trim()
-    .toLowerCase();
-
-  if (answer === 'n' || answer === 'no') {
-    context.io.output('No changes made; pass explicit --map options to choose different mappings.');
-
-    return null;
-  }
-
-  return validateCommandRequest(request.command, {
-    ...request,
-    import: { ...request.import, mapping: suggestions },
   });
-};
 
 /** Prints a dry-run preview of an import and applies it only after an explicit yes. */
-const runGuidedImport = async (
+const runGuidedImport = (
   request: ImportRequest,
   options: MutationCliOptions,
   context: CommandContext,
-): Promise<void> => {
-  const prepared = await // EFFECT-BRIDGE(S9b)
-  Effect.runPromiseExit(
-    prepareImportSource(
+) =>
+  Effect.gen(function* () {
+    const prepared = yield* prepareImportSource(
       request.source,
       context.workingDirectory,
       context.interaction.readImportStdin,
       request.import.format,
-    ),
-  ).then((exit) => valueFromExit(exit));
+    );
 
-  const needsMappings = prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0;
+    const needsMappings = prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0;
 
-  const guided = needsMappings
-    ? await withSuggestedMappings(request, prepared.csvHeaders, context)
-    : request;
+    const guided = needsMappings
+      ? yield* withSuggestedMappings(request, prepared.csvHeaders, context)
+      : request;
 
-  if (guided === null) return;
+    if (guided === null) return;
 
-  const preview = await runPreparedImport(
-    validateCommandRequest(guided.command, { ...guided, dry_run: true }),
-    options,
-    context,
-    prepared.source,
-  );
+    const preview = yield* runPreparedImport(
+      validateCommandRequest(guided.command, { ...guided, dry_run: true }),
+      options,
+      context,
+      prepared.source,
+    );
 
-  context.io.output(renderCommandResult(guided.command, 'human', preview));
+    context.io.output(renderCommandResult(guided.command, 'human', preview));
 
-  if (!confirmed(await context.interaction.prompt('Apply this import? [y/N]: '))) {
-    context.io.output('No changes made; import was not applied.');
+    if (
+      !confirmed(
+        yield* Effect.tryPromise({
+          try: () => context.interaction.prompt('Apply this import? [y/N]: '),
+          catch: (cause) => cause,
+        }),
+      )
+    ) {
+      context.io.output('No changes made; import was not applied.');
 
-    return;
-  }
+      return;
+    }
 
-  const applied = validateCommandRequest(guided.command, {
-    ...guided,
-    dry_run: false,
-    if_project_hash: preview.projectHashBefore,
-    yes: true,
+    const applied = validateCommandRequest(guided.command, {
+      ...guided,
+      dry_run: false,
+      if_project_hash: preview.projectHashBefore,
+      yes: true,
+    });
+
+    yield* runTestMutation(applied, options, context, prepared.source);
   });
-
-  await runTestMutation(applied, options, context, prepared.source);
-};
 
 export { runConfirmedDatasetImport, runGuidedImport };

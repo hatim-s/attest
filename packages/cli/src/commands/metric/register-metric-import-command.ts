@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { Option, type Command } from 'commander';
 
@@ -24,41 +25,54 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
     .option('--as <metric-id>', 'imported metric id')
     .addOption(new Option('--type <type>', 'import type').choices(['json']))
     .option('--name <name>', 'override the imported display name')
-    .action(async (source: string | undefined, options: ImportOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const prompt = { interactive, prompt: context.interaction.prompt };
+    .action((source: string | undefined, options: ImportOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = { interactive, prompt: context.interaction.prompt };
 
-      const request = await readOrBuildRequest({
-        command: 'metric.import',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          let request: Extract<CommandRequest, { command: 'metric.import' }> = {
-            ...mutationRequestFields('metric.import', options),
-            source: await requiredInput(
-              source,
-              { path: '<path|->', question: 'Metric JSON path or -: ' },
-              prompt,
-            ),
-            source_type: 'json',
-            as: await requiredInput(
-              options.as,
-              { path: '--as', question: 'Imported metric id: ' },
-              prompt,
-            ),
-          };
+          const request = yield* readOrBuildRequest({
+            command: 'metric.import',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                let request: Extract<CommandRequest, { command: 'metric.import' }> = {
+                  ...mutationRequestFields('metric.import', options),
+                  source: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        source,
+                        { path: '<path|->', question: 'Metric JSON path or -: ' },
+                        prompt,
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                  source_type: 'json',
+                  as: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        options.as,
+                        { path: '--as', question: 'Imported metric id: ' },
+                        prompt,
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                };
 
-          if (options.name !== undefined) {
-            request = { ...request, name: options.name };
-          }
+                if (options.name !== undefined) {
+                  request = { ...request, name: options.name };
+                }
 
-          return request;
-        },
-      });
+                return request;
+              }),
+          });
 
-      await runMetricMutation(request, options, interactive, context);
-    });
+          yield* runMetricMutation(request, options, interactive, context);
+        }),
+      ),
+    );
 
   setMutationHelp(importCommand, {
     examples: [
