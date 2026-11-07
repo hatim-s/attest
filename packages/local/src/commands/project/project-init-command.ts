@@ -259,6 +259,9 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(
         Effect.gen(function* () {
           let createdDirectory = false;
           let published = false;
+          // Set once the published manifest is verified. From then on the manifest stays, even if
+          // registration fails, and the error tells the user to run `attest projects add`.
+          let verified = false;
 
           const primary = yield* Effect.exit(
             Effect.gen(function* () {
@@ -292,7 +295,9 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(
                     },
                   }),
                 );
-              // Registration is the commit fence. A pending interruption cannot leave an unregistered manifest.
+              verified = true;
+              // Registration runs masked, so interruption cannot split it. A registry failure keeps
+              // the verified manifest, matching the documented `project init` behaviour.
               yield* registerProject({
                 registryPath: options.registryPath,
                 root: inspected.root,
@@ -316,6 +321,8 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(
           );
 
           if (Exit.isSuccess(primary)) return;
+
+          if (verified) return yield* Effect.failCause(primary.cause);
           const releases: Exit.Exit<void, LocalError>[] = [];
 
           if (published)

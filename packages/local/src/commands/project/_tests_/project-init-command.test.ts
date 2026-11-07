@@ -34,7 +34,7 @@ const fixture = async () => {
 };
 
 describe('native project initialization', () => {
-  it('rolls back publication and a new directory on registry failure, preserving its code', async () => {
+  it('keeps the verified manifest on registry failure, preserving its code', async () => {
     const options = await fixture();
     await writeFile(join(options.workingDirectory, 'blocked'), 'not a directory');
     await expect(
@@ -45,7 +45,9 @@ describe('native project initialization', () => {
         }),
       ).then(valueFromExit),
     ).rejects.toMatchObject({ code: 'registry_write_failed' });
-    expect(await readdir(options.workingDirectory)).toEqual(['blocked']);
+    await expect(
+      access(join(options.workingDirectory, 'project', 'attest.project.json')),
+    ).resolves.toBeUndefined();
   });
 
   it('rolls back on interruption during verification without registering', async () => {
