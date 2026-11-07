@@ -113,7 +113,15 @@ const registerEvalRun = Effect.fn('registerEvalRun')(function* (
   const requestPath = join(directory, `${runId}.cancel.json`);
   const temporaryPath = join(directory, `.${runId}.${record.token}.tmp`);
 
-  yield* publishRegistryFile(temporaryPath, path, `${JSON.stringify(record)}\n`);
+  yield* publishRegistryFile(temporaryPath, path, `${JSON.stringify(record)}\n`).pipe(
+    Effect.mapError(
+      (error) =>
+        new LocalError('run_failed', 'Could not publish the eval cancellation registry.', {
+          path: EVAL_REGISTRY_DIRECTORY,
+          cause: error.cause,
+        }),
+    ),
+  );
 
   const controller = new AbortController();
   const key = registryKey(projectRoot, runId);

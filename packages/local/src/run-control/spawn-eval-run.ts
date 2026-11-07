@@ -102,23 +102,21 @@ const createOutputReader = (log: FileHandle) => {
     readLines: Effect.fn('runOutput.readLines')(function* () {
       const lines: string[] = [];
 
-      {
-        const { bytesRead } = yield* launchIO(() => log.read(buffer, 0, buffer.length, position));
+      const { bytesRead } = yield* launchIO(() => log.read(buffer, 0, buffer.length, position));
 
-        drained = bytesRead < buffer.length;
+      drained = bytesRead < buffer.length;
 
-        if (bytesRead === 0) return lines;
+      if (bytesRead === 0) return lines;
 
-        position += bytesRead;
-        pending += decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
-        const parts = pending.split('\n');
-        pending = parts.pop() ?? '';
-        lines.push(...parts);
+      position += bytesRead;
+      pending += decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
+      const parts = pending.split('\n');
+      pending = parts.pop() ?? '';
+      lines.push(...parts);
 
-        if (pending.length > MAX_LINE_CHARACTERS) {
-          lines.push(pending);
-          pending = '';
-        }
+      if (pending.length > MAX_LINE_CHARACTERS) {
+        lines.push(pending);
+        pending = '';
       }
 
       return lines;
@@ -264,14 +262,6 @@ const awaitRunStarted = Effect.fn('awaitRunStarted')(function* ({
   }
 });
 
-/**
- * Starts `attest eval run` in the project as a detached process with the server's environment
- * and resolves with the run id once the CLI has recorded the run. The CLI keeps ownership of
- * validation, signals, exit codes and the cancellation registry. Its output goes to an unlinked
- * temporary file rather than a pipe: a Node CLI dies of EPIPE when the reader of its stdout goes
- * away, and the run must survive the dashboard closing. The file stays on disk, unnamed, until
- * the run exits.
- */
 /** Joins one foreign filesystem operation before releasing its descriptor. */
 const launchIO = <A>(operation: () => Promise<A>) =>
   Effect.tryPromise({
@@ -282,7 +272,14 @@ const launchIO = <A>(operation: () => Promise<A>) =>
       }),
   });
 
-/** Owns masked, bounded admission; successful children retain their own process lifetime. */
+/**
+ * Starts `attest eval run` in the project as a detached process with the server's environment
+ * and resolves with the run id once the CLI has recorded the run. The CLI keeps ownership of
+ * validation, signals, exit codes and the cancellation registry. Its output goes to an unlinked
+ * temporary file rather than a pipe: a Node CLI dies of EPIPE when the reader of its stdout goes
+ * away, and the run must survive the dashboard closing. The file stays on disk, unnamed, until
+ * the run exits.
+ */
 const spawnEvalRun = Effect.fn('spawnEvalRun')(function* ({
   command,
   projectRoot,
@@ -372,6 +369,8 @@ const spawnEvalRun = Effect.fn('spawnEvalRun')(function* ({
       ),
     ),
   );
+
+  if (Exit.isSuccess(primary)) return primary.value;
 
   return yield* finishOperation(primary, releases).pipe(
     Effect.mapError((cause) =>

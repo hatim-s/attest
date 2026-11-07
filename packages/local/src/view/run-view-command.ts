@@ -114,7 +114,7 @@ const runViewCommand = Effect.fn('runViewCommand')(function* (options: RunViewCo
             restore(
               Effect.gen(function* () {
                 if (options.onReady !== undefined)
-                  yield* Effect.uninterruptible(
+                  yield* Effect.raceFirst(
                     Effect.tryPromise({
                       try: () => Promise.resolve(options.onReady?.(server)),
                       catch: (cause) =>
@@ -122,6 +122,18 @@ const runViewCommand = Effect.fn('runViewCommand')(function* (options: RunViewCo
                           ? cause
                           : new Error('View readiness callback failed.', { cause }),
                     }),
+                    options.signal === undefined
+                      ? Effect.never
+                      : Effect.callback<void>((resume) => {
+                          const abort = () => resume(Effect.void);
+                          options.signal?.addEventListener('abort', abort, { once: true });
+
+                          if (options.signal?.aborted) abort();
+
+                          return Effect.sync(() =>
+                            options.signal?.removeEventListener('abort', abort),
+                          );
+                        }).pipe(Effect.andThen(server.close()), Effect.andThen(Effect.never)),
                   );
 
                 if (options.signal?.aborted) return;

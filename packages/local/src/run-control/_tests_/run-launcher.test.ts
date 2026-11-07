@@ -1,3 +1,5 @@
+import { open, type FileHandle } from 'node:fs/promises';
+import { vi } from 'vitest';
 import * as Exit from 'effect/Exit';
 import * as Context from 'effect/Context';
 import * as Cause from 'effect/Cause';
@@ -510,5 +512,42 @@ it('retains unconfirmed timeout cleanup with the owned child receipt and never r
       expect(reason.error.message).toContain('may still be running');
       expect(reason.error.cause).toMatchObject({ receipt: { cleanupConfirmed: false } });
     }
+  }
+});
+
+it('returns the live run id when closing the startup log fails after admission', async () => {
+  const root = await temporaryRoot();
+  const probe = await open(root, 'r');
+  // SAFETY: Node owns this descriptor; the shared prototype is used only to inject a real close failure.
+  const prototype = Object.getPrototypeOf(probe) as FileHandle;
+  await probe.close();
+  let injected = false;
+
+  const spy = vi.spyOn(prototype, 'read').mockImplementation(function (this: FileHandle, ...args) {
+    spy.mockRestore();
+    const close = this.close.bind(this);
+    this.close = async () => {
+      await close();
+      injected = true;
+      throw new Error('lost close acknowledgement');
+    };
+
+    return this.read(...args);
+  });
+
+  try {
+    const result = await Effect.runPromiseExit(
+      spawnEvalRun({
+        command: fakeCli,
+        projectRoot: root,
+        document: toEvalRunDocument({ selection: { all: true } }),
+        startTimeoutMs: 5000,
+      }),
+    ).then(valueFromExit);
+
+    expect(result).toEqual({ runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' });
+    expect(injected).toBe(true);
+  } finally {
+    spy.mockRestore();
   }
 });

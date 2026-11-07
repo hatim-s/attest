@@ -272,20 +272,28 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
         const primary = yield* Effect.exit(
           Effect.gen(function* () {
             if (!inspected.exists) {
-              yield* initCall(() => mkdir(inspected.root)).pipe(Effect.mapError(initFailure));
+              yield* initCall(() => mkdir(inspected.root)).pipe(
+                Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
+                Effect.mapError(initFailure),
+              );
               createdDirectory = true;
             }
 
             yield* initCall(() => assertUninitialized(inspected.root)).pipe(
+              Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
               Effect.mapError(initFailure),
             );
             yield* publishProjectManifest(inspected.root, manifest.contents).pipe(
+              Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
               Effect.mapError(initFailure),
             );
             published = true;
 
             const loaded = yield* restore(
-              loadProject({ project: inspected.root }).pipe(Effect.mapError(initFailure)),
+              loadProject({ project: inspected.root }).pipe(
+                Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
+                Effect.mapError(initFailure),
+              ),
             );
 
             if (loaded.projectHash !== prepared.projectHash)
@@ -306,6 +314,7 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
               name: prepared.project.project.name,
               projectId: prepared.project.project.project_id,
             }).pipe(
+              Effect.catchDefect((cause) => Effect.fail(cause)),
               Effect.mapError(
                 (cause) =>
                   new LocalError(
@@ -331,6 +340,7 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
           releases.push(
             yield* Effect.exit(
               rollbackPublishedManifest(inspected.root, manifest.contents).pipe(
+                Effect.catchDefect((cause) => Effect.fail(cause)),
                 Effect.mapError(
                   (cause) =>
                     new LocalError(

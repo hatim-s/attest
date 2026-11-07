@@ -1,3 +1,5 @@
+import * as publication from '../manifest-publish.js';
+import * as registry from '../../../registry/project-registry.js';
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -124,6 +126,61 @@ describe('native project initialization', () => {
     expect(stagedHash).not.toBe('');
     expect(await readdir(options.workingDirectory)).toEqual([]);
   });
+
+  it.each(['load', 'publish', 'register', 'rollback'] as const)(
+    'keeps the base %s defect envelope',
+    async (step) => {
+      const options = await fixture();
+      const defect = new Error('private module defect');
+
+      if (step === 'load') vi.spyOn(loader, 'loadProject').mockReturnValue(Effect.die(defect));
+
+      if (step === 'publish')
+        vi.spyOn(publication, 'publishProjectManifest').mockReturnValue(Effect.die(defect));
+
+      if (step === 'register')
+        vi.spyOn(registry, 'registerProject').mockReturnValue(Effect.die(defect));
+
+      if (step === 'rollback') {
+        vi.spyOn(loader, 'loadProject').mockReturnValue(
+          Effect.fail(new ProjectLoadError('project_invalid', 'failed', [])),
+        );
+        vi.spyOn(publication, 'rollbackPublishedManifest').mockReturnValue(Effect.die(defect));
+      }
+
+      const error = await Effect.runPromiseExit(runProjectInitCommand(options))
+        .then(valueFromExit)
+        .catch((cause: unknown) => cause);
+
+      expect(error).toMatchObject({
+        code:
+          step === 'rollback'
+            ? 'project_recovery_required'
+            : step === 'register'
+              ? 'registry_write_failed'
+              : 'init_failed',
+        hint:
+          step === 'rollback'
+            ? 'Preserve the manifest and reconcile it before retrying.'
+            : step === 'register'
+              ? `Run \`attest projects add ${join(options.workingDirectory, 'project')}\` to register it.`
+              : 'Check the target permissions and retry in an uninitialized directory.',
+        path:
+          step === 'register'
+            ? options.registryPath
+            : join(
+                options.workingDirectory,
+                'project',
+                ...(step === 'rollback' ? ['attest.project.json'] : []),
+              ),
+      });
+
+      if (step === 'rollback')
+        expect(error).toMatchObject({
+          hint: 'Preserve the manifest and reconcile it before retrying.',
+        });
+    },
+  );
 
   it('preserves a rejected prompt for generic CLI serialization', async () => {
     const options = await fixture();

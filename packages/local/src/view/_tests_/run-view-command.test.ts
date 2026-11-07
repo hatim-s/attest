@@ -65,6 +65,30 @@ describe('runViewCommand', () => {
     await expect(Effect.runPromiseExit(server.closed).then(valueFromExit)).resolves.toBeUndefined();
   });
 
+  it('closes the listener when aborted during a pending readiness callback', async () => {
+    const directory = await temporaryDirectory('attest-view-ready-abort-');
+    const controller = new AbortController();
+    let origin = '';
+
+    const operation = Effect.runPromiseExit(
+      runViewCommand({
+        scope: { kind: 'store' },
+        workingDirectory: directory,
+        signal: controller.signal,
+        onReady: async (server) => {
+          origin = server.origin;
+          controller.abort();
+          await Effect.runPromiseExit(server.closed);
+          await expect(fetch(origin)).rejects.toThrow();
+        },
+      }),
+    ).then(valueFromExit);
+
+    const server = await operation;
+    await Effect.runPromiseExit(server.closed).then(valueFromExit);
+    await expect(fetch(origin)).rejects.toThrow();
+  });
+
   it.each([
     [undefined, true],
     ['.attest/runs.db', true],

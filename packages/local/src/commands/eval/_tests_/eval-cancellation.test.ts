@@ -1,10 +1,11 @@
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Cause from 'effect/Cause';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import * as projectPath from '../eval-project-path.js';
+import { expect, test, vi } from 'vitest';
 import { CancellationRegistry, registerEvalRun, unregisterEvalRun } from '../eval-cancellation.js';
 
 /** Exercises real request files while keeping all PID and token identities owned by this test. */
@@ -46,6 +47,35 @@ test('fences stale cancellation requests and unregister against the replacement 
 
     if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
   } finally {
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('registry publication keeps the base message and relative path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'attest-registry-failure-'));
+
+  try {
+    const path = join(root, 'blocked.json');
+    await mkdir(path);
+    vi.spyOn(projectPath, 'prepareEvalProjectFile').mockReturnValueOnce(Effect.succeed(path));
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(registerEvalRun(root, 'blocked')).pipe(
+        Effect.provideService(CancellationRegistry, new Map()),
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+
+    if (!Exit.isFailure(exit)) throw new Error('Expected publication failure.');
+    expect(Cause.squash(exit.cause)).toMatchObject({
+      code: 'run_failed',
+      message: 'Could not publish the eval cancellation registry.',
+      path: join('.attest', 'eval-runs'),
+    });
+  } finally {
+    vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
   }
 });
