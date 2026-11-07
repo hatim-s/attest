@@ -77,6 +77,7 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
 
           context.io.output(renderCommandResult('metric.test', outputFormat(options), result));
         }),
+        { cancellation: 'owned' },
       ),
     );
 

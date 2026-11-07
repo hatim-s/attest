@@ -107,6 +107,7 @@ const registerRootCommands = ({
             workingDirectory,
           });
         }),
+        { cancellation: 'owned' },
       ),
     );
 

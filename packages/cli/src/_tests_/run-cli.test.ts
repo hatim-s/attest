@@ -1,7 +1,7 @@
+import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import * as Cause from 'effect/Cause';
 import * as Exit from 'effect/Exit';
-import { readExitValue } from '../errors/read-exit-value.js';
 import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -504,7 +504,7 @@ describe('runCli', () => {
     await mkdir(join(directory, '.attest'));
     const storePath = join(directory, '.attest', 'runs.db');
 
-    const { first, second } = readExitValue(
+    const { first, second } = valueFromExit(
       await Effect.runPromiseExit(
         withStoreScope((owner) =>
           Effect.gen(function* () {

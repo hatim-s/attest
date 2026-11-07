@@ -68,9 +68,8 @@ const runConfirmedDatasetImport = (
       projectHashAfter === null ||
       projectHashAfter === undefined
     ) {
-      throw new AttestCliError(
-        'internal_error',
-        'Dataset import preview returned no project hash.',
+      return yield* Effect.fail(
+        new AttestCliError('internal_error', 'Dataset import preview returned no project hash.'),
       );
     }
 
@@ -136,10 +135,12 @@ const withSuggestedMappings = (
     const suggestions = suggestedCsvMappings(csvHeaders);
 
     if (suggestions.length === 0) {
-      throw new AttestCliError('cli_missing_input', 'No safe CSV field mappings were detected.', {
-        path: '--map',
-        hint: `Detected headers: ${csvHeaders.join(', ') || '<none>'}. Pass explicit --map destination=header options.`,
-      });
+      return yield* Effect.fail(
+        new AttestCliError('cli_missing_input', 'No safe CSV field mappings were detected.', {
+          path: '--map',
+          hint: `Detected headers: ${csvHeaders.join(', ') || '<none>'}. Pass explicit --map destination=header options.`,
+        }),
+      );
     }
 
     const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);

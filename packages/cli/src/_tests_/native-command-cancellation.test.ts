@@ -63,10 +63,18 @@ describe('native command cancellation', () => {
   );
 });
 
-it('closes stdin request reading after SIGINT so the process can exit', async () => {
-  const entry = new URL('../../dist/run-cli.js', import.meta.url).href;
+describe.each(['node', 'bun'])('stdin cancellation on %s', (runtime) => {
+  it.each(
+    [
+      ['agent', 'add', '--from-json', '-'],
+      ['agent', 'test', '--from-json', '-'],
+      ['agent', 'test', 'a1', '--input-file', '-'],
+      ['metric', 'test', '--from-json', '-'],
+    ].flatMap((args) => (['SIGINT', 'SIGTERM'] as const).map((signal) => ({ args, signal }))),
+  )('closes stdin for $args after $signal', async ({ args, signal }) => {
+    const entry = new URL('../../dist/run-cli.js', import.meta.url).href;
 
-  const script = `
+    const script = `
     import { runCli } from ${JSON.stringify(entry)};
     let ready = false;
     process.stdin.on('newListener', (event) => {
@@ -75,43 +83,44 @@ it('closes stdin request reading after SIGINT so the process can exit', async ()
         queueMicrotask(() => process.stdout.write('READY\\n'));
       }
     });
-    process.exitCode = await runCli(['agent', 'add', '--from-json', '-', '--output', 'json']);
+    process.exitCode = await runCli(${JSON.stringify([...args, '--output', 'json'])});
   `;
 
-  const child = spawn('node', ['--input-type=module', '--eval', script], { stdio: 'pipe' });
-  let output = '';
-  let sent = false;
-  let timedOut = false;
+    const child = spawn(runtime, ['--input-type=module', '--eval', script], { stdio: 'pipe' });
+    let output = '';
+    let sent = false;
+    let timedOut = false;
 
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGKILL');
-  }, 4000);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 4000);
 
-  child.stdout.on('data', (chunk: Buffer) => {
-    output += chunk.toString();
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
 
-    if (!sent && output.includes('READY\n')) {
-      sent = true;
-      child.kill('SIGINT');
-    }
-  });
-  child.stderr.resume();
+      if (!sent && output.includes('READY\n')) {
+        sent = true;
+        child.kill(signal);
+      }
+    });
+    child.stderr.resume();
 
-  const exit = await new Promise<number | null>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', resolve);
-  }).finally(() => {
-    clearTimeout(timer);
-    child.kill();
-  });
+    const exit = await new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', resolve);
+    }).finally(() => {
+      clearTimeout(timer);
+      child.kill();
+    });
 
-  expect(timedOut).toBe(false);
-  expect(exit).toBe(130);
-  const result = output.split('\n').find((line) => line.startsWith('{'));
-  expect(result).toBeDefined();
-  expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result!))).toMatchObject({
-    ok: false,
-    error: { code: 'cancelled' },
+    expect(timedOut).toBe(false);
+    expect(exit).toBe(130);
+    const result = output.split('\n').find((line) => line.startsWith('{'));
+    expect(result).toBeDefined();
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result!))).toMatchObject({
+      ok: false,
+      error: { code: 'cancelled' },
+    });
   });
 });

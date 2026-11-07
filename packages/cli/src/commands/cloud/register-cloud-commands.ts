@@ -95,16 +95,12 @@ const registerCloudCommands = ({
   ).action((runId: string | undefined, options: CommonCliOptions) =>
     submit(
       Effect.gen(function* () {
-        const result = yield* Effect.gen(function* () {
-          const signal = commandSignal;
-
-          return yield* uploadCloudRun({
-            ...(yield* resolveCloudUploadProject({
-              ...(yield* projectContext(options)),
-              signal,
-            })),
-            runId,
-          });
+        const result = yield* uploadCloudRun({
+          ...(yield* resolveCloudUploadProject({
+            ...(yield* projectContext(options)),
+            signal: commandSignal,
+          })),
+          runId,
         });
 
         io.output(
@@ -204,16 +200,12 @@ const registerCloudCommands = ({
     .action((options: LoginOptions) =>
       submit(
         Effect.gen(function* () {
-          const result = yield* Effect.gen(function* () {
-            const signal = commandSignal;
-
-            return yield* loginCloud({
-              baseUrl: options.url,
-              credentialPath,
-              signal,
-              onDevice: ({ verification_uri, user_code }) =>
-                io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
-            });
+          const result = yield* loginCloud({
+            baseUrl: options.url,
+            credentialPath,
+            signal: commandSignal,
+            onDevice: ({ verification_uri, user_code }) =>
+              io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
           });
 
           output('login', options, result);
@@ -309,10 +301,12 @@ const registerCloudCommands = ({
       submit(
         Effect.gen(function* () {
           if (options.all && testIds.length)
-            throw new AttestCliError('cli_usage', 'Pass --all or test ids.');
+            return yield* Effect.fail(new AttestCliError('cli_usage', 'Pass --all or test ids.'));
 
           if (!options.all && !testIds.length)
-            throw new AttestCliError('cli_missing_input', 'Pass --all or test ids.');
+            return yield* Effect.fail(
+              new AttestCliError('cli_missing_input', 'Pass --all or test ids.'),
+            );
           const context = yield* projectContext(options);
 
           const project = yield* resolveCloudProject(context);
@@ -320,9 +314,11 @@ const registerCloudCommands = ({
           const revisionId = options.revision ?? project.revisionId;
 
           if (!revisionId)
-            throw new AttestCliError(
-              'cli_missing_input',
-              'Push the project before running it in the cloud.',
+            return yield* Effect.fail(
+              new AttestCliError(
+                'cli_missing_input',
+                'Push the project before running it in the cloud.',
+              ),
             );
 
           const request = yield* Effect.tryPromise({

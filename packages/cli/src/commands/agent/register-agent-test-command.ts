@@ -46,65 +46,62 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
           const interactive = isInteractive(options, context.interaction, options.fromJson);
 
           if (options.watch === true && !interactive) {
-            throw new AttestCliError(
-              'cli_usage',
-              '--watch requires an interactive human terminal.',
-              {
+            return yield* Effect.fail(
+              new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
                 path: '--watch',
-              },
+              }),
             );
           }
 
-          yield* Effect.gen(function* () {
-            const signal = context.signal;
+          const signal = context.signal;
 
-            const request = yield* readOrBuildRequest({
-              command: 'agent.test',
-              context,
-              leaf,
-              options,
-              build: () =>
-                Effect.gen(function* () {
-                  let request: Extract<CommandRequest, { command: 'agent.test' }> = {
-                    schema: COMMAND_REQUEST_SCHEMA_ID,
-                    command: 'agent.test',
-                    agent_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          agentId,
-                          { path: '<agent-id>', question: 'Agent id: ' },
-                          { interactive, prompt: context.interaction.prompt, signal },
-                        ),
-                      catch: (cause) => cause,
-                    }),
-                    input: yield* readAgentTestInput({
-                      input: options.input,
-                      inputFile: options.inputFile,
-                      readStdin: context.interaction.readStdin,
-                      workingDirectory: context.workingDirectory,
-                    }),
-                  };
+          const request = yield* readOrBuildRequest({
+            command: 'agent.test',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                let request: Extract<CommandRequest, { command: 'agent.test' }> = {
+                  schema: COMMAND_REQUEST_SCHEMA_ID,
+                  command: 'agent.test',
+                  agent_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        agentId,
+                        { path: '<agent-id>', question: 'Agent id: ' },
+                        { interactive, prompt: context.interaction.prompt, signal },
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                  input: yield* readAgentTestInput({
+                    input: options.input,
+                    inputFile: options.inputFile,
+                    readStdin: context.interaction.readStdin,
+                    workingDirectory: context.workingDirectory,
+                  }),
+                };
 
-                  if (options.record !== undefined) {
-                    request = { ...request, record: options.record };
-                  }
+                if (options.record !== undefined) {
+                  request = { ...request, record: options.record };
+                }
 
-                  return request;
-                }),
-            });
-
-            const result = yield* runAgentTestCommand({
-              onProgress: (message) => context.io.error(message),
-              project: options.project,
-              request,
-              signal,
-              watch: options.watch,
-              workingDirectory: context.workingDirectory,
-            });
-
-            context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
+                return request;
+              }),
           });
+
+          const result = yield* runAgentTestCommand({
+            onProgress: (message) => context.io.error(message),
+            project: options.project,
+            request,
+            signal,
+            watch: options.watch,
+            workingDirectory: context.workingDirectory,
+          });
+
+          context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
         }),
+        { cancellation: 'owned' },
       ),
     );
 

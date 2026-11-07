@@ -64,10 +64,13 @@ const guidedChoice = <Choice extends string>(
     const choice = choices.find((candidate) => candidate === answer);
 
     if (choice !== undefined) return choice;
-    throw new AttestCliError('cli_usage', `Unknown guided metric choice for ${path}.`, {
-      path,
-      hint: `Choose one of: ${choices.join(', ')}.`,
-    });
+
+    return yield* Effect.fail(
+      new AttestCliError('cli_usage', `Unknown guided metric choice for ${path}.`, {
+        path,
+        hint: `Choose one of: ${choices.join(', ')}.`,
+      }),
+    );
   });
 
 const traceSupport = (agent: { capabilities?: { trace?: boolean } }): string =>
@@ -106,10 +109,12 @@ const guidedTraceCapability = (options: MetricAddOptions, context: CommandContex
     const selected = loaded.agents.find(({ id }) => id === selectedId);
 
     if (selected === undefined) {
-      throw new AttestCliError('cli_usage', 'Unknown agent selected for trace guidance.', {
-        path: '<agent-id>',
-        hint: `Choose one of: ${loaded.agents.map(({ id }) => id).join(', ')}.`,
-      });
+      return yield* Effect.fail(
+        new AttestCliError('cli_usage', 'Unknown agent selected for trace guidance.', {
+          path: '<agent-id>',
+          hint: `Choose one of: ${loaded.agents.map(({ id }) => id).join(', ')}.`,
+        }),
+      );
     }
 
     return `Agent ${selected.id} ${traceSupport(selected)}. Creation remains available before trace evidence exists.`;

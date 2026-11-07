@@ -187,6 +187,8 @@ const runCliApplication = (
         >
       | undefined;
 
+    let cancellation: Parameters<CommandContext['submit']>[1];
+
     const interaction = { ...createDefaultCliInteraction(signal), ...options.interaction };
 
     const prompt: CliInteraction['prompt'] = (question, options) =>
@@ -201,8 +203,9 @@ const runCliApplication = (
       {
         argv,
         signal,
-        submit: (program) => {
+        submit: (program, options) => {
           selected = program;
+          cancellation = options;
         },
         complete: (publish) => {
           completion.publish = publish;
@@ -211,13 +214,15 @@ const runCliApplication = (
         services: options.services,
         interaction: { ...interaction, prompt },
         io,
-        ...(yield* Effect.promise(() =>
-          resolveAttestPaths({
-            attestHome: process.env.ATTEST_HOME,
-            homeDirectory: homedir(),
-            workingDirectory,
-          }),
-        )),
+        ...(yield* Effect.tryPromise({
+          try: () =>
+            resolveAttestPaths({
+              attestHome: process.env.ATTEST_HOME,
+              homeDirectory: homedir(),
+              workingDirectory,
+            }),
+          catch: (error) => error,
+        })),
         workingDirectory,
       },
       (message) => commanderErrors.push(message),
@@ -269,14 +274,27 @@ const runCliApplication = (
         return Effect.sync(() => signal.removeEventListener('abort', abort));
       });
 
-      // Eval and probes join terminal evidence; web joins its normal signal-driven shutdown.
-      const command = resultCommandName(failingCommand());
-
-      const execution = ['eval.run', 'agent.test', 'metric.test', 'web'].includes(command)
-        ? selected
-        : selected === undefined
+      // Owners join terminal evidence or normal shutdown before mapping post-signal failures.
+      const execution =
+        selected === undefined
           ? undefined
-          : Effect.raceFirst(selected, cancelled);
+          : cancellation?.cancellation === 'owned'
+            ? selected.pipe(
+                Effect.catchCause((cause) => {
+                  const error = Cause.squash(cause);
+
+                  if (!signal.aborted || error instanceof CliExit) return Effect.failCause(cause);
+
+                  return Effect.fail(
+                    new AttestCliError(
+                      'cancelled',
+                      cancellation?.cancellationMessage ?? 'Command cancelled.',
+                      { cause: error },
+                    ),
+                  );
+                }),
+              )
+            : Effect.raceFirst(selected, cancelled);
 
       // Commander selects the program; its application owner observes the complete command Exit.
       const executed =

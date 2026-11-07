@@ -154,7 +154,9 @@ const executeEvalRun = (
     const final = events.at(-1);
 
     if (final?.event !== 'result') {
-      throw new AttestCliError('run_failed', 'Eval stream did not produce a final result.');
+      return yield* Effect.fail(
+        new AttestCliError('run_failed', 'Eval stream did not produce a final result.'),
+      );
     }
 
     context.complete((failure) => {
@@ -281,43 +283,26 @@ const registerEvalCommands = (context: CommandContext): void => {
             testIds,
           };
 
-          yield* Effect.gen(function* () {
-            const signal = context.signal;
+          const signal = context.signal;
+          const request = yield* readRunRequest(fields, command, signal, context);
 
-            const executed = yield* Effect.exit(
-              Effect.gen(function* () {
-                const request = yield* readRunRequest(fields, command, signal, context);
-
-                if (signal.aborted) {
-                  throw new AttestCliError(
-                    'cancelled',
-                    'Evaluation was cancelled before execution.',
-                  );
-                }
-
-                yield* executeEvalRun(request, {
-                  project: options.project,
-                  signal,
-                  context,
-                  upload: options.upload === true,
-                });
-              }),
+          if (signal.aborted) {
+            return yield* Effect.fail(
+              new AttestCliError('cancelled', 'Evaluation was cancelled before execution.'),
             );
+          }
 
-            if (Exit.isFailure(executed)) {
-              const error = Cause.squash(executed.cause);
-
-              if (!signal.aborted || error instanceof CliExit)
-                return yield* Effect.failCause(executed.cause);
-
-              return yield* Effect.fail(
-                new AttestCliError('cancelled', 'Evaluation was cancelled by a process signal.', {
-                  cause: error,
-                }),
-              );
-            }
+          yield* executeEvalRun(request, {
+            project: options.project,
+            signal,
+            context,
+            upload: options.upload === true,
           });
         }),
+        {
+          cancellation: 'owned',
+          cancellationMessage: 'Evaluation was cancelled by a process signal.',
+        },
       ),
     );
 

@@ -1,4 +1,3 @@
-import { readExitValue } from '../errors/read-exit-value.js';
 import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -330,7 +329,7 @@ describe('project commands', () => {
     const root = await createFixtureProject();
     await mkdir(join(root, '.attest'));
     const ids: string[] = [];
-    readExitValue(
+    valueFromExit(
       await Effect.runPromiseExit(
         withStoreScope((owner) =>
           Effect.gen(function* () {
@@ -366,7 +365,7 @@ describe('project commands', () => {
     const storePath = join(root, '.attest', 'runs.db');
     await mkdir(join(root, '.attest'));
 
-    const run = readExitValue(
+    const run = valueFromExit(
       await Effect.runPromiseExit(
         withStoreScope((owner) =>
           Effect.gen(function* () {

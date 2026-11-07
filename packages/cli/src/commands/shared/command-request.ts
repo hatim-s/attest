@@ -73,13 +73,11 @@ const readJsonRequest = <TCommand extends CommandRequest['command']>({
     });
 
     if (options.fromJson === '-' && requestReadsStdin(request)) {
-      throw new AttestCliError(
-        'cli_usage',
-        'The command request and its source cannot share stdin.',
-        {
+      return yield* Effect.fail(
+        new AttestCliError('cli_usage', 'The command request and its source cannot share stdin.', {
           path: '--from-json',
           hint: 'Put either the command request or the source it reads in a file.',
-        },
+        }),
       );
     }
 

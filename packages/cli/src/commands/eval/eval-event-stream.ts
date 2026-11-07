@@ -199,22 +199,24 @@ const collectEvalEvents = (source: EvalEventSource, options: CollectEvalEventsOp
       else publish();
     };
 
-    try {
-      const stream =
-        Symbol.asyncIterator in source
-          ? Stream.fromAsyncIterable(source, (cause: unknown) => cause)
-          : Stream.fromIterable(source);
+    const collected = yield* Effect.exit(
+      Effect.gen(function* () {
+        const stream =
+          Symbol.asyncIterator in source
+            ? Stream.fromAsyncIterable(source, (cause: unknown) => cause)
+            : Stream.fromIterable(source);
 
-      const consumed = yield* Effect.exit(
-        Stream.runForEach(stream, (value) =>
-          Effect.sync(() => {
+        yield* Stream.runForEach(stream, (value) =>
+          Effect.gen(function* () {
             const event = parseWithSchemaSync(evalEventSchema, value);
 
             if (event.sequence !== events.length) {
-              throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
-                path: `/events/${events.length}/sequence`,
-                hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
-              });
+              return yield* Effect.fail(
+                new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
+                  path: `/events/${events.length}/sequence`,
+                  hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
+                }),
+              );
             }
 
             events.push(event);
@@ -228,41 +230,46 @@ const collectEvalEvents = (source: EvalEventSource, options: CollectEvalEventsOp
               if (rendered !== undefined) options.io.output(rendered);
             }
           }),
-        ),
-      );
+        );
 
-      if (Exit.isFailure(consumed)) {
-        if (Cause.hasInterrupts(consumed.cause)) return yield* Effect.failCause(consumed.cause);
-        throw Cause.squash(consumed.cause);
-      }
+        const parsed = parseWithSchema(evalEventStreamSchema, events);
 
-      const parsed = parseWithSchema(evalEventStreamSchema, events);
+        if (!parsed.ok) {
+          return yield* Effect.fail(
+            new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
+              hint: 'Repair dispatcher event ordering and terminal result metadata.',
+              details: { diagnostics: issueDiagnostics(parsed.error.issues) },
+            }),
+          );
+        }
 
-      if (!parsed.ok) {
-        throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
-          hint: 'Repair dispatcher event ordering and terminal result metadata.',
-          details: { diagnostics: issueDiagnostics(parsed.error.issues) },
-        });
-      }
+        complete(
+          parsed.value.filter(
+            (event) => event.event === 'run_completed' || event.event === 'result',
+          ),
+        );
 
-      complete(
-        parsed.value.filter((event) => event.event === 'run_completed' || event.event === 'result'),
-      );
+        return parsed.value;
+      }),
+    );
 
-      return parsed.value;
-    } catch (error: unknown) {
-      if (!options.streamJsonl || events.length === 0) throw error;
-      const recovered = recoverFailedJsonlStream(events, error, options.now);
-      const remaining = recovered.slice(printed);
-      remaining
-        .filter((event) => event.event !== 'run_completed' && event.event !== 'result')
-        .forEach(print);
-      complete(
-        remaining.filter((event) => event.event === 'run_completed' || event.event === 'result'),
-      );
+    if (Exit.isSuccess(collected)) return collected.value;
 
-      return recovered;
-    }
+    if (Cause.hasInterrupts(collected.cause)) return yield* Effect.failCause(collected.cause);
+    const error = Cause.squash(collected.cause);
+
+    if (!options.streamJsonl || events.length === 0)
+      return yield* Effect.failCause(collected.cause);
+    const recovered = recoverFailedJsonlStream(events, error, options.now);
+    const remaining = recovered.slice(printed);
+    remaining
+      .filter((event) => event.event !== 'run_completed' && event.event !== 'result')
+      .forEach(print);
+    complete(
+      remaining.filter((event) => event.event === 'run_completed' || event.event === 'result'),
+    );
+
+    return recovered;
   });
 
 export { collectEvalEvents, evalEvent, serializeEvalEvent };

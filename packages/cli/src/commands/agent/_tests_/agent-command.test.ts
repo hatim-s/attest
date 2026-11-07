@@ -1,4 +1,3 @@
-import { readExitValue } from '../../../errors/read-exit-value.js';
 import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import { access, writeFile } from 'node:fs/promises';
@@ -575,7 +574,7 @@ describe('agent commands', () => {
 
     const runId = probe.recorded_run_id;
 
-    const run = readExitValue(
+    const run = valueFromExit(
       await Effect.runPromiseExit(
         withStoreScope((owner) =>
           Effect.gen(function* () {
