@@ -844,3 +844,11 @@ still waits for application release, and an earlier infrastructure or command er
 catalog identity and exit code when cleanup fails. No wire, hash, schema, environment or script
 changes are made. The two execution-test calls remain Promise operations owned by S8b phase B;
 only their request building and application handoff are converted here.
+
+## Integrated S8b-B and S9b CLI root
+
+Agent and metric tests, probe input reads, and project init compose native Effects directly
+through `CommandContext.submit`. The unused PromiseStoreOwner and its owner-handshake tests
+are removed; eval store-path fixtures now use the native store scope. No migration execution
+bridges remain. The empty ledger and its lint rule remain until S10. `runCli` stays
+`Promise<number>`. Native local test/init signatures are deliberate TypeScript API breaks.

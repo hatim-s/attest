@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import {
@@ -44,27 +43,28 @@ const registerProjectInit = (
   addMutationOptions(command)
     .argument('[directory]', 'target project directory')
     .option('--name <name>', 'project display name; defaults to the directory name')
-    .action(async (directory: string | undefined, options: ProjectInitCliOptions) => {
-      const result = await // EFFECT-BRIDGE(S9b)
-      Effect.runPromiseExit(
-        runProjectInitCommand({
-          directory,
-          dryRun: options.dryRun,
-          expectedProjectHash: options.ifProjectHash,
-          fromJson: options.fromJson,
-          interactive: isInteractive(options, context.interaction, options.fromJson),
-          name: options.name,
-          prompt: context.interaction.prompt,
-          projectDirectory: options.project,
-          readStdin: context.interaction.readStdin,
-          registryPath: context.registryPath,
-          workingDirectory: context.workingDirectory,
-          yes: options.yes,
-        }).pipe(Effect.provideContext(context.evalContext)),
-      ).then(valueFromExit);
+    .action((directory: string | undefined, options: ProjectInitCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runProjectInitCommand({
+            directory,
+            dryRun: options.dryRun,
+            expectedProjectHash: options.ifProjectHash,
+            fromJson: options.fromJson,
+            interactive: isInteractive(options, context.interaction, options.fromJson),
+            name: options.name,
+            prompt: context.interaction.prompt,
+            projectDirectory: options.project,
+            readStdin: context.interaction.readStdin,
+            registryPath: context.registryPath,
+            workingDirectory: context.workingDirectory,
+            yes: options.yes,
+          });
 
-      context.io.output(renderCommandResult('project.init', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('project.init', outputFormat(options), result));
+        }),
+      ),
+    );
   setCliCommandHelpMetadata(command, {
     aliasFor,
     examples: [

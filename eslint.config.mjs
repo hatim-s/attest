@@ -556,56 +556,7 @@ const effectRoots = [
 ];
 
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
-const effectMigrationBridges = [
-  {
-    file: 'packages/cli/src/commands/metric/register-metric-test-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Commander caller of native test operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9b',
-        owner: 'CLI application migration',
-      },
-    ],
-  },
-  {
-    file: 'packages/cli/src/commands/agent/register-agent-test-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Commander caller of native test operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9b',
-        owner: 'CLI application migration',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/internal/promise-store-owner.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary owner handshake for later Promise application lifetimes',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9a',
-        owner: 'view server and catalog lifetime',
-      },
-    ],
-  },
-  {
-    file: 'packages/cli/src/commands/register-project-resource-commands.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'staged native resource command caller',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9b',
-        owner: 'declared command migration owner',
-      },
-    ],
-  },
-];
+const effectMigrationBridges = [];
 
 const effectExecutionBlock = ({ file, operations, removalSlice, bridges }) => {
   const dataOnly =

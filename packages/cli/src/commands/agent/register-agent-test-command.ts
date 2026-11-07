@@ -1,4 +1,3 @@
-import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
@@ -78,18 +77,11 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
                         ),
                       catch: (cause) => cause,
                     }),
-                    input: yield* Effect.tryPromise({
-                      try: () =>
-                        // EFFECT-BRIDGE(S9b)
-                        Effect.runPromiseExit(
-                          readAgentTestInput({
-                            input: options.input,
-                            inputFile: options.inputFile,
-                            readStdin: context.interaction.readStdin,
-                            workingDirectory: context.workingDirectory,
-                          }).pipe(Effect.provideContext(context.evalContext)),
-                        ).then(valueFromExit),
-                      catch: (cause) => cause,
+                    input: yield* readAgentTestInput({
+                      input: options.input,
+                      inputFile: options.inputFile,
+                      readStdin: context.interaction.readStdin,
+                      workingDirectory: context.workingDirectory,
                     }),
                   };
 
@@ -101,20 +93,13 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
                 }),
             });
 
-            const result = yield* Effect.tryPromise({
-              try: () =>
-                // EFFECT-BRIDGE(S9b)
-                Effect.runPromiseExit(
-                  runAgentTestCommand({
-                    onProgress: (message) => context.io.error(message),
-                    project: options.project,
-                    request,
-                    signal,
-                    watch: options.watch,
-                    workingDirectory: context.workingDirectory,
-                  }).pipe(Effect.provideContext(context.evalContext)),
-                ).then(valueFromExit),
-              catch: (cause) => cause,
+            const result = yield* runAgentTestCommand({
+              onProgress: (message) => context.io.error(message),
+              project: options.project,
+              request,
+              signal,
+              watch: options.watch,
+              workingDirectory: context.workingDirectory,
             });
 
             context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
