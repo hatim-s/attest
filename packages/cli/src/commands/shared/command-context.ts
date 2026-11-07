@@ -40,8 +40,8 @@ type CommandContext = {
   /** Selects the native command program executed by the application root. */
   submit: (
     program: Effect.Effect<unknown, unknown, EvalApplication | CancellationRegistry>,
-    /** Owners join their work before the root maps any post-signal failure to cancellation. */
-    options?: { cancellation: 'owned'; cancellationMessage?: string },
+    /** Owners join their work; shutdown preserves failures, owned maps post-signal failures. */
+    options?: { cancellation: 'owned' | 'shutdown'; cancellationMessage?: string },
   ) => void;
   /** Publishes the terminal result after resources close and returns its selected exit code. */
   complete: (publish: (failure?: SerializedCliFailure) => number) => void;

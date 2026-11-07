@@ -274,7 +274,7 @@ const runCliApplication = (
         return Effect.sync(() => signal.removeEventListener('abort', abort));
       });
 
-      // Owners join terminal evidence or normal shutdown before mapping post-signal failures.
+      // Owners join terminal evidence or normal shutdown before the root reports failures.
       const execution =
         selected === undefined
           ? undefined
@@ -294,7 +294,9 @@ const runCliApplication = (
                   );
                 }),
               )
-            : Effect.raceFirst(selected, cancelled);
+            : cancellation?.cancellation === 'shutdown'
+              ? selected
+              : Effect.raceFirst(selected, cancelled);
 
       // Commander selects the program; its application owner observes the complete command Exit.
       const executed =

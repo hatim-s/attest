@@ -214,10 +214,11 @@ Commander actions submit one native program through `CommandContext.submit`.
 `run-cli.ts` captures application services at the CLI boundary; `runCli` retains
 its process-facing `Promise<number>` API. One process signal reaches prompts and
 operations. Ordinary commands interrupt and join their resources. Commands that join
-their own work (eval, agent test, metric test, web) pass `{ cancellation: 'owned' }` to
+their own work (eval, agent test, metric test) pass `{ cancellation: 'owned' }` to
 `submit`; the root then maps any failure after the signal to the `cancelled` envelope,
 exit 130. Eval uses business cancellation to finish accepted evidence and its terminal
-JSONL sequence.
+JSONL sequence. Web passes `{ cancellation: 'shutdown' }` to join shutdown while
+preserving any failure's original error code, including failures after a signal.
 
 The CLI propagates command failure to the eval application before joining runs.
 Signal listeners cover that join and store release. Terminal eval output waits
