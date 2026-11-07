@@ -26,7 +26,20 @@ const MobileNavigation = ({ children, onClose, wordmark }: MobileNavigationProps
       dialog?.close();
 
       if (!breakpoint.matches) {
-        document.querySelector<HTMLElement>('.attest-sidebar .attest-wordmark')?.focus();
+        const wordmark = document.querySelector<HTMLElement>('.attest-sidebar .attest-wordmark');
+
+        if (wordmark) {
+          const clearRestoredFocus = () => {
+            delete wordmark.dataset.restoredFocus;
+            wordmark.removeEventListener('blur', clearRestoredFocus);
+            wordmark.removeEventListener('pointerdown', clearRestoredFocus);
+          };
+
+          wordmark.dataset.restoredFocus = '';
+          wordmark.addEventListener('blur', clearRestoredFocus, { once: true });
+          wordmark.addEventListener('pointerdown', clearRestoredFocus, { once: true });
+          wordmark.focus();
+        }
       } else if (opener instanceof HTMLElement && opener.isConnected) {
         opener.focus();
       }

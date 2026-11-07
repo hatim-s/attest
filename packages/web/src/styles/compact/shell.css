@@ -56,7 +56,7 @@
   color: var(--ink);
 }
 /* Responsive dismissal restores focus here even after a pointer opened the drawer. */
-.attest-sidebar .attest-wordmark:focus {
+.attest-sidebar .attest-wordmark[data-restored-focus]:focus {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
