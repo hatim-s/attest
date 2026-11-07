@@ -50,7 +50,7 @@ const renderHumanFinalResult = (data: EvalFinalResultData): string => {
     `  metric errors: ${run.summary.metric_error_count}`,
     'Next:',
     `  attest report ${run.run_id}`,
-    '  attest view --no-open',
+    '  attest web --no-open',
     'Compare with a baseline run:',
     // A finished eval knows only its own id, so the baseline stays a placeholder.
     `  attest diff <base-run-id> ${run.run_id}`,

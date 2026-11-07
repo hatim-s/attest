@@ -190,17 +190,17 @@ inspection:
 ```sh
 attest diff 01ARZ3NDEKTSV4RRFFQ69G5FAA 01ARZ3NDEKTSV4RRFFQ69G5FAV --format json
 attest report 01ARZ3NDEKTSV4RRFFQ69G5FAV --output artifacts/run.html
-attest view --no-open --port 0
+attest web --no-open --port 0
 ```
 
-`diff`, `report`, and `view` default to `.attest/runs.db`; pass `--store <path>` to select another
+`diff`, `report`, and `web` default to `.attest/runs.db`; pass `--store <path>` to select another
 store. `report` refuses to replace an existing artifact unless `--force` is explicit. JUnit is
 written through a verified, atomically renamed temporary file; unsafe paths and write failures use
 stable artifact error identities. `report` snapshots carry the record of the project they read.
 
 ## Read surfaces and routes
 
-`attest view` serves one project. `attest view --all` serves every project in the global
+`attest web` serves one project. `attest web --all` serves every project in the global
 registry on the same port, and cannot be combined with `--store`. See
 [project registry and dashboard](./index.md#project-registry-and-dashboard).
 
@@ -213,7 +213,7 @@ The dashboard and its read API are project scoped. Dashboard routes are `/projec
 
 ## Starting and cancelling runs from the dashboard
 
-`attest view` and `attest view --all` can start and cancel eval runs in every project they serve.
+`attest web` and `attest web --all` can start and cancel eval runs in every project they serve.
 The dashboard bootstrap reports `capabilities.control: true`. A report from `attest report`
 reports `false` and cannot start anything.
 
@@ -228,12 +228,12 @@ The dashboard can select every test or a list of test ids, and can add tags, a c
 run timeout. Other `attest eval run` options, such as `--baseline` and `--junit`, stay on the
 command line. Several runs can be active in one project at once, as from a terminal.
 
-Dashboard runs read secrets from the environment of the `attest view` process: `ANTHROPIC_API_KEY`,
+Dashboard runs read secrets from the environment of the `attest web` process: `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, the `VERCEL_*` sandbox credentials and every `from_env` secret reference.
-Export them in the shell before you start `attest view`. A variable exported later, in that shell
+Export them in the shell before you start `attest web`. A variable exported later, in that shell
 or another one, does not reach the runs.
 
-Each run gets its own process group. Closing the dashboard tab or stopping `attest view` with
+Each run gets its own process group. Closing the dashboard tab or stopping `attest web` with
 Ctrl+C leaves it running; cancel it from its run page or with `attest eval cancel <run-id>`.
 A dashboard run writes its JSONL event stream to an unlinked file in the system temp directory,
 which takes disk space until the run exits and does not show up in `ls` or `du`.

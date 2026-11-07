@@ -85,13 +85,29 @@ describe('projects commands', () => {
     await expect(access(join(parent, 'second', 'attest.project.json'))).resolves.toBeUndefined();
   });
 
-  it('rejects view --all together with --store', async () => {
+  it.each(['web', 'view'])('rejects %s --all together with --store', async (command) => {
     await useAttestHome();
     const parent = await temporaryDirectory('attest-projects-');
 
-    const run = await runCommand(parent, ['view', '--all', '--store', 'x.db', '--no-open']);
+    const run = await runCommand(parent, [command, '--all', '--store', 'x.db', '--no-open']);
 
     expect(run.exitCode).toBe(2);
-    expect(run.errors.join('\n')).toContain('cli_usage');
+    expect(run.errors.join('\n')).toContain(
+      '`--all` serves every registered project; drop `--store`.',
+    );
+  });
+
+  it.each(['web', 'view'])('rejects invalid %s ports before opening a store', async (command) => {
+    await useAttestHome();
+    const root = await temporaryDirectory('attest-web-invalid-');
+
+    for (const port of ['-1', '65536', '1.5', 'invalid']) {
+      const run = await runCommand(root, [command, '--port', port, '--no-open']);
+
+      expect(run.exitCode).toBe(2);
+      expect(run.errors.join('\n')).toContain('View port must be an integer from 0 to 65535.');
+    }
+
+    await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

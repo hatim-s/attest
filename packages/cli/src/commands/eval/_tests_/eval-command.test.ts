@@ -490,7 +490,7 @@ describe('eval output and sequencing', () => {
       '[2] refund/delayed started.',
     ]);
     expect(harness.output.at(-1)).toContain(
-      `Next:\n  attest report ${RUN_ID}\n  attest view --no-open\nCompare with a baseline run:\n  attest diff <base-run-id> ${RUN_ID}`,
+      `Next:\n  attest report ${RUN_ID}\n  attest web --no-open\nCompare with a baseline run:\n  attest diff <base-run-id> ${RUN_ID}`,
     );
     expect(harness.output.at(-1)).not.toContain('\n  attest diff\n');
     expect(harness.output.at(-1)?.split('\n').at(-1)).toBe('Result: PASS (exit 0)');

@@ -84,7 +84,8 @@ const registerRootCommands = ({
   workingDirectory,
 }: CommandContext): void => {
   program
-    .command('view')
+    .command('web')
+    .alias('view')
     .description('Open the local dashboard over the project run store or every registered project.')
     .option('--store <path>', 'SQLite run store path (default: .attest/runs.db)')
     .option('--all', 'serve every project in the global registry')

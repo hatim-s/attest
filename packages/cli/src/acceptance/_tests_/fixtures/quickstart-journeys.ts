@@ -137,7 +137,7 @@ const quickstartJourneys: Journeys = {
           required_stdout: [
             'Result: PASS (exit 0)',
             'attest report $RUN_ID',
-            'attest view --no-open',
+            'attest web --no-open',
             'Compare with a baseline run:',
             'attest diff <base-run-id> $RUN_ID',
           ],
@@ -173,7 +173,7 @@ const quickstartJourneys: Journeys = {
         },
         {
           id: 'open-view',
-          argv: ['view', '--no-open'],
+          argv: ['web', '--no-open', '--port', '0'],
           exit_code: 0,
           output: 'human',
           readiness_probe: 'view',
