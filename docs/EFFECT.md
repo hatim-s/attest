@@ -156,7 +156,8 @@ read connection independently of BEGIN, COMMIT and ROLLBACK, so a failed command
 releases the shared path lock, and a failed commit attempts rollback. Only acquisition and
 cleanup are masked; the read itself stays interruptible. Commit or rollback settles
 before store release. Node uses DatabaseSync statement finalization. Bun owns and
-finalizes every prepared statement before strict close and disables persistent
+finalizes each single-use prepared statement after its query, including failed queries,
+and releases any remaining statements before strict close and disables persistent
 WAL sidecars so a final writable connection can remove them. A closing writable handle also
 tries rollback-journal mode without waiting on other connections, allowing an
 immediate standalone readonly copy on macOS. A busy connection keeps WAL mode.

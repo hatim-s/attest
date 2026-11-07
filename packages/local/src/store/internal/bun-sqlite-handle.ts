@@ -4,7 +4,7 @@ import type { SqliteHandle } from './sqlite-handle.js';
 const openBunSqliteHandle = async (
   path: string,
   options: { readOnly?: boolean } = {},
-): Promise<SqliteHandle> => {
+): Promise<SqliteHandle & { readonly activeStatementCount: number }> => {
   const { Database, constants } = await import('bun:sqlite');
   const database = new Database(path, { readonly: options.readOnly, create: !options.readOnly });
   // macOS SQLite persists empty WAL sidecars by default. Let SQLite remove them on final writable close.
@@ -18,13 +18,27 @@ const openBunSqliteHandle = async (
   const statements = new Set<ReturnType<typeof database.prepare>>();
 
   return {
+    get activeStatementCount() {
+      return statements.size;
+    },
     prepare: (sql) => {
       const statement = database.prepare(sql);
       statements.add(statement);
 
+      /** Releases each single-use statement even when SQLite rejects the query. */
+      const execute = <A>(query: () => A): Promise<A> =>
+        Promise.resolve().then(() => {
+          try {
+            return query();
+          } finally {
+            statement.finalize();
+            statements.delete(statement);
+          }
+        });
+
       return {
-        all: (...parameters) => Promise.resolve().then(() => statement.all(...parameters)),
-        run: (...parameters) => Promise.resolve().then(() => statement.run(...parameters)),
+        all: (...parameters) => execute(() => statement.all(...parameters)),
+        run: (...parameters) => execute(() => statement.run(...parameters)),
       };
     },
     exec: (sql) => Promise.resolve().then(() => database.exec(sql)),
