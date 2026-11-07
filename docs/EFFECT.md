@@ -782,9 +782,8 @@ point. A failure or interruption before it rolls back the exact published bytes 
 created directory. After it, a registry failure reports `registry_write_failed` and keeps the
 manifest, so `attest projects add` can register it later. Dry runs still write nothing.
 
-The direct Commander callers use the captured CLI application context through exact-file S9b
-adapters, matching the integrated S7 eval boundary. Other Promise CLI actions and guided metric
-loading remain owned by S9b. No S8b execution bridges remain.
+Commander submits the native probe and init programs through the shared CLI application root.
+No S8b execution bridges remain.
 
 ## S9a native dashboard operations
 
@@ -801,8 +800,8 @@ Close stops admission, joins the listener and accepted Hono callbacks, then invo
 with the primary Exit. The view command owns its StoreScope outside that server scope. Startup
 failure therefore reaches the store owner before release. Cleanup receipts retain every failed
 release; primary typed failures, defects and interruption keep their Cause classification.
-The PromiseStoreOwner helper remains for the separate S8b consumers. These are deliberate
-TypeScript API breaks; wire schemas, status codes, and the detached CLI protocol are unchanged.
+These are deliberate TypeScript API breaks; wire schemas, status codes, and the detached CLI
+protocol are unchanged. The integrated S8b lane removes the unused PromiseStoreOwner helper.
 
 ## main-merge dashboard projections and web command
 
@@ -852,3 +851,11 @@ through `CommandContext.submit`. The unused PromiseStoreOwner and its owner-hand
 are removed; eval store-path fixtures now use the native store scope. No migration execution
 bridges remain. The empty ledger and its lint rule remain until S10. `runCli` stays
 `Promise<number>`. Native local test/init signatures are deliberate TypeScript API breaks.
+
+## CLI failure and eval run lifetime
+
+The CLI root propagates command failure to the eval application before joining admitted runs.
+The application aborts those runs through their owned controllers, preserving evidence finalization
+and the earlier command Cause. Signal listeners span the application join and store release.
+`CliExit` keeps its selected exit code and deferred terminal publisher. Eval cancel composes
+its native result directly, as eval run does; upload failure remains advisory.

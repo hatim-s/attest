@@ -31,7 +31,7 @@ class EvalApplication extends Context.Service<EvalApplication, Application>()(
 ) {}
 
 /** Joins every admitted run before the store owner closes its shared handles. */
-const withEvalApplication = <A, E extends Error, R>(
+const withEvalApplication = <A, E, R>(
   use: Effect.Effect<A, E, R | EvalApplication | CancellationRegistry>,
 ) =>
   withStoreScope((owner) =>
@@ -55,6 +55,7 @@ const withEvalApplication = <A, E extends Error, R>(
             ),
           );
 
+          // Business cancellation lets the masked evidence owners finalize before the join.
           if (Exit.isFailure(primary)) for (const run of application.runs) run.controller.abort();
           const exits: Exit.Exit<unknown, Error>[] = [];
 

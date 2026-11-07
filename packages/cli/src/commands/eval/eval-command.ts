@@ -389,15 +389,10 @@ const registerEvalCommands = (context: CommandContext): void => {
           const request = yield* readCancelRequest(runId, options, command, context);
           const cancel = context.services?.eval?.cancelConfiguration ?? cancelConfiguration;
 
-          const resultExit = yield* Effect.exit(
-            cancel(request, {
-              project: options.project,
-              workingDirectory: context.workingDirectory,
-            }).pipe(Effect.provideContext(context.evalContext)),
-          );
-
-          if (Exit.isFailure(resultExit)) throw Cause.squash(resultExit.cause);
-          const result = resultExit.value;
+          const result = yield* cancel(request, {
+            project: options.project,
+            workingDirectory: context.workingDirectory,
+          }).pipe(Effect.provideContext(context.evalContext));
 
           if (request.output === 'json') {
             const document = createCliSuccessResult(

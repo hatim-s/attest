@@ -843,3 +843,74 @@ it.each(['credentials', 'project'] as const)(
     });
   },
 );
+
+it('aborts and joins an admitted run after a stream failure while keeping signals installed', async () => {
+  const { EvalApplication } = await import('@attest/local/eval');
+  const controller = new AbortController();
+  const listeners = process.listenerCount('SIGINT');
+  const lines: string[] = [];
+  let forced = false;
+  let joined = false;
+  let listeningDuringJoin = false;
+
+  const timer = setTimeout(() => {
+    forced = true;
+    controller.abort();
+  }, 250);
+
+  run.mockImplementation(() =>
+    Effect.gen(function* () {
+      const application = yield* EvalApplication;
+
+      const fiber = yield* Effect.forkIn(
+        Effect.uninterruptible(
+          Effect.callback<void>((resume) => {
+            const abort = () => resume(Effect.void);
+
+            if (controller.signal.aborted) abort();
+            else controller.signal.addEventListener('abort', abort, { once: true });
+
+            return Effect.sync(() => controller.signal.removeEventListener('abort', abort));
+          }).pipe(
+            Effect.ensuring(
+              Effect.promise(async () => {
+                await new Promise<void>((resolve) => setTimeout(resolve, 5));
+                listeningDuringJoin = process.listenerCount('SIGINT') > listeners;
+                joined = true;
+              }),
+            ),
+          ),
+        ),
+        application.scope,
+      );
+
+      application.runs.push({ fiber, controller });
+
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield await Promise.reject(new LocalError('run_failed', 'The eval stream failed.'));
+        },
+      };
+    }),
+  );
+
+  try {
+    const code = await runCli(['eval', 'run', 'refund', '--output', 'json'], {
+      interaction: nonInteractive(),
+      io: { error: () => {}, output: (line) => lines.push(line) },
+    });
+
+    expect(forced).toBe(false);
+    expect(controller.signal.aborted).toBe(true);
+    expect(joined).toBe(true);
+    expect(listeningDuringJoin).toBe(true);
+    expect(code).toBe(getCliErrorDefinition('run_failed').exit_code);
+    expect(JSON.parse(lines[0]!)).toMatchObject({
+      error: { code: 'run_failed', message: 'The eval stream failed.' },
+    });
+    expect(process.listenerCount('SIGINT')).toBe(listeners);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+});

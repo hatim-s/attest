@@ -133,16 +133,28 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
     },
   };
 
-  const exit = await Effect.runPromiseExit(
-    withEvalApplication(
-      Effect.gen(function* () {
-        const evalContext = yield* Effect.context<
-          | import('@attest/local/eval').EvalApplication
-          | import('@attest/local/eval').CancellationRegistry
-        >();
+  const controller = new AbortController();
 
-        return yield* runCliApplication(argv, options, evalContext, completion);
-      }),
+  const exit = await Effect.runPromiseExit(
+    withCommandSignals(
+      () =>
+        withEvalApplication(
+          Effect.gen(function* () {
+            const evalContext = yield* Effect.context<
+              | import('@attest/local/eval').EvalApplication
+              | import('@attest/local/eval').CancellationRegistry
+            >();
+
+            return yield* runCliApplication(
+              argv,
+              options,
+              evalContext,
+              completion,
+              controller.signal,
+            );
+          }),
+        ),
+      controller,
     ),
   );
 
@@ -163,11 +175,9 @@ const runCliApplication = (
   options: RunCliOptions,
   evalContext: CommandContext['evalContext'],
   completion: CliCompletion,
+  signal: AbortSignal,
 ) =>
   Effect.gen(function* () {
-    const controller = new AbortController();
-    const signal = controller.signal;
-
     let selected:
       | Effect.Effect<
           unknown,
@@ -239,6 +249,8 @@ const runCliApplication = (
       return failure === undefined ? 0 : reportFailure(failure);
     };
 
+    let commandCause: Cause.Cause<unknown> | undefined;
+
     try {
       const parsed = yield* Effect.exit(
         Effect.tryPromise({
@@ -266,30 +278,30 @@ const runCliApplication = (
           ? undefined
           : Effect.raceFirst(selected, cancelled);
 
-      // Legacy actions still run during parsing and retain their existing signal ownership.
+      // Commander selects the program; its application owner observes the complete command Exit.
       const executed =
         Exit.isFailure(parsed) || execution === undefined
           ? parsed
-          : yield* Effect.exit(
-              withCommandSignals(
-                () => execution.pipe(Effect.provideContext(evalContext)),
-                controller,
-              ),
-            );
+          : yield* Effect.exit(execution.pipe(Effect.provideContext(evalContext)));
 
-      if (Exit.isFailure(executed)) throw Cause.squash(executed.cause);
+      if (Exit.isFailure(executed)) {
+        commandCause = executed.cause;
+        throw Cause.squash(executed.cause);
+      }
 
       return 0;
     } catch (error: unknown) {
       if (error instanceof CommanderError && error.exitCode === 0) return 0;
 
+      // A terminal eval verdict is complete, so store release can still replace that verdict.
       if (error instanceof CliExit) return error.exitCode;
 
       const failure = serializeCliError(error);
       // Commander already owns this primary failure; a later store release cannot replace it.
       completion.publish = () => reportFailure(failure, error instanceof CommanderError);
 
-      return failure.exitCode;
+      // The application must see failure before joining admitted runs. Publication waits for release.
+      return yield* Effect.failCause(commandCause ?? Cause.die(error));
     }
   });
 
