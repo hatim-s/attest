@@ -22,7 +22,7 @@ const startPromiseStoreOwner = async <A, E extends Error>(
     reject = fail;
   });
 
-  // EFFECT-BRIDGE(S9a)
+  // EFFECT-BRIDGE(S8b)
   const finished = Effect.runPromiseExit(
     withStoreScope((owner) =>
       Effect.gen(function* () {

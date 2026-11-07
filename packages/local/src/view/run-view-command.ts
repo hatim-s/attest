@@ -9,8 +9,9 @@ import { describeStoreProject } from '../project/describe-store-project.js';
 import { createRegistryCatalog, readRegistry } from '../registry/index.js';
 import { createRunLauncher, type CliCommand } from '../run-control/index.js';
 import { openStore, type StoreScope } from '../store/index.js';
-import { startPromiseStoreOwner } from '../internal/promise-store-owner.js';
-import * as Exit from 'effect/Exit';
+import { withStoreScope } from '../store/index.js';
+import { finishOperation } from '../internal/operation-cleanup.js';
+import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 
 /** What the dashboard serves: one project's store, or every project in the registry. */
@@ -43,7 +44,7 @@ const openViewCatalog = Effect.fn('openViewCatalog')(function* (
     yield* readRegistry(scope.registryPath);
     const catalog = createRegistryCatalog({ registryPath: scope.registryPath }, owner);
 
-    return { catalog, control: createRunLauncher({ catalog, command }) };
+    return { catalog, control: yield* createRunLauncher({ catalog, command }) };
   }
 
   const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
@@ -60,7 +61,7 @@ const openViewCatalog = Effect.fn('openViewCatalog')(function* (
 
   return {
     catalog,
-    control: ownStore ? createRunLauncher({ catalog, command }) : undefined,
+    control: ownStore ? yield* createRunLauncher({ catalog, command }) : undefined,
   } satisfies ViewCatalog;
 });
 
@@ -71,88 +72,84 @@ const openViewCatalog = Effect.fn('openViewCatalog')(function* (
  * the server loaded. A program that embeds `runCli` is `argv[1]` itself, so that program is what
  * runs. Only when `argv[1]` is not a file (a compiled binary) is `attest` taken from PATH.
  */
-const resolveCliCommand = async (): Promise<CliCommand> => {
+const resolveCliCommand = Effect.fn('resolveCliCommand')(function* () {
   const script = process.argv[1];
 
   const isFile =
     script !== undefined &&
-    (await stat(script).then(
-      (entry) => entry.isFile(),
-      () => false,
+    (yield* Effect.tryPromise({ try: () => stat(script), catch: () => false as const }).pipe(
+      Effect.map((entry) => entry.isFile()),
+      Effect.catch(() => Effect.succeed(false)),
     ));
 
   return isFile
     ? { command: process.execPath, args: [...process.execArgv, script] }
     : { command: 'attest', args: [] };
-};
+});
 
 /** Starts the loopback dashboard and owns abort-driven shutdown. */
-const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServerHandle> => {
-  const command = await resolveCliCommand();
+const runViewCommand = Effect.fn('runViewCommand')(function* (options: RunViewCommandOptions) {
+  const command = yield* resolveCliCommand();
 
-  const lifetime = await startPromiseStoreOwner((owner) =>
-    openViewCatalog(options.scope, options.workingDirectory, command, owner),
-  );
+  return yield* withStoreScope((owner) =>
+    Effect.scoped(
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const { catalog, control } = yield* openViewCatalog(
+            options.scope,
+            options.workingDirectory,
+            command,
+            owner,
+          );
 
-  const { catalog, control } = lifetime.value;
-  let server: ViewServerHandle;
-  let terminal: Exit.Exit<void, Error> = Exit.void;
+          const server = yield* startViewServer({
+            indexHtml: dashboardHtml,
+            port: options.port,
+            catalog,
+            control,
+            close: () => Effect.void,
+          });
 
-  try {
-    server = await startViewServer({
-      indexHtml: dashboardHtml,
-      port: options.port,
-      catalog,
-      control,
-      close: () => lifetime.finish(terminal),
-    });
-  } catch (error: unknown) {
-    // startViewServer already attached any release failure to the startup error.
-    await lifetime
-      .finish(error instanceof Error ? Exit.fail(error) : Exit.die(error))
-      .catch(() => undefined);
-    throw error;
-  }
+          const primary = yield* Effect.exit(
+            restore(
+              Effect.gen(function* () {
+                if (options.onReady !== undefined)
+                  yield* Effect.uninterruptible(
+                    Effect.tryPromise({
+                      try: () => Promise.resolve(options.onReady?.(server)),
+                      catch: (cause) =>
+                        cause instanceof Error
+                          ? cause
+                          : new Error('View readiness callback failed.', { cause }),
+                    }),
+                  );
 
-  // Observe rejection while onReady is pending; the command still awaits the same closed promise.
-  void server.closed.catch(() => {});
+                if (options.signal?.aborted) return;
 
-  const closeOnAbort = (): void => {
-    // closed carries shutdown failures to the awaiting command.
-    void server.close().catch(() => {});
-  };
+                if (options.signal === undefined) return yield* server.closed;
+                yield* Effect.raceFirst(
+                  server.closed,
+                  Effect.callback<void>((resume) => {
+                    const abort = () => resume(Effect.void);
+                    options.signal?.addEventListener('abort', abort, { once: true });
 
-  options.signal?.addEventListener('abort', closeOnAbort, { once: true });
+                    if (options.signal?.aborted) abort();
 
-  try {
-    await options.onReady?.(server);
+                    return Effect.sync(() => options.signal?.removeEventListener('abort', abort));
+                  }),
+                );
+              }),
+            ),
+          );
 
-    if (options.signal?.aborted === true) {
-      await server.close();
-    }
+          const release = yield* Effect.exit(server.close());
+          yield* finishOperation(primary, [release]);
 
-    await server.closed;
-
-    return server;
-  } catch (error: unknown) {
-    terminal = error instanceof Error ? Exit.fail(error) : Exit.die(error);
-
-    try {
-      await server.close();
-    } catch (cleanup) {
-      if (cleanup !== error) {
-        const primary =
-          error instanceof Error ? error : new Error('View command failed.', { cause: error });
-
-        Object.defineProperty(primary, 'cleanupFailure', { value: cleanup, configurable: true });
-        throw primary;
-      }
-    }
-
-    throw error;
-  } finally {
-    options.signal?.removeEventListener('abort', closeOnAbort);
-  }
-};
+          return server;
+        }),
+      ),
+    ),
+  ).pipe(Effect.provideService(CancellationRegistry, new Map()));
+});
 
 export { runViewCommand, type RunViewCommandOptions, type ViewScope };

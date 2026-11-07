@@ -50,6 +50,26 @@ const coreForbidden = [
 
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
+  {
+    file: 'packages/web/src/api/queries.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'TanStack query and mutation callback roots',
+  },
+  {
+    file: 'packages/local/src/view/_tests_/run-view-command.test.ts',
+    operations: ['Effect.runPromiseExit', 'Effect.runFork'],
+    owner: 'native view command lifetime tests',
+  },
+  {
+    file: 'packages/local/src/view-server/_tests_/view-server.test.ts',
+    operations: ['Effect.runSync', 'Effect.runPromiseExit'],
+    owner: 'native server Scope and assertion roots',
+  },
+  {
+    file: 'packages/api/src/client/_tests_/suite-analytics.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native client analytics assertions',
+  },
   ...[
     'packages/client/src/_tests_/support/native-owner.ts',
     'packages/client/src/_tests_/collect-artifacts.test.ts',
@@ -270,11 +290,11 @@ const effectRoots = [
   {
     file: 'packages/api/src/server/create-api-app.ts',
     operations: ['Effect.runPromiseExit'],
-    owner: 'Hono request read execution roots; host retains catalog lifetime',
+    owner: 'Hono read/control request roots; start admission ignores request disconnect',
   },
   {
     file: 'packages/api/src/client/_tests_/api-client.test.ts',
-    operations: ['Effect.runPromiseExit'],
+    operations: ['Effect.runPromiseExit', 'Effect.runFork'],
     owner: 'API HTTP comparison fixture test root',
   },
   {
@@ -285,7 +305,7 @@ const effectRoots = [
   {
     file: 'packages/cli/src/commands/register-root-commands.ts',
     operations: ['Effect.runPromiseExit'],
-    owner: 'Commander report, trace convert and diff action roots',
+    owner: 'Commander view, report, trace convert and diff action roots',
   },
   {
     file: 'packages/cli/src/commands/projects/register-projects-commands.ts',
@@ -474,8 +494,8 @@ const effectRoots = [
   },
   {
     file: 'packages/local/src/run-control/_tests_/run-launcher.test.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'native resource command fixture execution root',
+    operations: ['Effect.runSync', 'Effect.runPromiseExit'],
+    owner: 'native launcher fixture and assertion roots',
   },
   {
     file: 'packages/local/src/commands/project/_tests_/manifest-publication.test.ts',
@@ -542,38 +562,14 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
-    file: 'packages/local/src/run-control/spawn-eval-run.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'run admission process lifetime',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S9a',
-        owner: 'run admission process lifetime',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/internal/promise-store-owner.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'temporary owner handshake for later Promise application lifetimes',
     bridges: [
       {
         operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9a',
-        owner: 'view server and catalog lifetime',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/run-control/create-run-launcher.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise RunControl native catalog read',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9a',
-        owner: 'RunControl catalog consumer',
+        removalSlice: 'S8b',
+        owner: 'remaining agent probe and test fixture owners',
       },
     ],
   },
@@ -609,18 +605,6 @@ const effectMigrationBridges = [
       {
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/run-control/list-project-tests.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9a',
         owner: 'declared migration owner',
       },
     ],

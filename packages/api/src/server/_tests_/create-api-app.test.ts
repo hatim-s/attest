@@ -301,7 +301,7 @@ describe('createApiApp', () => {
 
       const control: RunControl = {
         listTests: () =>
-          Promise.resolve([{ id: 'smoke', name: 'Smoke', tags: ['fast'], caseCount: 2 }]),
+          Effect.succeed([{ id: 'smoke', name: 'Smoke', tags: ['fast'], caseCount: 2 }]),
         startRun: (projectKey, request) => {
           started.push({ projectKey, request });
 
@@ -311,14 +311,14 @@ describe('createApiApp', () => {
             });
           }
 
-          return Promise.resolve({ runId: 'run-new' });
+          return Effect.succeed({ runId: 'run-new' });
         },
         cancelRun: (_projectKey, runId) => {
           cancelled.push(runId);
 
           if (runId === 'missing') throw new StoreError('RUN_NOT_FOUND', 'Run missing.');
 
-          return Promise.resolve({ outcome: 'cancellation_requested' });
+          return Effect.succeed({ outcome: 'cancellation_requested' });
         },
       };
 
@@ -430,4 +430,45 @@ describe('createApiApp', () => {
       expect(started).toEqual([]);
     });
   });
+});
+
+it('joins one admitted start after request disconnect without replaying it', async () => {
+  let enter = () => {};
+
+  let finish = () => {};
+
+  let starts = 0;
+
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+
+  const control: RunControl = {
+    listTests: () => Effect.succeed([]),
+    cancelRun: () => Effect.succeed({ outcome: 'already_terminal' }),
+    startRun: () =>
+      Effect.callback<{ runId: string }>((resume) => {
+        starts++;
+        enter();
+        finish = () => resume(Effect.succeed({ runId: 'detached-run' }));
+      }),
+  };
+
+  const app = createApiApp({ catalog: catalogFor(source), control });
+  const controller = new AbortController();
+
+  const pending = app.request('/projects/demo/runs', {
+    method: 'POST',
+    signal: controller.signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selection: { all: true } }),
+  });
+
+  await entered;
+  controller.abort();
+  finish();
+  const response = await pending;
+  expect(response.status).toBe(201);
+  expect(await response.json()).toEqual({ runId: 'detached-run' });
+  expect(starts).toBe(1);
 });

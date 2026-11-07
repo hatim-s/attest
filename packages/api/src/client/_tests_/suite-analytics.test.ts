@@ -1,3 +1,4 @@
+import { valueFromExit } from './native-root.js';
 import * as Effect from 'effect/Effect';
 import {
   createSingleProjectCatalog,
@@ -129,7 +130,9 @@ describe('suite analytics clients', () => {
 
     const controller = new AbortController();
     expect(
-      await client.listRunSuites({ projectKey, runId: run.id }, { signal: controller.signal }),
+      await Effect.runPromiseExit(
+        client.listRunSuites({ projectKey, runId: run.id }, { signal: controller.signal }),
+      ).then(valueFromExit),
     ).toMatchObject({
       runId: run.id,
       suites: [
@@ -138,28 +141,41 @@ describe('suite analytics clients', () => {
       ],
     });
     expect(
-      await client.getSuiteHistory(
-        { projectKey, suiteName: 'a/b' },
-        { limit: 1 },
-        { signal: controller.signal },
-      ),
+      await Effect.runPromiseExit(
+        client.getSuiteHistory(
+          { projectKey, suiteName: 'a/b' },
+          { limit: 1 },
+          { signal: controller.signal },
+        ),
+      ).then(valueFromExit),
     ).toEqual({
       suiteName: 'a/b',
       runsExamined: 1,
       exhausted: true,
       points: [point],
     });
-    expect(requests).toEqual([
-      { url: '/api/projects/demo/runs/run/suites', signal: controller.signal },
-      { url: '/api/projects/demo/suites/a%2Fb/history?limit=1', signal: controller.signal },
+    expect(requests).toMatchObject([
+      { url: '/api/projects/demo/runs/run/suites', signal: requests[0]?.signal },
+      { url: '/api/projects/demo/suites/a%2Fb/history?limit=1', signal: requests[1]?.signal },
     ]);
-    expect(await client.getSuiteHistory({ projectKey, suiteName: 'absent' }, {})).toEqual({
+    expect(requests.every(({ signal }) => signal instanceof AbortSignal)).toBe(true);
+    controller.abort();
+    expect(requests.every(({ signal }) => signal?.aborted)).toBe(true);
+    expect(
+      await Effect.runPromiseExit(
+        client.getSuiteHistory({ projectKey, suiteName: 'absent' }, {}),
+      ).then(valueFromExit),
+    ).toEqual({
       suiteName: 'absent',
       runsExamined: 1,
       exhausted: true,
       points: [],
     });
-    await expect(client.listRunSuites({ projectKey, runId: 'missing' })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(client.listRunSuites({ projectKey, runId: 'missing' })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({
       status: 404,
       code: 'RUN_NOT_FOUND',
     });
@@ -173,11 +189,17 @@ describe('suite analytics clients', () => {
       fetch: () => Promise.resolve(Response.json({})),
     });
 
-    await expect(client.listRunSuites({ projectKey, runId: run.id })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(client.listRunSuites({ projectKey, runId: run.id })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
     await expect(
-      client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {}),
+      Effect.runPromiseExit(client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {})).then(
+        valueFromExit,
+      ),
     ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
@@ -205,7 +227,9 @@ describe('suite analytics clients', () => {
     for (const client of clients) {
       for (const limit of [0, 51, 1.5]) {
         await expect(
-          client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, { limit }),
+          Effect.runPromiseExit(
+            client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, { limit }),
+          ).then(valueFromExit),
         ).rejects.toMatchObject({
           name: 'ApiError',
           status: 400,
@@ -228,23 +252,39 @@ describe('suite analytics clients', () => {
     };
 
     const client = createApiClient({ kind: 'snapshot', snapshot });
-    expect(await client.listRunSuites({ projectKey, runId: run.id })).toEqual({
+    expect(
+      await Effect.runPromiseExit(client.listRunSuites({ projectKey, runId: run.id })).then(
+        valueFromExit,
+      ),
+    ).toEqual({
       runId: run.id,
       suites: [{ suiteName: 'a/b', ...aggregate }],
     });
-    expect(await client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, { limit: 1 })).toEqual({
+    expect(
+      await Effect.runPromiseExit(
+        client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, { limit: 1 }),
+      ).then(valueFromExit),
+    ).toEqual({
       suiteName: 'a/b',
       runsExamined: 1,
       exhausted: true,
       points: [point],
     });
-    expect(await client.getSuiteHistory({ projectKey, suiteName: 'z' }, { limit: 50 })).toEqual({
+    expect(
+      await Effect.runPromiseExit(
+        client.getSuiteHistory({ projectKey, suiteName: 'z' }, { limit: 50 }),
+      ).then(valueFromExit),
+    ).toEqual({
       suiteName: 'z',
       runsExamined: 1,
       exhausted: true,
       points: [],
     });
-    await expect(client.listRunSuites({ projectKey, runId: 'missing' })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(client.listRunSuites({ projectKey, runId: 'missing' })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({
       status: 404,
       code: 'RUN_NOT_FOUND',
     });
@@ -254,13 +294,21 @@ describe('suite analytics clients', () => {
       snapshot: { ...snapshot, run: { ...run, status: 'running', finishedAt: undefined } },
     });
 
-    expect(await running.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {})).toEqual({
+    expect(
+      await Effect.runPromiseExit(
+        running.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {}),
+      ).then(valueFromExit),
+    ).toEqual({
       suiteName: 'a/b',
       runsExamined: 0,
       exhausted: true,
       points: [],
     });
-    expect(await running.listRunSuites({ projectKey, runId: run.id })).toEqual({
+    expect(
+      await Effect.runPromiseExit(running.listRunSuites({ projectKey, runId: run.id })).then(
+        valueFromExit,
+      ),
+    ).toEqual({
       runId: run.id,
       suites: [{ suiteName: 'a/b', ...aggregate }],
     });

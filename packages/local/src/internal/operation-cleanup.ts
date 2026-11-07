@@ -49,4 +49,55 @@ const withOperationCleanup = <A, E extends Error, R, E2 extends Error, R2>(
     }),
   );
 
-export { withOperationCleanup, OperationCleanup };
+/** Retains every failed release without changing the primary Cause classification. */
+class OperationReleases extends Context.Service<
+  OperationReleases,
+  readonly Exit.Exit<unknown, Error>[]
+>()('attest/OperationReleases') {}
+
+/** Retains completed work when mandatory release fails after success. */
+class OperationCompletion extends Context.Service<
+  OperationCompletion,
+  Exit.Exit<unknown, unknown>
+>()('attest/OperationCompletion') {}
+
+/** Applies primary precedence after the owner has attempted every release. */
+const finishOperation = <A, E extends Error>(
+  primary: Exit.Exit<A, E>,
+  releases: readonly Exit.Exit<unknown, Error>[],
+): Effect.Effect<A, E | Error> => {
+  const failed = releases.filter(Exit.isFailure);
+
+  if (failed.length === 0) return primary;
+
+  if (Exit.isSuccess(primary)) {
+    const cause: Cause.Cause<Error> = failed.reduce<Cause.Cause<Error>>(
+      (left, exit) => Cause.combine(left, exit.cause),
+      Cause.empty,
+    );
+
+    return Effect.failCause(
+      Cause.annotate(
+        Cause.annotate(cause, Context.make(OperationCompletion, primary)),
+        Context.make(OperationReleases, releases),
+      ),
+    );
+  }
+
+  const previous =
+    Context.getOrUndefined(Cause.annotations(primary.cause), OperationReleases) ?? [];
+
+  return Effect.failCause(
+    Cause.annotate(primary.cause, Context.make(OperationReleases, [...previous, ...releases]), {
+      overwrite: true,
+    }),
+  );
+};
+
+export {
+  withOperationCleanup,
+  OperationCleanup,
+  OperationReleases,
+  OperationCompletion,
+  finishOperation,
+};

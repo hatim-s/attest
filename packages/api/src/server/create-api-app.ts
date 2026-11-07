@@ -156,20 +156,35 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
     const runControl = requireControl();
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
 
-    return context.json({ items: await runControl.listTests(projectKey) });
+    return context.json({
+      items: readExitValue(
+        await Effect.runPromiseExit(runControl.listTests(projectKey), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    });
   });
   app.on(apiRoutes.startRun.method, apiRoutes.startRun.path, async (context) => {
     const runControl = requireControl();
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
     const request = await parseJsonBody(runStartRequestSchema, context.req.raw);
 
-    return context.json(await runControl.startRun(projectKey, request), 201);
+    return context.json(
+      readExitValue(await Effect.runPromiseExit(runControl.startRun(projectKey, request))),
+      201,
+    );
   });
   app.on(apiRoutes.cancelRun.method, apiRoutes.cancelRun.path, async (context) => {
     const runControl = requireControl();
     const { projectKey, runId } = parseInput(runParamsSchema, context.req.param());
 
-    return context.json(await runControl.cancelRun(projectKey, runId));
+    return context.json(
+      readExitValue(
+        await Effect.runPromiseExit(runControl.cancelRun(projectKey, runId), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
   });
 
   // Mounted Hono apps do not carry their notFound handler into the host.

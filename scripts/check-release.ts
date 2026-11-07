@@ -115,28 +115,25 @@ assert.equal(parseWithSchema(cliResultSchema, {}).ok, false);
 assert.ok(dashboardHtml.includes('<html'));
 const schema = JSON.parse(await readFile(new URL(import.meta.resolve('@attest/schemas/generated/project.json')), 'utf8'));
 assert.ok(schema.$schema);
-await Effect.runPromise(withStoreScope((owner) => Effect.gen(function* () {
-const store = yield* openStore('release-check.db', owner);
-assert.deepEqual(yield* store.runs.listRuns(), { items: [] });
-// Join the foreign server lifetime before the store owner releases its handles.
-yield* Effect.promise(async () => {
-const server = await startViewServer({
-  catalog: createSingleProjectCatalog({ key: 'release', name: 'Release' }, store.runs),
-  close: async () => {},
-  indexHtml: dashboardHtml,
-  port: 0,
-});
-try {
-  const response = await fetch(server.url);
-  assert.equal(response.status, 200);
-  assert.ok((await response.text()).includes('window.__ATTEST_BOOTSTRAP__='));
-  const runs = await fetch(new URL('/api/projects/release/runs', server.url));
-  assert.deepEqual(await runs.json(), { items: [] });
-} finally {
-  await server.close();
-}
-});
-})));
+await Effect.runPromise(withStoreScope((owner) => Effect.scoped(Effect.gen(function* () {
+  const store = yield* openStore('release-check.db', owner);
+  assert.deepEqual(yield* store.runs.listRuns(), { items: [] });
+  const server = yield* startViewServer({
+    catalog: createSingleProjectCatalog({ key: 'release', name: 'Release' }, store.runs),
+    close: () => Effect.void,
+    indexHtml: dashboardHtml,
+    port: 0,
+  });
+  try {
+    const response = yield* Effect.promise(() => fetch(server.url));
+    assert.equal(response.status, 200);
+    assert.ok((yield* Effect.promise(() => response.text())).includes('window.__ATTEST_BOOTSTRAP__='));
+    const runs = yield* Effect.promise(() => fetch(new URL('/api/projects/release/runs', server.url)));
+    assert.deepEqual(yield* Effect.promise(() => runs.json()), { items: [] });
+  } finally {
+    yield* server.close();
+  }
+}))));
 `,
     );
     execFileSync('node', ['verify.mjs'], {

@@ -96,17 +96,20 @@ const registerRootCommands = ({
       const scope = viewScope(options, registryPath);
 
       await withProcessSignals((signal) =>
-        runViewCommand({
-          onReady: async ({ url }) => {
-            io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`);
+        // Commander owns the native view execution root.
+        Effect.runPromiseExit(
+          runViewCommand({
+            onReady: async ({ url }) => {
+              io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`);
 
-            if (options.open) await openBrowser(url);
-          },
-          port: options.port,
-          scope,
-          signal,
-          workingDirectory,
-        }),
+              if (options.open) await openBrowser(url);
+            },
+            port: options.port,
+            scope,
+            signal,
+            workingDirectory,
+          }),
+        ).then(readExitValue),
       );
     });
 

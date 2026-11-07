@@ -780,3 +780,21 @@ their native interfaces after S7 integration and remove the remaining S8b forwar
 Remaining Promise CLI actions and guided metric loading use exact-file S9b bridges. Test
 runners are permanent execution roots. These staging bridges do not establish completion of
 the CLI application lifetime migration.
+
+## S9a native dashboard operations
+
+`RunControl` and API client operations return native Effects with captured dependencies.
+The launcher acquisition captures the process-root CancellationRegistry; its methods require no
+services. Dashboard starts still spawn a detached CLI, which owns its database and run scope.
+Start admission is masked through its bounded handshake and process cleanup. HTTP disconnect
+does not cancel an accepted start, and uncertain cleanup never authorizes another launch.
+Hono read/cancel handlers and TanStack query/mutation callbacks are explicit execution roots.
+Remote mutation completion remains unknown after an opaque transport failure; clients do not retry it.
+
+`startViewServer` requires Scope. Its handle exposes native `close` and `closed` Effects.
+Close stops admission, joins the listener and accepted Hono callbacks, then invokes catalog release
+with the primary Exit. The view command owns its StoreScope outside that server scope. Startup
+failure therefore reaches the store owner before release. Cleanup receipts retain every failed
+release; primary typed failures, defects and interruption keep their Cause classification.
+The PromiseStoreOwner helper remains for the separate S8b consumers. These are deliberate
+TypeScript API breaks; wire schemas, status codes, and the detached CLI protocol are unchanged.

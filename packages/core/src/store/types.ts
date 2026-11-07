@@ -66,10 +66,16 @@ interface ProjectCatalog {
  * are allowed.
  */
 interface RunControl {
-  listTests(projectKey: string): Promise<TestSummary[]>;
+  listTests(projectKey: string): Effect.Effect<TestSummary[], StoreError>;
   /** Resolves once the run is recorded, so its id can be read straight away. */
-  startRun(projectKey: string, request: RunStartRequest): Promise<{ runId: string }>;
-  cancelRun(projectKey: string, runId: string): Promise<{ outcome: RunCancelOutcome }>;
+  startRun(
+    projectKey: string,
+    request: RunStartRequest,
+  ): Effect.Effect<{ runId: string }, StoreError>;
+  cancelRun(
+    projectKey: string,
+    runId: string,
+  ): Effect.Effect<{ outcome: RunCancelOutcome }, StoreError>;
 }
 
 /** Defines durable run writes; reads come from RunSource. */

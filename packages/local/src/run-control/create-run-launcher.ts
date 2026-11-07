@@ -1,5 +1,4 @@
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../internal/effect-exit.js';
 import {
   parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
@@ -21,7 +20,12 @@ type RunLauncherOptions = {
 };
 
 /** Says why the project could not be loaded or changed, in the CLI's own terms. */
-const toProjectUnloadable = (error: LocalError): StoreError => {
+const toProjectUnloadable = (error: Error): StoreError => {
+  if (!(error instanceof LocalError))
+    return new StoreError('PROJECT_UNLOADABLE', 'The project could not be loaded or changed.', {
+      cause: error,
+      details: { code: 'internal_error', message: 'The project could not be loaded or changed.' },
+    });
   const { code, message, path, hint, details } = error;
 
   return new StoreError('PROJECT_UNLOADABLE', message, {
@@ -35,84 +39,75 @@ const toProjectUnloadable = (error: LocalError): StoreError => {
  * cross-process cancellation registry, so the dashboard can cancel runs a terminal started.
  * Every catalog project with a local root can be controlled.
  */
-const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl => {
-  const cancellationRegistry = new Map();
+const createRunLauncher = Effect.fn('createRunLauncher')(function* ({
+  catalog,
+  command,
+}: RunLauncherOptions) {
+  const cancellationRegistry = yield* CancellationRegistry;
 
-  const projectRoot = async (projectKey: string): Promise<string> => {
-    // EFFECT-BRIDGE(S9a)
-    const project = valueFromExit(await Effect.runPromiseExit(catalog.listProjects())).find(
-      ({ key }) => key === projectKey,
-    );
+  const projectRoot = Effect.fn('launcher.projectRoot')(function* (projectKey: string) {
+    const project = (yield* catalog.listProjects()).find(({ key }) => key === projectKey);
 
-    if (project === undefined) {
-      throw new StoreError('PROJECT_NOT_FOUND', `Project ${projectKey} is not served here.`);
-    }
-
-    if (project.root === undefined) {
-      throw new StoreError(
-        'CONTROL_UNAVAILABLE',
-        `Project ${projectKey} has no local directory to run in.`,
+    if (project === undefined)
+      return yield* Effect.fail(
+        new StoreError('PROJECT_NOT_FOUND', `Project ${projectKey} is not served here.`),
       );
-    }
+
+    if (project.root === undefined)
+      return yield* Effect.fail(
+        new StoreError(
+          'CONTROL_UNAVAILABLE',
+          `Project ${projectKey} has no local directory to run in.`,
+        ),
+      );
 
     return project.root;
-  };
+  });
 
   return {
-    listTests: async (projectKey) => {
-      const root = await projectRoot(projectKey);
+    listTests: Effect.fn('launcher.listTests')(function* (projectKey) {
+      const root = yield* projectRoot(projectKey);
 
-      try {
-        return await listProjectTests(root);
-      } catch (error: unknown) {
-        if (error instanceof LocalError) throw toProjectUnloadable(error);
+      return yield* listProjectTests(root).pipe(Effect.mapError(toProjectUnloadable));
+    }),
+    startRun: Effect.fn('launcher.startRun')(function* (projectKey, request) {
+      const root = yield* projectRoot(projectKey);
 
-        throw error;
-      }
-    },
-    startRun: async (projectKey, request) =>
-      spawnEvalRun({
+      return yield* spawnEvalRun({
         command,
-        projectRoot: await projectRoot(projectKey),
+        projectRoot: root,
         document: toEvalRunDocument(request),
         startTimeoutMs: START_TIMEOUT_MS,
-      }),
-    cancelRun: async (projectKey, runId) => {
-      const root = await projectRoot(projectKey);
-      // Run ids name registry files; anything but a run id cannot name a run.
+      });
+    }, Effect.uninterruptible),
+    cancelRun: Effect.fn('launcher.cancelRun')(function* (projectKey, runId) {
+      const root = yield* projectRoot(projectKey);
+      // Run ids name registry files; validate before resolving a registry path.
       const parsed = parseWithSchema(evalCancelRequestSchema.fields.run_id, runId);
 
-      if (!parsed.ok) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
+      if (!parsed.ok)
+        return yield* Effect.fail(new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`));
 
-      try {
-        const { status } = valueFromExit(
-          // EFFECT-BRIDGE(S9a)
-          await Effect.runPromiseExit(
-            cancelConfiguration(
-              {
-                schema: COMMAND_REQUEST_SCHEMA_ID,
-                command: 'eval.cancel',
-                run_id: parsed.value,
-                output: 'json',
-              },
-              { project: root, workingDirectory: root },
-            ).pipe(Effect.provideService(CancellationRegistry, cancellationRegistry)),
-          ),
-        );
+      const { status } = yield* cancelConfiguration(
+        {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'eval.cancel',
+          run_id: parsed.value,
+          output: 'json',
+        },
+        { project: root, workingDirectory: root },
+      ).pipe(
+        Effect.provideService(CancellationRegistry, cancellationRegistry),
+        Effect.mapError((error) =>
+          error instanceof LocalError && error.code === 'resource_not_found'
+            ? new StoreError('RUN_NOT_FOUND', error.message, { cause: error })
+            : toProjectUnloadable(error),
+        ),
+      );
 
-        return { outcome: status };
-      } catch (error: unknown) {
-        if (!(error instanceof LocalError)) throw error;
-
-        if (error.code === 'resource_not_found') {
-          throw new StoreError('RUN_NOT_FOUND', error.message, { cause: error });
-        }
-
-        // A locked or broken project, or a run process that cannot be signalled.
-        throw toProjectUnloadable(error);
-      }
-    },
-  };
-};
+      return { outcome: status };
+    }),
+  } satisfies RunControl;
+});
 
 export { createRunLauncher };

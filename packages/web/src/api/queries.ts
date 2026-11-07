@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { useEffect } from 'react';
 import type { ApiClient } from '@attest/api/client';
 import {
@@ -16,7 +17,7 @@ import { useApiClient } from './api-client-context.js';
 const projectsQueryOptions = (client: ApiClient) =>
   queryOptions({
     queryKey: ['projects'],
-    queryFn: async ({ signal }) => (await client.listProjects({ signal })).items,
+    queryFn: async ({ signal }) => (await Effect.runPromise(client.listProjects({ signal }))).items,
   });
 
 /** Lets the projects page reuse the catalog the `/` redirect already loaded. */
@@ -29,7 +30,7 @@ const useProjects = () => useQuery(projectsQueryOptions(useApiClient()));
 const runsQueryOptions = (client: ApiClient, projectKey: string) =>
   queryOptions({
     queryKey: ['runs', projectKey],
-    queryFn: ({ signal }) => client.listRuns({ projectKey }, {}, { signal }),
+    queryFn: ({ signal }) => Effect.runPromise(client.listRuns({ projectKey }, {}, { signal })),
     // An idle page still refreshes slowly, so a run started from a terminal shows up.
     refetchInterval: (query) => {
       if (client.mode.kind !== 'live') return false;
@@ -54,7 +55,7 @@ const useRun = (projectKey: string, runId: string) => {
 
   return useQuery({
     queryKey: ['run', projectKey, runId],
-    queryFn: ({ signal }) => client.getRun({ projectKey, runId }, { signal }),
+    queryFn: ({ signal }) => Effect.runPromise(client.getRun({ projectKey, runId }, { signal })),
     refetchInterval: (query) =>
       client.mode.kind === 'live' && query.state.data?.status === 'running' ? 2_000 : false,
   });
@@ -75,10 +76,12 @@ const useCases = (projectKey: string, runId: string, status: RunStatus | undefin
   return useInfiniteQuery({
     queryKey: ['cases', projectKey, runId],
     queryFn: ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
-      client.listCaseSummaries(
-        { projectKey, runId },
-        { cursor: pageParam, limit: 250 },
-        { signal },
+      Effect.runPromise(
+        client.listCaseSummaries(
+          { projectKey, runId },
+          { cursor: pageParam, limit: 250 },
+          { signal },
+        ),
       ),
     initialPageParam: undefined,
     getNextPageParam: (page) => page.nextCursor,
@@ -108,7 +111,8 @@ const caseQueryOptions = (
 ) =>
   queryOptions({
     queryKey: ['case', projectKey, runId, suiteName, caseId, status],
-    queryFn: ({ signal }) => client.getCase({ projectKey, runId, suiteName, caseId }, { signal }),
+    queryFn: ({ signal }) =>
+      Effect.runPromise(client.getCase({ projectKey, runId, suiteName, caseId }, { signal })),
     refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
   });
 
@@ -120,7 +124,8 @@ const diffQueryOptions = (
 ) =>
   queryOptions({
     queryKey: ['diff', projectKey, baseRunId, candidateRunId, baseStatus, candidateStatus],
-    queryFn: ({ signal }) => client.getDiff({ projectKey, baseRunId, candidateRunId }, { signal }),
+    queryFn: ({ signal }) =>
+      Effect.runPromise(client.getDiff({ projectKey, baseRunId, candidateRunId }, { signal })),
     refetchInterval:
       client.mode.kind === 'live' && (baseStatus === 'running' || candidateStatus === 'running')
         ? 2_000
@@ -144,7 +149,8 @@ const runSuitesQueryOptions = (
 ) =>
   queryOptions({
     queryKey: ['run-suites', projectKey, runId, status],
-    queryFn: ({ signal }) => client.listRunSuites({ projectKey, runId: runId ?? '' }, { signal }),
+    queryFn: ({ signal }) =>
+      Effect.runPromise(client.listRunSuites({ projectKey, runId: runId ?? '' }, { signal })),
     enabled: runId !== undefined,
     refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
   });
@@ -164,7 +170,10 @@ const newestCompletedRunQueryOptions = (client: ApiClient, projectKey: string) =
       let cursor: string | undefined;
 
       do {
-        const page = await client.listRuns({ projectKey }, { cursor }, { signal });
+        const page = await Effect.runPromise(
+          client.listRuns({ projectKey }, { cursor }, { signal }),
+        );
+
         const run = page.items.find((item) => item.status !== 'running');
 
         if (run !== undefined) return run;
@@ -190,7 +199,7 @@ const suiteHistoryQueryOptions = (
   queryOptions({
     queryKey: ['suite-history', projectKey, suiteName, limit],
     queryFn: ({ signal }) =>
-      client.getSuiteHistory({ projectKey, suiteName }, { limit }, { signal }),
+      Effect.runPromise(client.getSuiteHistory({ projectKey, suiteName }, { limit }, { signal })),
     refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
   });
 
@@ -204,7 +213,8 @@ const useTests = (projectKey: string) => {
 
   return useQuery({
     queryKey: ['tests', projectKey],
-    queryFn: async ({ signal }) => (await client.listTests({ projectKey }, { signal })).items,
+    queryFn: async ({ signal }) =>
+      (await Effect.runPromise(client.listTests({ projectKey }, { signal }))).items,
   });
 };
 
@@ -214,7 +224,8 @@ const useStartRun = (projectKey: string) => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (request: RunStartRequest) => client.startRun({ projectKey }, request),
+    mutationFn: (request: RunStartRequest) =>
+      Effect.runPromise(client.startRun({ projectKey }, request)),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runs', projectKey] }),
   });
 };
@@ -225,7 +236,7 @@ const useCancelRun = (projectKey: string, runId: string) => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => client.cancelRun({ projectKey, runId }),
+    mutationFn: () => Effect.runPromise(client.cancelRun({ projectKey, runId })),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['run', projectKey, runId] }),

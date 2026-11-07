@@ -1,3 +1,9 @@
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import { OperationReleases } from '../../internal/operation-cleanup.js';
+import * as Scope from 'effect/Scope';
+import * as Exit from 'effect/Exit';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
@@ -9,12 +15,22 @@ import { join } from 'node:path';
 import { dashboardHtml } from '@attest/web/embedded';
 import { parseWithSchemaSync, AGENT_PROTOCOL } from '@attest/contracts';
 import { createSingleProjectCatalog, type RunControl, type RunStore } from '@attest/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
 
 import { startViewServer } from '../start-view-server.js';
 import type { ViewServerHandle } from '../types.js';
+
+/** Acquires a server under a test-owned scope and observes release after close. */
+const startOwnedServer = async (options: Parameters<typeof startViewServer>[0]) => {
+  const scope = Effect.runSync(Scope.make());
+  onTestFinished(() => Effect.runPromiseExit(Scope.close(scope, Exit.void)).then(valueFromExit));
+
+  return Effect.runPromiseExit(
+    startViewServer(options).pipe(Effect.provideService(Scope.Scope, scope)),
+  ).then(valueFromExit);
+};
 
 const directories: string[] = [];
 
@@ -93,9 +109,14 @@ const startFixtureServer = async (
 ): Promise<ViewServerHandle> => {
   const store = await openStore(storePath);
 
-  const server = await startViewServer({
+  const server = await startOwnedServer({
     catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
-    close: () => store.close(),
+    close: () =>
+      Effect.tryPromise({
+        try: () => store.close(),
+        catch: (error) =>
+          error instanceof Error ? error : new Error('Test store close failed.', { cause: error }),
+      }),
     control,
     indexHtml: dashboardHtml,
   });
@@ -106,7 +127,11 @@ const startFixtureServer = async (
 };
 
 afterEach(async () => {
-  await Promise.all(servers.splice(0).map(async (server) => server.close()));
+  await Promise.all(
+    servers
+      .splice(0)
+      .map(async (server) => Effect.runPromiseExit(server.close()).then(valueFromExit)),
+  );
   await Promise.all(
     directories.splice(0).map(async (directory) => rm(directory, { recursive: true })),
   );
@@ -174,16 +199,16 @@ describe('view server', () => {
     const calls: string[] = [];
 
     const control: RunControl = {
-      listTests: () => Promise.resolve([]),
+      listTests: () => Effect.succeed([]),
       startRun: (projectKey) => {
         calls.push(`start ${projectKey}`);
 
-        return Promise.resolve({ runId: 'run-new' });
+        return Effect.succeed({ runId: 'run-new' });
       },
       cancelRun: (_projectKey, runId) => {
         calls.push(`cancel ${runId}`);
 
-        return Promise.resolve({ outcome: 'cancellation_requested' });
+        return Effect.succeed({ outcome: 'cancellation_requested' });
       },
     };
 
@@ -250,7 +275,7 @@ describe('view server', () => {
 
     let closed = false;
 
-    const server = await startViewServer({
+    const server = await startOwnedServer({
       indexHtml: dashboardHtml,
       catalog: {
         listProjects: () =>
@@ -265,18 +290,18 @@ describe('view server', () => {
       close: () => {
         closed = true;
 
-        return Promise.resolve();
+        return Effect.void;
       },
     });
 
     const request = fetch(`${server.origin}/api/projects`).then((response) => response.json());
     await entered;
-    const closing = server.close();
+    const closing = Effect.runPromiseExit(server.close()).then(valueFromExit);
     expect(closed).toBe(false);
     release();
     await expect(request).resolves.toEqual({ items: [] });
     await closing;
-    await server.closed;
+    await Effect.runPromiseExit(server.closed).then(valueFromExit);
     expect(closed).toBe(true);
   });
   it('preserves startup failure and retains a failed close callback', async () => {
@@ -286,14 +311,36 @@ describe('view server', () => {
     const cleanup = new Error('catalog cleanup failed');
 
     try {
-      await expect(
-        startViewServer({
-          indexHtml: dashboardHtml,
-          catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
-          port: Number(new URL(occupied.origin).port),
-          close: () => Promise.reject(cleanup),
-        }),
-      ).rejects.toMatchObject({ code: 'EADDRINUSE', cleanupFailure: cleanup });
+      const outcome = await Effect.runPromiseExit(
+        Effect.scoped(
+          startViewServer({
+            indexHtml: dashboardHtml,
+            catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
+            port: Number(new URL(occupied.origin).port),
+            close: (primary) => {
+              expect(Exit.isFailure(primary)).toBe(true);
+
+              if (Exit.isFailure(primary))
+                expect(primary.cause.reasons[0]).toMatchObject({ error: { code: 'EADDRINUSE' } });
+
+              return Effect.fail(cleanup);
+            },
+          }),
+        ),
+      );
+
+      expect(Exit.isFailure(outcome)).toBe(true);
+
+      if (Exit.isFailure(outcome)) {
+        expect(outcome.cause.reasons[0]).toMatchObject({ error: { code: 'EADDRINUSE' } });
+        const receipts = Context.getOrUndefined(
+          Cause.annotations(outcome.cause),
+          OperationReleases,
+        );
+        expect(receipts).toHaveLength(1);
+        expect(receipts?.[0]).toEqual(Exit.fail(cleanup));
+        expect(Cause.hasDies(outcome.cause)).toBe(false);
+      }
     } finally {
       await store.close();
     }
