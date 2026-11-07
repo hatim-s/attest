@@ -261,7 +261,8 @@ describe('runConfiguration', () => {
   });
 
   it('executes and persists only sampled folder/tag matches and compares their shared baseline cases', async () => {
-    const sampled = Array.from({ length: 100 }, (_, index): TestCase => ({
+    // Each case launches a real agent process. Twelve cases still exercise filtering and sampling.
+    const sampled = Array.from({ length: 12 }, (_, index): TestCase => ({
       id: `sample-${index}`,
       input: 'Paris',
       params: { index },
@@ -294,7 +295,7 @@ describe('runConfiguration', () => {
       test_ids: ['smoke'],
       folders: ['billing'],
       tags: ['smoke'],
-      sample: { count: 25, seed: 'integration' },
+      sample: { count: 3, seed: 'integration' },
       baseline_run_id: baseline.runId,
     });
 
@@ -302,13 +303,13 @@ describe('runConfiguration', () => {
 
     if (started?.event !== 'run_started') throw new Error('Expected sampled run start.');
     expect(started.data.selection).toMatchObject({
-      total_cases: 101,
-      matched_cases: 50,
-      selected_cases: 25,
+      total_cases: 13,
+      matched_cases: 6,
+      selected_cases: 3,
     });
-    expect(selected.events.filter((event) => event.event === 'case_started')).toHaveLength(25);
+    expect(selected.events.filter((event) => event.event === 'case_started')).toHaveLength(3);
     expect(selected.final).toMatchObject({
-      result: { result: { selection: started.data.selection, summary: { total_cases: 25 } } },
+      result: { result: { selection: started.data.selection, summary: { total_cases: 3 } } },
     });
 
     const store = await openStore(join(root, '.attest', 'runs.db'));
@@ -321,7 +322,7 @@ describe('runConfiguration', () => {
         JSON.parse(stored.run.configJson),
       ).snapshot;
 
-      expect(stored.cases).toHaveLength(25);
+      expect(stored.cases).toHaveLength(3);
       expect(snapshot.selected_cases.map(({ case_id }) => case_id).sort()).toEqual(
         stored.cases.map(({ caseId }) => caseId).sort(),
       );
@@ -330,12 +331,12 @@ describe('runConfiguration', () => {
       ).toBe(true);
       const diff = await executeB2(diffRuns(store.runs, baseline.runId, selected.runId));
       expect(diff.summary.coverage).toEqual({
-        sharedCases: 25,
-        baseOnlyCases: 76,
+        sharedCases: 3,
+        baseOnlyCases: 10,
         candidateOnlyCases: 0,
       });
       expect(diff.summary.counts.removed).toBe(0);
-      expect(diff.transitions).toHaveLength(25);
+      expect(diff.transitions).toHaveLength(3);
     } finally {
       await store.close();
     }

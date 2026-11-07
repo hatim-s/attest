@@ -233,7 +233,7 @@ const assertCommand = async (
 
   for (const path of expectation.artifacts_present ?? []) {
     const artifact = join(root, materialize(path, runId));
-    await expect(access(artifact), `${label}: ${artifact}`).resolves.toBeUndefined();
+    await expect(access(artifact), `${label}: ${artifact}`).resolves.not.toThrow();
 
     if (artifact.endsWith('.html')) {
       const report = await readFile(artifact, 'utf8');
@@ -309,7 +309,7 @@ describe('quickstart journeys through the packed CLI', () => {
       expect(result.readiness?.status).toBe(200);
       expect(result.readiness?.body).toContain('<!doctype html>');
 
-      if (scope === 'store') await expect(access(join(root, 'custom.db'))).resolves.toBeUndefined();
+      if (scope === 'store') await expect(access(join(root, 'custom.db'))).resolves.not.toThrow();
       await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
     },
   );

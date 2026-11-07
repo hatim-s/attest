@@ -88,7 +88,7 @@ describe('projects commands', () => {
       ok: false,
       error: { code: 'registry_write_failed' },
     });
-    await expect(access(join(parent, 'second', 'attest.project.json'))).resolves.toBeUndefined();
+    await expect(access(join(parent, 'second', 'attest.project.json'))).resolves.not.toThrow();
   });
 
   it('rejects web --all together with --store', async () => {
