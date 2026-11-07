@@ -139,6 +139,7 @@ const executeEvalRun = (
       workingDirectory: context.workingDirectory,
     }).pipe(Effect.provideContext(context.evalContext));
 
+    let uploadNotice: string | undefined;
     let publishTerminal: (failure?: SerializedCliFailure) => void = () => {};
 
     const events = yield* collectEvalEvents(source, {
@@ -174,6 +175,8 @@ const executeEvalRun = (
         context.io.output(renderHumanFinalResult(result));
       }
 
+      if (uploadNotice !== undefined) context.io.error(uploadNotice);
+
       return result.exit_code;
     });
 
@@ -199,10 +202,10 @@ const executeEvalRun = (
         ),
       );
 
-      if (Exit.isSuccess(uploaded)) context.io.error(uploaded.value.url);
+      if (Exit.isSuccess(uploaded)) uploadNotice = uploaded.value.url;
       else {
         if (Cause.hasInterrupts(uploaded.cause)) return yield* Effect.failCause(uploaded.cause);
-        context.io.error(renderCliError(serializeCliError(Cause.squash(uploaded.cause)).error));
+        uploadNotice = renderCliError(serializeCliError(Cause.squash(uploaded.cause)).error);
       }
     }
 

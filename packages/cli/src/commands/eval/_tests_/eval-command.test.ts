@@ -914,3 +914,29 @@ it('aborts and joins an admitted run after a stream failure while keeping signal
     controller.abort();
   }
 });
+
+it('prints the terminal result before the upload URL', async () => {
+  run.mockReturnValue(Effect.succeed(eventSource(completedEvents())));
+  const lines: string[] = [];
+  const client = { baseUrl: 'https://cloud.test', request: vi.fn(), upload: vi.fn() };
+
+  const code = await executeCli(['eval', 'run', '--all', '--upload', '--output', 'json'], {
+    workingDirectory: process.cwd(),
+    interaction: nonInteractive(),
+    io: { output: (line) => lines.push(line), error: (line) => lines.push(line) },
+    services: {
+      ...services,
+      cloud: {
+        authenticatedCloudClient: () => Effect.succeed(client),
+        resolveCloudUploadProject: () =>
+          Effect.succeed({ root: process.cwd(), projectId: 'p', client, signal: undefined }),
+        uploadCloudRun: () => Effect.succeed({ url: 'https://cloud.test/run', unchanged: false }),
+      },
+    },
+  });
+
+  expect(code).toBe(0);
+  expect(lines).toHaveLength(2);
+  expect(JSON.parse(lines[0]!)).toMatchObject({ ok: true });
+  expect(lines[1]).toBe('https://cloud.test/run');
+});
