@@ -84,7 +84,7 @@ const runCrashWriter = async (
   return new Promise((resolveExit, reject) => {
     const child = spawn(
       // These loader flags belong to Node; Bun otherwise runs the loader as the entrypoint.
-      process.versions.bun === undefined ? process.execPath : 'node',
+      process.versions.bun === undefined ? process.execPath : '/usr/local/bin/node',
       ['--experimental-strip-types', '--experimental-loader', loaderPath, writerPath, databasePath],
       { cwd: dirname(databasePath) },
     );
