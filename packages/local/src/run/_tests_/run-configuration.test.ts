@@ -1,3 +1,13 @@
+import * as Deferred from 'effect/Deferred';
+import * as Fiber from 'effect/Fiber';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import {
+  EvalApplicationCompletion,
+  applicationStore,
+} from '../../commands/eval/eval-application.js';
+import { evalApplicationFixture } from './eval-application-fixture.js';
+import { withEvalApplication } from '../../commands/eval/eval-application.js';
 import { createClient } from '@libsql/client';
 import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
@@ -180,19 +190,21 @@ const startEval = async (
   root: string,
   selection: Partial<EvalRunRequest>,
 ): Promise<AsyncIterable<EvalEvent>> =>
-  runConfiguration(
-    parseWithSchemaSync(evalRunRequestSchema, {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'eval.run',
-      output: 'json',
-      ...selection,
-    }),
-    {
-      argv: ['eval', 'run'],
-      signal: new AbortController().signal,
-      terminalFailure,
-      workingDirectory: root,
-    },
+  evalApplicationFixture(
+    runConfiguration(
+      parseWithSchemaSync(evalRunRequestSchema, {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'eval.run',
+        output: 'json',
+        ...selection,
+      }),
+      {
+        argv: ['eval', 'run'],
+        signal: new AbortController().signal,
+        terminalFailure,
+        workingDirectory: root,
+      },
+    ),
   );
 
 /** Drains an eval stream and returns its run id and final result. */
@@ -610,15 +622,19 @@ describe('runConfiguration', () => {
     if (firstRunId === undefined) throw new Error('Expected a registered eval run.');
 
     await expect(
-      cancelConfiguration(
-        {
-          schema: COMMAND_REQUEST_SCHEMA_ID,
-          command: 'eval.cancel',
-          run_id: firstRunId,
-          output: 'json',
-        },
-        { workingDirectory: project },
-      ),
+      Effect.runPromiseExit(
+        withEvalApplication(
+          cancelConfiguration(
+            {
+              schema: COMMAND_REQUEST_SCHEMA_ID,
+              command: 'eval.cancel',
+              run_id: firstRunId,
+              output: 'json',
+            },
+            { workingDirectory: project },
+          ),
+        ),
+      ).then(valueFromExit),
     ).resolves.toMatchObject({ runId: firstRunId, status: 'cancellation_requested' });
 
     await writeFile(releasePath, 'release');
@@ -661,4 +677,111 @@ describe('runConfiguration', () => {
       await store.close();
     }
   }, 15_000);
+});
+
+it('keeps an eval alive after its action scope returns and joins it before database release', async () => {
+  const root = await createEvalProject();
+  let source: AsyncIterable<EvalEvent> | undefined;
+  await Effect.runPromiseExit(
+    withEvalApplication(
+      Effect.gen(function* () {
+        const first = yield* applicationStore(root);
+        expect(yield* applicationStore(root)).toBe(first);
+        source = yield* Effect.scoped(
+          runConfiguration(
+            parseWithSchemaSync(evalRunRequestSchema, {
+              schema: COMMAND_REQUEST_SCHEMA_ID,
+              command: 'eval.run',
+              output: 'json',
+              all: true,
+            }),
+            {
+              argv: ['eval', 'run'],
+              signal: new AbortController().signal,
+              terminalFailure,
+              workingDirectory: root,
+            },
+          ),
+        );
+        // The action returns without consuming progress. The application still owns the run.
+      }),
+    ),
+  ).then(valueFromExit);
+
+  if (source === undefined) throw new Error('Expected an event source.');
+  const outcome = await collectEval(source);
+  const store = await openStore(join(root, '.attest', 'runs.db'));
+
+  try {
+    expect(await executeB2(store.runs.getRun(outcome.runId))).toMatchObject({
+      status: 'completed',
+    });
+    expect(await readdir(join(root, '.attest', 'eval-runs'))).toEqual([]);
+  } finally {
+    await store.close();
+  }
+});
+
+it('native root interruption cancels as input and joins evidence before propagating interruption', async () => {
+  const root = await createEvalProject({
+    agentSource: ECHO_AGENT.replace(
+      'const request = JSON.parse(source);',
+      'const request = JSON.parse(source); await new Promise(resolve => setTimeout(resolve, 10000));',
+    ),
+  });
+
+  await Effect.runPromiseExit(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ready = yield* Deferred.make<AsyncIterable<EvalEvent>>();
+
+        const fiber = yield* Effect.forkScoped(
+          withEvalApplication(
+            Effect.gen(function* () {
+              const source = yield* runConfiguration(
+                parseWithSchemaSync(evalRunRequestSchema, {
+                  schema: COMMAND_REQUEST_SCHEMA_ID,
+                  command: 'eval.run',
+                  output: 'json',
+                  all: true,
+                }),
+                {
+                  argv: ['eval', 'run'],
+                  signal: new AbortController().signal,
+                  terminalFailure,
+                  workingDirectory: root,
+                },
+              );
+
+              yield* Deferred.succeed(ready, source);
+              yield* Effect.never;
+            }),
+          ),
+        );
+
+        const source = yield* Deferred.await(ready);
+        yield* Effect.sleep(100);
+        yield* Fiber.interrupt(fiber);
+        const exit = yield* Fiber.await(fiber);
+        expect(exit._tag).toBe('Failure');
+
+        if (exit._tag === 'Failure') {
+          expect(Cause.hasInterrupts(exit.cause)).toBe(true);
+          expect(
+            Context.getOrUndefined(Cause.annotations(exit.cause), EvalApplicationCompletion),
+          ).toHaveLength(1);
+        }
+
+        const outcome = yield* Effect.promise(() => collectEval(source));
+        expect(outcome.final).toMatchObject({
+          exit_code: 130,
+          result: { ok: false, error: { code: 'cancelled' } },
+        });
+        expect(outcome.events.some((event) => event.event === 'case_completed')).toBe(true);
+        expect(yield* Effect.promise(() => readdir(join(root, '.attest', 'eval-runs')))).toEqual(
+          [],
+        );
+      }),
+    ),
+  ).then(valueFromExit);
 });

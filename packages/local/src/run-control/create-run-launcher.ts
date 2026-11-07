@@ -8,6 +8,7 @@ import {
 import { StoreError, type ProjectCatalog, type RunControl } from '@attest/core';
 
 import { LocalError } from '../errors/local-error.js';
+import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
 import { cancelConfiguration } from '../run/run-configuration.js';
 import { toEvalRunDocument } from './eval-run-document.js';
 import { listProjectTests } from './list-project-tests.js';
@@ -35,6 +36,8 @@ const toProjectUnloadable = (error: LocalError): StoreError => {
  * Every catalog project with a local root can be controlled.
  */
 const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl => {
+  const cancellationRegistry = new Map();
+
   const projectRoot = async (projectKey: string): Promise<string> => {
     // EFFECT-BRIDGE(S9a)
     const project = valueFromExit(await Effect.runPromiseExit(catalog.listProjects())).find(
@@ -82,14 +85,19 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
       if (!parsed.ok) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
 
       try {
-        const { status } = await cancelConfiguration(
-          {
-            schema: COMMAND_REQUEST_SCHEMA_ID,
-            command: 'eval.cancel',
-            run_id: parsed.value,
-            output: 'json',
-          },
-          { project: root, workingDirectory: root },
+        const { status } = valueFromExit(
+          // EFFECT-BRIDGE(S9a)
+          await Effect.runPromiseExit(
+            cancelConfiguration(
+              {
+                schema: COMMAND_REQUEST_SCHEMA_ID,
+                command: 'eval.cancel',
+                run_id: parsed.value,
+                output: 'json',
+              },
+              { project: root, workingDirectory: root },
+            ).pipe(Effect.provideService(CancellationRegistry, cancellationRegistry)),
+          ),
         );
 
         return { outcome: status };

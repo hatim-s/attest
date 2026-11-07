@@ -28,85 +28,92 @@ test('runs isolated agent, hook, evaluation, and persistence stages on the host 
   const stored = [];
   const plan = await createPlan();
 
-  const invoke = async ({ resolvedCase, environment }) => {
-    assert.equal(await Effect.runPromise(environment.readFile('input')), resolvedCase.case_id);
-    stages.get(resolvedCase.case_id).push('agent');
+  const invoke = ({ resolvedCase, environment }) =>
+    Effect.gen(function* () {
+      assert.equal(yield* environment.readFile('input'), resolvedCase.case_id);
+      stages.get(resolvedCase.case_id).push('agent');
 
-    return {
-      caseId: resolvedCase.case_id,
-      suiteName: resolvedCase.test_id,
-      request: {
-        protocol: 'attest.agent-invocation',
-        run_id: plan.run.run_id,
-        case_id: resolvedCase.case_id,
-        input: 'test',
-      },
-      caseDefinition: { id: resolvedCase.case_id, input: 'test' },
-      expectedMetrics: [],
-      attempts: [],
-      diagnostics: {},
-      warnings: [],
-      startedAt: new Date().toISOString(),
-      durationMs: 0,
-      outcome: 'completed',
-      response: { protocol: 'attest.agent-invocation', output: 'ok' },
-    };
-  };
+      return {
+        caseId: resolvedCase.case_id,
+        suiteName: resolvedCase.test_id,
+        request: {
+          protocol: 'attest.agent-invocation',
+          run_id: plan.run.run_id,
+          case_id: resolvedCase.case_id,
+          input: 'test',
+        },
+        caseDefinition: { id: resolvedCase.case_id, input: 'test' },
+        expectedMetrics: [],
+        attempts: [],
+        diagnostics: {},
+        warnings: [],
+        startedAt: new Date().toISOString(),
+        durationMs: 0,
+        outcome: 'completed',
+        response: { protocol: 'attest.agent-invocation', output: 'ok' },
+      };
+    });
 
-  const evaluate = async ({ resolvedCase, environment }) => {
-    assert.equal(await Effect.runPromise(environment.readFile('ready')), 'yes\n');
-    stages.get(resolvedCase.case_id).push('evaluate');
+  const evaluate = ({ resolvedCase, environment }) =>
+    Effect.gen(function* () {
+      assert.equal(yield* environment.readFile('ready'), 'yes\n');
+      stages.get(resolvedCase.case_id).push('evaluate');
 
-    return [];
-  };
+      return [];
+    });
 
   // The smallest runner that awaits the stage hooks between agent and evaluation work.
   const runner = {
-    executeCase: async (_runId, resolvedCase, _signal, context) => {
-      const stage = { resolvedCase, environment: context.environment };
-      const execution = await invoke(stage);
-      await context.afterAgent(execution);
-      const metrics = await evaluate(stage);
-      await context.afterEvaluation(execution, metrics);
+    executeCase: (_runId, resolvedCase, _signal, context) =>
+      Effect.gen(function* () {
+        const stage = { resolvedCase, environment: context.environment };
+        const execution = yield* invoke(stage);
+        yield* context.afterAgent(execution);
+        const metrics = yield* evaluate(stage);
+        yield* context.afterEvaluation(execution, metrics);
 
-      return { execution, metrics };
-    },
+        return { execution, metrics };
+      }),
   };
 
-  const result = await executeResolvedEvalPlan(
-    plan,
-    runner,
-    {
-      createRun: async () => {},
-      recordCase: async (_id, record) => {
-        stored.push(record);
+  const result = await Effect.runPromise(
+    executeResolvedEvalPlan(
+      plan,
+      runner,
+      {
+        createRun: () => Effect.sync(() => {}),
+        recordCase: (_id, record) =>
+          Effect.sync(() => {
+            stored.push(record);
+          }),
+        finalizeRun: () => Effect.sync(() => {}),
       },
-      finalizeRun: async () => {},
-    },
-    {
-      isolation: justBashIsolation(),
-      hooks: [
-        {
-          before_case: async ({ resolvedCase, environment }) => {
-            stages.set(resolvedCase.case_id, ['before']);
-            await Effect.runPromise(environment.writeFile('input', resolvedCase.case_id));
+      {
+        isolation: justBashIsolation(),
+        hooks: [
+          {
+            before_case: ({ resolvedCase, environment }) =>
+              Effect.gen(function* () {
+                stages.set(resolvedCase.case_id, ['before']);
+                yield* environment.writeFile('input', resolvedCase.case_id);
+              }),
+            after_agent: ({ resolvedCase, environment }) =>
+              Effect.gen(function* () {
+                assert.equal((yield* environment.exec('echo yes > ready')).exitCode, 0);
+                stages.get(resolvedCase.case_id).push('after_agent');
+              }),
+            after_evaluation: ({ resolvedCase }) =>
+              Effect.sync(() => {
+                stages.get(resolvedCase.case_id).push('after_evaluation');
+              }),
+            after_case: ({ resolvedCase }) =>
+              Effect.sync(() => {
+                stages.get(resolvedCase.case_id).push('after');
+              }),
           },
-          after_agent: async ({ resolvedCase, environment }) => {
-            assert.equal(
-              (await Effect.runPromise(environment.exec('echo yes > ready'))).exitCode,
-              0,
-            );
-            stages.get(resolvedCase.case_id).push('after_agent');
-          },
-          after_evaluation: ({ resolvedCase }) => {
-            stages.get(resolvedCase.case_id).push('after_evaluation');
-          },
-          after_case: ({ resolvedCase }) => {
-            stages.get(resolvedCase.case_id).push('after');
-          },
-        },
-      ],
-    },
+        ],
+      },
+    ),
   );
 
   assert.equal(result.status, 'completed');

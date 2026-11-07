@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import { finishWithRelease } from './lifecycle-cause.js';
 import {
   AGENT_PROTOCOL,
   type AgentRequest,
@@ -73,7 +76,11 @@ const testNativeAgentConnection = async (
 ): Promise<NativeAgentConnectionResult> => {
   assertSafeNativeAgentResource(options.agent);
   options.onProgress?.(`Testing agent ${options.agent.id}...`);
-  const resolved = await resolveNativeAgent(options.agent, options.projectRoot);
+
+  const resolved = valueFromExit(
+    // EFFECT-BRIDGE(S8b): native adapter operation under the Promise probe parent.
+    await Effect.runPromiseExit(resolveNativeAgent(options.agent, options.projectRoot)),
+  );
 
   const request: AgentRequest = {
     protocol: AGENT_PROTOCOL,
@@ -99,19 +106,32 @@ const testNativeAgentConnection = async (
   let invocation: InvocationResult;
 
   try {
-    const runtime = await startAgentRuntime(resolved, options.signal);
+    invocation = valueFromExit(
+      // EFFECT-BRIDGE(S8b): native adapter operation under the Promise probe parent.
+      await Effect.runPromiseExit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const runtime = yield* startAgentRuntime(resolved, options.signal);
 
-    try {
-      invocation = await invokeResolvedAgent(runtime, request, {
-        agent: options.agent,
-        attemptTimeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
-        projectRoot: options.projectRoot,
-        sandboxArtifactSegment: 'connection-test',
-        signal: options.signal,
-      });
-    } finally {
-      if (runtime.kind === 'session') await runtime.session.close();
-    }
+            const primary = yield* Effect.exit(
+              invokeResolvedAgent(runtime, request, {
+                agent: options.agent,
+                attemptTimeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
+                projectRoot: options.projectRoot,
+                sandboxArtifactSegment: 'connection-test',
+                signal: options.signal,
+              }),
+            );
+
+            const release = yield* Effect.exit(
+              runtime.kind === 'session' ? runtime.session.close() : Effect.void,
+            );
+
+            return yield* finishWithRelease(primary, [release]);
+          }),
+        ),
+      ),
+    );
   } catch (error: unknown) {
     // A managed session's lifecycle failure is probe evidence; any other throw propagates.
     const managedSession =

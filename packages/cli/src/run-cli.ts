@@ -1,3 +1,7 @@
+import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import { withEvalApplication } from '@attest/local/eval';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 
@@ -29,7 +33,12 @@ import {
   type CliServices,
 } from './commands/shared/command-context.js';
 import { registerTestCommands } from './commands/test/registration/register-test-commands.js';
-import { CliExit, renderCliError, serializeCliError } from './errors/cli-error.js';
+import {
+  CliExit,
+  renderCliError,
+  serializeCliError,
+  type SerializedCliFailure,
+} from './errors/cli-error.js';
 import { resultCommandName, setCliCommandHelpMetadata } from './help/command-help.js';
 import { createCliFailureResult, serializeCliResult } from './output/cli-protocol.js';
 
@@ -53,6 +62,8 @@ const defaultIo: CliIo = {
 };
 
 type CliProgram = { failingCommand: () => Command; program: Command };
+
+type CliCompletion = { publish: (failure?: SerializedCliFailure) => number };
 
 /** Builds the public command tree; the returned leaf getter names the command that failed. */
 const createProgram = (
@@ -112,6 +123,47 @@ const createProgram = (
 
 /** Parses one CLI invocation and returns an exit code without terminating embedders or tests. */
 const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<number> => {
+  const completion: CliCompletion = {
+    publish: (failure) => {
+      if (failure !== undefined) (options.io ?? defaultIo).error(renderCliError(failure.error));
+
+      return failure?.exitCode ?? 0;
+    },
+  };
+
+  const exit = await Effect.runPromiseExit(
+    withEvalApplication(
+      Effect.gen(function* () {
+        const evalContext = yield* Effect.context<
+          | import('@attest/local/eval').EvalApplication
+          | import('@attest/local/eval').CancellationRegistry
+        >();
+
+        return yield* Effect.promise(() =>
+          runCliApplication(argv, options, evalContext, completion),
+        );
+      }),
+    ),
+  );
+
+  if (Exit.isFailure(exit)) {
+    const failure = serializeCliError(Cause.squash(exit.cause));
+
+    return completion.publish(failure);
+  }
+
+  completion.publish();
+
+  return exit.value;
+};
+
+/** Keeps Commander and its Promise callbacks inside the application resource lifetime. */
+const runCliApplication = async (
+  argv: string[],
+  options: RunCliOptions,
+  evalContext: CommandContext['evalContext'],
+  completion: CliCompletion,
+): Promise<number> => {
   const io = options.io ?? defaultIo;
   const workingDirectory = options.workingDirectory ?? process.cwd();
   // Commander's own usage errors wait until the failing command's output mode is known.
@@ -120,6 +172,10 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
   const { failingCommand, program } = createProgram(
     {
       argv,
+      complete: (publish) => {
+        completion.publish = publish;
+      },
+      evalContext,
       services: options.services,
       interaction: { ...createDefaultCliInteraction(), ...options.interaction },
       io,
@@ -133,16 +189,7 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
     (message) => commanderErrors.push(message),
   );
 
-  try {
-    await program.parseAsync(argv, { from: 'user' });
-
-    return 0;
-  } catch (error: unknown) {
-    if (error instanceof CommanderError && error.exitCode === 0) return 0;
-
-    if (error instanceof CliExit) return error.exitCode;
-
-    const failure = serializeCliError(error);
+  const reportFailure = (failure: SerializedCliFailure, commanderUsage = false): number => {
     const leaf = failingCommand();
 
     const command = resultCommandName(leaf);
@@ -153,13 +200,33 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
       io.output(serializeCliResult(createCliFailureResult(command, failure.error)));
     } else if (output === 'jsonl') {
       io.output(renderEvalFailureEvent(failure));
-    } else if (error instanceof CommanderError) {
+    } else if (commanderUsage) {
       commanderErrors.forEach(io.error);
     } else {
       io.error(renderCliError(failure.error));
 
       if (leaf.parent?.name() === 'eval') io.output(renderEvalResultLine(failure.exitCode));
     }
+
+    return failure.exitCode;
+  };
+
+  completion.publish = (failure) => {
+    return failure === undefined ? 0 : reportFailure(failure);
+  };
+
+  try {
+    await program.parseAsync(argv, { from: 'user' });
+
+    return 0;
+  } catch (error: unknown) {
+    if (error instanceof CommanderError && error.exitCode === 0) return 0;
+
+    if (error instanceof CliExit) return error.exitCode;
+
+    const failure = serializeCliError(error);
+    // Commander already owns this primary failure; a later store release cannot replace it.
+    completion.publish = () => reportFailure(failure, error instanceof CommanderError);
 
     return failure.exitCode;
   }

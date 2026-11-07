@@ -1,6 +1,8 @@
 import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
 import { readExitValue } from '../errors/read-exit-value.js';
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -10,15 +12,282 @@ import {
   cliResultSchema,
   evalEventSchema,
   evalEventStreamSchema,
+  type EvalFinalResultData,
 } from '@attest/contracts';
+import { LocalError } from '@attest/local';
 import { openStore, withStoreScope } from '@attest/local/store';
+import { runConfiguration } from '@attest/local/eval';
 import { describe, expect, it } from 'vitest';
 
 import { runCli } from '../run-cli.js';
+import {
+  renderCliError,
+  serializeCliError,
+  type SerializedCliFailure,
+} from '../errors/cli-error.js';
 
-import { runCommand, runJson, temporaryDirectory } from './support/cli-test-support.js';
+import {
+  createFixtureProject,
+  nonInteractive,
+  runCommand,
+  runJson,
+  temporaryDirectory,
+  type CliRun,
+} from './support/cli-test-support.js';
+
+/** Forces a real store release failure without changing its database or the native owner. */
+const replaceOpeningAlias = async (root: string): Promise<void> => {
+  const alias = (await readdir(root)).find((name) => name.endsWith('.opening'));
+  expect(alias).toBeDefined();
+  await rm(join(root, alias!));
+  await writeFile(join(root, alias!), 'replacement');
+};
+
+/** Checks primary error identity across the three public output modes after a double failure. */
+const expectPrimaryFailure = (
+  run: CliRun,
+  output: 'json' | 'human' | 'jsonl',
+  failure: SerializedCliFailure,
+): void => {
+  expect(run.exitCode).toBe(failure.exitCode);
+
+  if (output === 'human') {
+    expect(run.errors).toEqual([renderCliError(failure.error)]);
+    expect(run.output.filter((line) => line.startsWith('Result:'))).toEqual([
+      `Result: ERROR (exit ${failure.exitCode})`,
+    ]);
+  } else {
+    expect(run.errors).toEqual([]);
+
+    const result =
+      output === 'json'
+        ? parseWithSchemaSync(cliResultSchema, JSON.parse(run.output[0]!))
+        : parseWithSchemaSync(
+            evalEventStreamSchema,
+            run.output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
+          ).at(-1)?.data;
+
+    if (output === 'json') expect(run.output).toHaveLength(1);
+    expect(JSON.stringify(result)).toContain(JSON.stringify(failure.error));
+    expect(run.output.filter((line) => line.includes('"event":"result"'))).toHaveLength(
+      output === 'jsonl' ? 1 : 0,
+    );
+  }
+};
 
 describe('runCli', () => {
+  it.each(['json', 'human', 'jsonl'] as const)(
+    'keeps the admission failure when the shared store also fails to close in %s mode',
+    async (output) => {
+      const root = await createFixtureProject();
+      await mkdir(join(root, '.attest'), { recursive: true });
+      await writeFile(join(root, '.attest', 'eval-runs'), 'not a directory');
+      let primary: SerializedCliFailure | undefined;
+
+      const result = await runCommand(root, ['eval', 'run', 'refund', '--output', output], {
+        services: {
+          eval: {
+            runConfiguration: (request, options) =>
+              runConfiguration(request, options).pipe(
+                Effect.onExit((exit) => {
+                  expect(Exit.isFailure(exit)).toBe(true);
+
+                  if (Exit.isFailure(exit)) primary = serializeCliError(Cause.squash(exit.cause));
+
+                  return Effect.promise(() => replaceOpeningAlias(root));
+                }),
+              ),
+          },
+        },
+      });
+
+      expect(primary?.error.message).toBe('The eval cancellation registry is unsafe.');
+      expectPrimaryFailure(result, output, primary!);
+    },
+  );
+
+  it.each(['json', 'human', 'jsonl'] as const)(
+    'keeps the terminal run failure when the shared store also fails to close in %s mode',
+    async (output) => {
+      const root = await createFixtureProject();
+      let primary: EvalFinalResultData | undefined;
+
+      const result = await runCommand(root, ['eval', 'run', 'refund', '--output', output], {
+        services: {
+          eval: {
+            runConfiguration: (request, options) =>
+              runConfiguration(request, options).pipe(
+                Effect.map((source) =>
+                  (async function* () {
+                    for await (const event of source) {
+                      if (event.event === 'result') primary = event.data;
+                      yield event;
+                    }
+
+                    await replaceOpeningAlias(root);
+                  })(),
+                ),
+              ),
+          },
+        },
+      });
+
+      expect(primary?.exit_code).toBe(4);
+
+      if (primary === undefined || primary.result.ok) throw new Error('Expected a failed eval.');
+      expectPrimaryFailure(result, output, { exitCode: 4, error: primary.result.error });
+    },
+  );
+
+  it.each(['typed', 'defect'] as const)(
+    'keeps the original catalogued %s failure and exit when shared store cleanup fails',
+    async (kind) => {
+      const root = await createFixtureProject();
+
+      const error =
+        kind === 'typed'
+          ? new LocalError('project_invalid', 'Original project validation failure.', {
+              path: 'original.json',
+            })
+          : new TypeError('Original command defect.');
+
+      const result = await runCommand(root, ['eval', 'run', 'refund', '--output', 'json'], {
+        services: {
+          eval: {
+            runConfiguration: (request, options) =>
+              runConfiguration(request, options).pipe(
+                Effect.flatMap(() => (kind === 'typed' ? Effect.fail(error) : Effect.die(error))),
+                Effect.onExit(() => Effect.promise(() => replaceOpeningAlias(root))),
+              ),
+          },
+        },
+      });
+
+      expectPrimaryFailure(result, 'json', serializeCliError(error));
+    },
+  );
+
+  it.each([
+    ['json', false],
+    ['human', false],
+    ['human', true],
+    ['jsonl', false],
+  ] as const)(
+    'reports a shared store close failure once in %s mode with watch=%s',
+    async (output, watch) => {
+      const root = await createFixtureProject();
+      await mkdir(join(root, 'src'));
+      await writeFile(
+        join(root, 'src', 'agent.mjs'),
+        "for await (const chunk of process.stdin) {}\nprocess.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: 'expected' }));\n",
+      );
+      let replaced = false;
+
+      const lines: string[] = [];
+      const errors: string[] = [];
+
+      const exitCode = await runCli(
+        ['eval', 'run', 'refund', '--output', output, ...(watch ? ['--watch'] : [])],
+        {
+          workingDirectory: root,
+          interaction: nonInteractive(),
+          io: { output: (line) => lines.push(line), error: (line) => errors.push(line) },
+          services: {
+            eval: {
+              runConfiguration: (request, options) =>
+                runConfiguration(request, options).pipe(
+                  Effect.map((source) =>
+                    (async function* () {
+                      for await (const event of source) {
+                        if (event.event === 'run_completed') {
+                          expect(event.data.summary.passed_cases).toBe(1);
+
+                          // Progress reaches the caller before shared-store release begins.
+                          if (watch || output === 'jsonl') expect(lines.length).toBeGreaterThan(0);
+
+                          const alias = (await readdir(root)).find((name) =>
+                            name.endsWith('.opening'),
+                          );
+
+                          expect(alias).toBeDefined();
+                          await rm(join(root, alias!));
+                          await writeFile(join(root, alias!), 'replacement');
+                          replaced = true;
+                        }
+
+                        yield event;
+                      }
+                    })(),
+                  ),
+                ),
+            },
+          },
+        },
+      );
+
+      const result = { exitCode, output: lines, errors };
+
+      expect(replaced).toBe(true);
+      expect(result.exitCode).toBe(4);
+      expect([...result.output, ...result.errors].join('\n')).not.toContain('LocalError:');
+
+      if (output === 'human') {
+        expect(result.output.at(-1)).toBe('Result: ERROR (exit 4)');
+        expect(result.output.filter((line) => line.startsWith('Result:'))).toHaveLength(1);
+
+        if (!watch) expect(result.output).toHaveLength(1);
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0]).toContain('run_failed');
+      } else {
+        expect(result.errors).toEqual([]);
+
+        const documents = result.output.map((line) =>
+          output === 'json'
+            ? parseWithSchemaSync(cliResultSchema, JSON.parse(line))
+            : parseWithSchemaSync(evalEventSchema, JSON.parse(line)),
+        );
+
+        if (output === 'json') {
+          expect(documents).toHaveLength(1);
+          expect(documents[0]).toMatchObject({ ok: false, error: { code: 'run_failed' } });
+        } else {
+          const events = parseWithSchemaSync(evalEventStreamSchema, documents);
+          expect(events.filter((event) => event.event === 'result')).toHaveLength(1);
+          expect(events.at(-1)).toMatchObject({
+            event: 'result',
+            data: { exit_code: 4, result: { ok: false, error: { code: 'run_failed' } } },
+          });
+        }
+      }
+    },
+  );
+
+  it.each(['json', 'human'])(
+    'reports an eval admission failure once with its catalogued exit in %s mode',
+    async (output) => {
+      const root = await createFixtureProject();
+      await mkdir(join(root, '.attest'), { recursive: true });
+      await writeFile(join(root, '.attest', 'eval-runs'), 'not a directory');
+
+      const result = await runCommand(root, ['eval', 'run', 'refund', '--output', output]);
+
+      expect(result.exitCode).toBe(4);
+
+      if (output === 'json') {
+        expect(result.errors).toEqual([]);
+        expect(result.output).toHaveLength(1);
+        expect(JSON.parse(result.output[0]!)).toMatchObject({
+          ok: false,
+          error: { code: 'run_failed' },
+        });
+      } else {
+        expect(result.output).toEqual(['Result: ERROR (exit 4)']);
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0]).toContain('run_failed');
+      }
+    },
+  );
+
   it('renders help without terminating the caller', async () => {
     const help = await runCommand(process.cwd(), ['--help']);
 

@@ -252,12 +252,14 @@ const parse = (
 ): Promise<CliRun> => runCommand(root, argv, { interaction });
 
 beforeEach(() => {
-  run.mockImplementation(() => Promise.resolve(eventSource(completedEvents())));
-  cancel.mockResolvedValue({
-    projectHash: PROJECT_HASH,
-    runId: RUN_ID,
-    status: 'cancellation_requested',
-  });
+  run.mockImplementation(() => Effect.succeed(eventSource(completedEvents())));
+  cancel.mockReturnValue(
+    Effect.succeed({
+      projectHash: PROJECT_HASH,
+      runId: RUN_ID,
+      status: 'cancellation_requested',
+    }),
+  );
 });
 
 afterEach(() => {
@@ -266,7 +268,7 @@ afterEach(() => {
 
 describe('eval request normalization', () => {
   it('normalizes every run flag through the frozen request schema', async () => {
-    run.mockResolvedValue(eventSource(completedEvents('fail')));
+    run.mockReturnValue(Effect.succeed(eventSource(completedEvents('fail'))));
 
     const harness = await parse([
       'eval',
@@ -459,7 +461,7 @@ describe('eval output and sequencing', () => {
     expect(definition).toMatchObject({ exit_code: 4, retryable: true });
 
     for (const output of ['human', 'json', 'jsonl'] as const) {
-      run.mockResolvedValue(eventSource(failedEvents()));
+      run.mockReturnValue(Effect.succeed(eventSource(failedEvents())));
       const harness = await parse(['eval', 'run', 'refund', '--output', output]);
       expect(harness.exitCode).toBe(definition.exit_code);
       const serialized = [...harness.errors, ...harness.output].join('\n');
@@ -496,7 +498,7 @@ describe('eval output and sequencing', () => {
       yield* completed.slice(1);
     };
 
-    run.mockResolvedValue(events());
+    run.mockReturnValue(Effect.succeed(events()));
     const output: string[] = [];
 
     const parsing = runCli(['eval', 'run', 'refund', '--output', 'jsonl'], {
@@ -529,7 +531,8 @@ describe('eval output and sequencing', () => {
       throw new Error('producer failed');
     };
 
-    run.mockResolvedValue(events());
+    run.mockReturnValue(Effect.succeed(events()));
+
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = parseWithSchemaSync(
@@ -547,7 +550,7 @@ describe('eval output and sequencing', () => {
     expect(harness.exitCode).toBe(4);
   });
   it.each([1, 3, 6])('repairs a JSONL source that ends after %i events', async (length) => {
-    run.mockResolvedValue(eventSource(completedEvents().slice(0, length)));
+    run.mockReturnValue(Effect.succeed(eventSource(completedEvents().slice(0, length))));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = parseWithSchemaSync(
@@ -576,7 +579,7 @@ describe('eval output and sequencing', () => {
           })
         : event,
     );
-    run.mockResolvedValue(eventSource(events));
+    run.mockReturnValue(Effect.succeed(eventSource(events)));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = parseWithSchemaSync(
@@ -591,7 +594,7 @@ describe('eval output and sequencing', () => {
   it('turns a sequence violation into one stable machine failure', async () => {
     const invalid = [...completedEvents()];
     invalid[1] = { ...invalid[1]!, sequence: 7 };
-    run.mockResolvedValue(eventSource(invalid));
+    run.mockReturnValue(Effect.succeed(eventSource(invalid)));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'json']);
     expect(harness.exitCode).toBe(4);
     expect(harness.output).toHaveLength(1);
@@ -781,7 +784,7 @@ it.each(['pass', 'fail'] as const)(
       }),
     );
 
-    run.mockResolvedValue(eventSource(completedEvents(verdict)));
+    run.mockReturnValue(Effect.succeed(eventSource(completedEvents(verdict))));
 
     const result = await executeCommand(
       process.cwd(),

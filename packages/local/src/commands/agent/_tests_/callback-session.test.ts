@@ -1,3 +1,8 @@
+import * as Scope from 'effect/Scope';
+import * as Exit from 'effect/Exit';
+import { onTestFinished as finishNative } from 'vitest';
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
@@ -27,22 +32,24 @@ it('keeps the receiver alive while close joins every accepted invocation', async
   // SAFETY: listen above binds TCP on loopback and has completed successfully.
   const address = server.address() as AddressInfo;
 
-  const session = await startCallbackSession({
-    kind: 'callback',
-    agent: {
-      schema: 'attest.agent',
-      id: 'callback',
-      name: 'Callback',
-      transport: {
-        kind: 'callback',
-        lifecycle: 'external',
-        trigger: { url: `http://127.0.0.1:${address.port}/trigger`, method: 'POST' },
+  const session = await acquireNative(
+    startCallbackSession({
+      kind: 'callback',
+      agent: {
+        schema: 'attest.agent',
+        id: 'callback',
+        name: 'Callback',
+        transport: {
+          kind: 'callback',
+          lifecycle: 'external',
+          trigger: { url: `http://127.0.0.1:${address.port}/trigger`, method: 'POST' },
+        },
+        timeouts: { attempt_ms: 2000 },
       },
-      timeouts: { attempt_ms: 2000 },
-    },
-    trigger: { headers: {}, query: {} },
-    secrets: [],
-  });
+      trigger: { headers: {}, query: {} },
+      secrets: [],
+    }),
+  );
 
   const controller = new AbortController();
 
@@ -53,8 +60,8 @@ it('keeps the receiver alive while close joins every accepted invocation', async
     input: 'work',
   });
 
-  const first = session.invoke(request('first'), controller.signal);
-  const second = session.invoke(request('second'), controller.signal);
+  const first = runNative(session.invoke(request('first'), controller.signal));
+  const second = runNative(session.invoke(request('second'), controller.signal));
 
   /** Delivers only the selected case, leaving its sibling admitted and waiting. */
   const complete = async (id: string): Promise<string> => {
@@ -86,11 +93,13 @@ it('keeps the receiver alive while close joins every accepted invocation', async
     await expect.poll(() => received.length, { timeout: 3000 }).toBe(2);
     let closed = false;
 
-    const closing = session.close().then(() => {
+    const closing = runNative(session.close()).then(() => {
       closed = true;
     });
 
-    await expect(session.invoke(request('late'))).rejects.toMatchObject({ code: 'cancelled' });
+    await expect(runNative(session.invoke(request('late')))).rejects.toMatchObject({
+      code: 'cancelled',
+    });
     await complete('first');
     expect((await first).status).toBe('ok');
     expect(closed).toBe(false);
@@ -99,11 +108,11 @@ it('keeps the receiver alive while close joins every accepted invocation', async
     await closing;
     expect(closed).toBe(true);
     await expect(fetch(url)).rejects.toThrow();
-    await session.close();
+    await runNative(session.close());
   } finally {
     controller.abort();
     await Promise.allSettled([first, second]);
-    await session.close().finally(
+    await runNative(session.close()).finally(
       () =>
         new Promise<void>((resolve, reject) => {
           server.close((error) => (error === undefined ? resolve() : reject(error)));
@@ -112,3 +121,15 @@ it('keeps the receiver alive while close joins every accepted invocation', async
     );
   }
 });
+
+/** Executes native test operations without converting production owners back to Promises. */
+const runNative = async <A, E extends Error>(operation: Effect.Effect<A, E>) =>
+  valueFromExit(await Effect.runPromiseExit(operation));
+
+/** Retains acquisition scope through each test's accepted work and explicit cleanup. */
+const acquireNative = async <A, E extends Error>(operation: Effect.Effect<A, E, Scope.Scope>) => {
+  const scope = await runNative(Scope.make());
+  finishNative(() => runNative(Scope.close(scope, Exit.void)));
+
+  return runNative(Scope.provide(operation, scope));
+};

@@ -1,4 +1,4 @@
-import { foreign, withRelease } from '../agent/adapter/metric-operation.js';
+import { foreign, MetricCleanupError, withRelease } from '../agent/adapter/metric-operation.js';
 import * as Effect from 'effect/Effect';
 /**
  * The local metric bridge. `attest metric test` and eval both dispatch metrics through it, so
@@ -241,22 +241,47 @@ const evaluateMetricResource = ({
       return { evaluation, secrets };
     }
 
-    const directory = yield* openMetricDirectory(projectRoot, definition.cwd);
-
-    return yield* withRelease(
+    // Keep acquisition and release ownership in one masked region. A pending interruption must
+    // reach the metric body only after the descriptor has an owner that will close it.
+    return yield* Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        const { env, secrets } = yield* resolveMetricEnvironment(definition, projectRoot);
-        yield* assertMetricDirectoryIdentity(directory, definition.cwd);
+        const directory = yield* openMetricDirectory(projectRoot, definition.cwd);
 
-        const evaluation = yield* evaluateOne(
-          { name: id, type: 'exec', command: [...definition.argv] },
-          context,
-          { exec: { cwd: directory.path, env, timeoutMs: definition.timeout_ms }, signal },
+        return yield* withRelease(
+          restore(
+            Effect.gen(function* () {
+              const { env, secrets } = yield* resolveMetricEnvironment(definition, projectRoot);
+              yield* assertMetricDirectoryIdentity(directory, definition.cwd);
+
+              const evaluation = yield* evaluateOne(
+                { name: id, type: 'exec', command: [...definition.argv] },
+                context,
+                { exec: { cwd: directory.path, env, timeoutMs: definition.timeout_ms }, signal },
+              );
+
+              return { evaluation, secrets };
+            }),
+          ),
+          foreign(() => directory.handle.close()),
+        ).pipe(
+          // Cleanup failures cross the caller boundary as evidence. Keep the scored result and
+          // full cleanup Cause, but neither its plaintext metric secrets nor unredacted output.
+          Effect.catchTag('LocalMetricCleanupError', (error) =>
+            Effect.fail(
+              new MetricCleanupError(
+                {
+                  evaluation: redactMetricEvaluation(
+                    error.completed.evaluation,
+                    error.completed.secrets,
+                  ),
+                  secrets: [],
+                },
+                error.cleanupCause,
+              ),
+            ),
+          ),
         );
-
-        return { evaluation, secrets };
       }),
-      foreign(() => directory.handle.close()),
     );
   });
 

@@ -1,3 +1,5 @@
+import type * as Context from 'effect/Context';
+import type { EvalApplication, CancellationRegistry } from '@attest/local/eval';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -6,6 +8,7 @@ import type * as CloudAdapter from '@attest/local/cloud';
 import type * as EvalAdapter from '@attest/local/eval';
 
 import type { CliInteraction } from './cli-interaction.js';
+import type { SerializedCliFailure } from '../../errors/cli-error.js';
 
 type CliIo = {
   error: (message: string) => void;
@@ -33,6 +36,9 @@ type CliServices = {
 
 /** What every command registration needs: the root program, terminal I/O, and invocation facts. */
 type CommandContext = {
+  /** Publishes the terminal result after resources close and returns its selected exit code. */
+  complete: (publish: (failure?: SerializedCliFailure) => number) => void;
+  evalContext: Context.Context<EvalApplication | CancellationRegistry>;
   argv: readonly string[];
   /** Cloud credentials file under the Attest home, resolved once per invocation. */
   credentialPath: string;

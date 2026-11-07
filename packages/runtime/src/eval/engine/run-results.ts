@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import { observe, ordinaryError, withEvidence } from '../lifecycle.js';
 import {
   CLI_EVENT_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
@@ -98,7 +101,7 @@ const terminalResultFor = (
 };
 
 /** Creates a contract-shaped result-only response for failures before orchestration starts. */
-const preOrchestrationFailure = async <Payload, BaselineDiff>(
+const preOrchestrationFailure = <Payload, BaselineDiff>(
   run: Readonly<EvalRun>,
   failure: {
     time: string;
@@ -106,31 +109,31 @@ const preOrchestrationFailure = async <Payload, BaselineDiff>(
     finalResult: EvalFinalResultData;
     onEvent: ExecuteEvalOptions['onEvent'];
   },
-): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
-  const event: EvalEvent = {
-    schema: CLI_EVENT_SCHEMA_ID,
-    sequence: 0,
-    time: failure.time,
-    event: 'result',
-    data: failure.finalResult,
-  };
+): Effect.Effect<EvalExecutionResult<Payload, BaselineDiff>, Error> =>
+  Effect.gen(function* () {
+    const event: EvalEvent = {
+      schema: CLI_EVENT_SCHEMA_ID,
+      sequence: 0,
+      time: failure.time,
+      event: 'result',
+      data: failure.finalResult,
+    };
 
-  try {
-    await failure.onEvent?.(event);
-  } catch {
-    // The primary failure remains authoritative when its one result-event sink also fails.
-  }
+    const delivery = yield* observe(() => failure.onEvent?.(event) ?? Effect.void);
 
-  return {
-    run,
-    status: failure.status,
-    exit_code: failure.finalResult.exit_code,
-    summary: summarizeEvalCases([]),
-    cases: [],
-    events: [event],
-    final_result: failure.finalResult,
-    can_release_cancellation_ownership: true,
-  };
-};
+    if (Exit.isFailure(delivery) && ordinaryError(delivery.cause) === undefined)
+      return yield* Effect.failCause(withEvidence(delivery.cause, []));
+
+    return {
+      run,
+      status: failure.status,
+      exit_code: failure.finalResult.exit_code,
+      summary: summarizeEvalCases([]),
+      cases: [],
+      events: [event],
+      final_result: failure.finalResult,
+      can_release_cancellation_ownership: true,
+    };
+  });
 
 export { defaultTerminalFailure, preOrchestrationFailure, terminalResultFor };

@@ -3,7 +3,6 @@ import type { CaseExecution } from '../types.js';
 import type { StoredMetricEvaluation } from '@attest/core';
 import { justBashIsolation, type CaseEnvironment } from '@attest/executor';
 import { describe, expect, it, vi } from 'vitest';
-
 import { executeResolvedEvalPlan } from '../engine/execute-eval.js';
 import { EvalCaseStageError } from '../errors.js';
 import { withEvalHooks } from '../hooks.js';
@@ -23,22 +22,25 @@ type Stage = {
 
 /** Runs agent work, then evaluation, awaiting the stage hooks in between as a real runner must. */
 const stagedRunner = (
-  invoke: (stage: Stage) => Promise<CaseExecution>,
-  evaluate: (stage: Stage) => Promise<readonly StoredMetricEvaluation[]>,
+  invoke: (stage: Stage) => Effect.Effect<CaseExecution, Error>,
+  evaluate: (stage: Stage) => Effect.Effect<readonly StoredMetricEvaluation[], Error>,
 ): EvalCaseRunner<string> => ({
-  executeCase: async (_runId, resolvedCase, _signal, context) => {
-    const stage = { resolvedCase, environment: context.environment };
-    const execution = await invoke(stage);
-    await context.afterAgent?.(execution).catch((cause: unknown) => {
-      throw new EvalCaseStageError('after_agent', execution, [], cause);
-    });
-    const metrics = await evaluate(stage);
-    await context.afterEvaluation?.(execution, metrics).catch((cause: unknown) => {
-      throw new EvalCaseStageError('after_evaluation', execution, metrics, cause);
-    });
+  executeCase: (_runId, resolvedCase, _signal, context) =>
+    Effect.gen(function* () {
+      const stage = { resolvedCase, environment: context.environment };
+      const execution = yield* invoke(stage);
+      yield* (context.afterAgent?.(execution) ?? Effect.void).pipe(
+        Effect.mapError((cause) => new EvalCaseStageError('after_agent', execution, [], cause)),
+      );
+      const metrics = yield* evaluate(stage);
+      yield* (context.afterEvaluation?.(execution, metrics) ?? Effect.void).pipe(
+        Effect.mapError(
+          (cause) => new EvalCaseStageError('after_evaluation', execution, metrics, cause),
+        ),
+      );
 
-    return { execution, metrics };
-  },
+      return { execution, metrics };
+    }),
 });
 
 /** A fake environment whose finalization steps can be scripted. */
@@ -57,51 +59,57 @@ describe('eval hooks and case environments', () => {
     const runStages: string[] = [];
 
     const runner = stagedRunner(
-      async ({ resolvedCase, environment }) => {
-        stages.get(resolvedCase.case_id)?.push('invoke');
-        expect(await Effect.runPromise(environment!.readFile('case.txt'))).toBe(
-          resolvedCase.case_id,
-        );
+      ({ resolvedCase, environment }) =>
+        Effect.gen(function* () {
+          stages.get(resolvedCase.case_id)?.push('invoke');
+          expect(yield* environment!.readFile('case.txt')).toBe(resolvedCase.case_id);
 
-        return completedExecution(resolvedCase).execution;
-      },
-      async ({ resolvedCase, environment }) => {
-        stages.get(resolvedCase.case_id)?.push('evaluate');
-        expect(await Effect.runPromise(environment!.readFile('after-agent.txt'))).toBe('ready');
+          return completedExecution(resolvedCase).execution;
+        }),
+      ({ resolvedCase, environment }) =>
+        Effect.gen(function* () {
+          stages.get(resolvedCase.case_id)?.push('evaluate');
+          expect(yield* environment!.readFile('after-agent.txt')).toBe('ready');
 
-        return [];
-      },
+          return [];
+        }),
     );
 
-    const result = await executeResolvedEvalPlan(
-      createPlan(['one', 'two']),
-      runner,
-      createPersistence().adapter,
-      {
+    const result = await Effect.runPromise(
+      executeResolvedEvalPlan(createPlan(['one', 'two']), runner, createPersistence().adapter, {
         isolation: justBashIsolation(),
         hooks: [
           {
-            before_run: () => void runStages.push('before'),
-            before_case: async ({ resolvedCase, environment }) => {
-              stages.set(resolvedCase.case_id, ['before']);
-              await Effect.runPromise(environment!.writeFile('case.txt', resolvedCase.case_id));
-            },
-            after_agent: async ({ resolvedCase, environment }) => {
-              stages.get(resolvedCase.case_id)?.push('after_agent');
-              await Effect.runPromise(environment!.writeFile('after-agent.txt', 'ready'));
-            },
+            before_run: () =>
+              Effect.sync(() => {
+                return void runStages.push('before');
+              }),
+            before_case: ({ resolvedCase, environment }) =>
+              Effect.gen(function* () {
+                stages.set(resolvedCase.case_id, ['before']);
+                yield* environment!.writeFile('case.txt', resolvedCase.case_id);
+              }),
+            after_agent: ({ resolvedCase, environment }) =>
+              Effect.gen(function* () {
+                stages.get(resolvedCase.case_id)?.push('after_agent');
+                yield* environment!.writeFile('after-agent.txt', 'ready');
+              }),
             after_evaluation: ({ resolvedCase }) =>
-              void stages.get(resolvedCase.case_id)?.push('after_evaluation'),
-            after_case: async ({ resolvedCase, environment }) => {
-              expect(await Effect.runPromise(environment!.readFile('case.txt'))).toBe(
-                resolvedCase.case_id,
-              );
-              stages.get(resolvedCase.case_id)?.push('after');
-            },
-            after_run: ({ status }) => void runStages.push(status),
+              Effect.sync(() => {
+                return void stages.get(resolvedCase.case_id)?.push('after_evaluation');
+              }),
+            after_case: ({ resolvedCase, environment }) =>
+              Effect.gen(function* () {
+                expect(yield* environment!.readFile('case.txt')).toBe(resolvedCase.case_id);
+                stages.get(resolvedCase.case_id)?.push('after');
+              }),
+            after_run: ({ status }) =>
+              Effect.sync(() => {
+                return void runStages.push(status);
+              }),
           },
         ],
-      },
+      }),
     );
 
     expect(result.status).toBe('completed');
@@ -117,31 +125,29 @@ describe('eval hooks and case environments', () => {
     );
     expect(runStages).toEqual(['before', 'completed']);
   });
-
   it('runs all final hooks and disposes the environment when setup throws', async () => {
     const dispose = vi.fn(() => Effect.void);
     const environment = fakeEnvironment({ dispose });
-    const after = vi.fn();
+    const after = vi.fn(() => Effect.void);
     const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();
 
-    const result = await executeResolvedEvalPlan(
-      createPlan(['one']),
-      { executeCase },
-      createPersistence().adapter,
-      {
+    const result = await Effect.runPromise(
+      executeResolvedEvalPlan(createPlan(['one']), { executeCase }, createPersistence().adapter, {
         isolation: () => Effect.succeed(environment),
         hooks: [
           {
-            before_case: () => {
-              throw new Error('setup failed');
-            },
-            after_case: () => {
-              throw new Error('teardown failed');
-            },
+            before_case: () =>
+              Effect.gen(function* () {
+                return yield* Effect.fail(new Error('setup failed'));
+              }),
+            after_case: () =>
+              Effect.gen(function* () {
+                return yield* Effect.fail(new Error('teardown failed'));
+              }),
           },
           { after_case: after },
         ],
-      },
+      }),
     );
 
     expect(result.status).toBe('failed');
@@ -149,7 +155,6 @@ describe('eval hooks and case environments', () => {
     expect(after).toHaveBeenCalledOnce();
     expect(dispose).toHaveBeenCalledOnce();
   });
-
   it('latches uncertain setup cleanup and aggregates the runner cleanup failure', async () => {
     const plan = createPlan(['one']);
 
@@ -162,22 +167,21 @@ describe('eval hooks and case environments', () => {
     const wrapped = withEvalHooks<string>(
       plan.run,
       {
-        beforeRun: () => Promise.reject(setupFailure),
-        executeCase: (_runId, resolvedCase) => Promise.resolve(completedExecution(resolvedCase)),
-        cleanup: () => Promise.reject(runnerCleanupFailure),
+        beforeRun: () => Effect.fail(setupFailure),
+        executeCase: (_runId, resolvedCase) => Effect.succeed(completedExecution(resolvedCase)),
+        cleanup: () => Effect.fail(runnerCleanupFailure),
       },
       [],
     );
 
-    await expect(wrapped.beforeRun?.(RUN_ID, new AbortController().signal)).rejects.toBe(
-      setupFailure,
-    );
-    await expect(wrapped.cleanup?.(RUN_ID)).rejects.toMatchObject({
+    await expect(
+      Effect.runPromise(wrapped.beforeRun!(RUN_ID, new AbortController().signal)),
+    ).rejects.toBe(setupFailure);
+    await expect(Effect.runPromise(wrapped.cleanup!(RUN_ID))).rejects.toMatchObject({
       errors: [setupFailure, runnerCleanupFailure],
       cleanupConfirmed: false,
     });
   });
-
   it.each([
     {
       disposal: 'fails',
@@ -193,36 +197,45 @@ describe('eval hooks and case environments', () => {
       const original = completedExecution(plan.cases[0]!, [passingMetric()]);
       const persistence = createPersistence();
 
-      const result = await executeResolvedEvalPlan(
-        plan,
-        { executeCase: () => Promise.resolve(original) },
-        persistence.adapter,
-        {
-          isolation: () =>
-            Effect.succeed(
-              fakeEnvironment({
-                beginFinalization: () => {
-                  finalization.push('begin');
+      const result = await Effect.runPromise(
+        executeResolvedEvalPlan(
+          plan,
+          { executeCase: () => Effect.succeed(original) },
+          persistence.adapter,
+          {
+            isolation: () =>
+              Effect.succeed(
+                fakeEnvironment({
+                  beginFinalization: () => {
+                    finalization.push('begin');
 
-                  return Effect.fail(new Error('finalization transition failed'));
-                },
-                dispose: () => {
-                  finalization.push('dispose');
+                    return Effect.fail(new Error('finalization transition failed'));
+                  },
+                  dispose: () => {
+                    finalization.push('dispose');
 
-                  return disposeResult();
-                },
-              }),
-            ),
-          hooks: [
-            {
-              after_case: () => {
-                finalization.push('after_case_one');
-                throw new Error('first after_case failed');
+                    return disposeResult();
+                  },
+                }),
+              ),
+            hooks: [
+              {
+                after_case: () =>
+                  Effect.gen(function* () {
+                    finalization.push('after_case_one');
+
+                    return yield* Effect.fail(new Error('first after_case failed'));
+                  }),
               },
-            },
-            { after_case: () => void finalization.push('after_case_two') },
-          ],
-        },
+              {
+                after_case: () =>
+                  Effect.sync(() => {
+                    return void finalization.push('after_case_two');
+                  }),
+              },
+            ],
+          },
+        ),
       );
 
       expect(finalization).toEqual(['begin', 'after_case_one', 'after_case_two', 'dispose']);
@@ -242,15 +255,16 @@ describe('eval hooks and case environments', () => {
       });
     },
   );
-
   it('truncates lifecycle diagnostics to the persisted limit', async () => {
     const plan = createPlan(['one']);
 
-    const result = await executeResolvedEvalPlan(
-      plan,
-      { executeCase: (_runId, resolvedCase) => Promise.resolve(completedExecution(resolvedCase)) },
-      createPersistence().adapter,
-      { hooks: [{ after_case: () => Promise.reject(new Error(`long ${'x'.repeat(5000)}`)) }] },
+    const result = await Effect.runPromise(
+      executeResolvedEvalPlan(
+        plan,
+        { executeCase: (_runId, resolvedCase) => Effect.succeed(completedExecution(resolvedCase)) },
+        createPersistence().adapter,
+        { hooks: [{ after_case: () => Effect.fail(new Error(`long ${'x'.repeat(5000)}`)) }] },
+      ),
     );
 
     const record = result.cases[0];
@@ -259,28 +273,27 @@ describe('eval hooks and case environments', () => {
     expect(record.execution.diagnostics.lifecycleError).toHaveLength(4096);
     expect(record.execution.diagnostics.lifecycleError?.endsWith(' [truncated]')).toBe(true);
   });
-
   it.each([
     { stage: 'after_agent' as const, expectedMetrics: 0 },
     { stage: 'after_evaluation' as const, expectedMetrics: 1 },
   ])('preserves completed evidence when $stage fails', async ({ stage, expectedMetrics }) => {
-    const evaluate = vi.fn(() => Promise.resolve([passingMetric()]));
+    const evaluate = vi.fn(() => Effect.succeed([passingMetric()]));
     const persistence = createPersistence();
 
     const runner = stagedRunner(
-      ({ resolvedCase }) => Promise.resolve(completedExecution(resolvedCase).execution),
+      ({ resolvedCase }) => Effect.succeed(completedExecution(resolvedCase).execution),
       evaluate,
     );
 
-    const result = await executeResolvedEvalPlan(createPlan(['one']), runner, persistence.adapter, {
-      hooks: [
-        {
-          [stage]: () => {
-            throw new Error(`${stage} failed`);
+    const result = await Effect.runPromise(
+      executeResolvedEvalPlan(createPlan(['one']), runner, persistence.adapter, {
+        hooks: [
+          {
+            [stage]: () => Effect.fail(new Error(`${stage} failed`)),
           },
-        },
-      ],
-    });
+        ],
+      }),
+    );
 
     const record = result.cases[0];
 

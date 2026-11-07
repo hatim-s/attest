@@ -67,7 +67,6 @@ const effectRoots = [
     operations: ['Effect.runPromiseExit'],
     owner: 'Node HTTP request callback root; runner scope retains accepted invocations',
   },
-
   {
     file: 'packages/runtime/src/eval/_tests_/portability.check.mjs',
     operations: ['Effect.runPromise'],
@@ -176,9 +175,13 @@ const effectRoots = [
   {
     file: 'packages/cli/src/commands/eval/eval-command.ts',
     operations: ['Effect.runPromiseExit'],
-    owner: 'Promise CLI parent of native cloud operations',
+    owner: 'Commander eval request, cloud and application composition boundary',
     bridges: [
-      { operation: 'Effect.runPromiseExit', removalSlice: 'S9b', owner: 'S9b CLI composition' },
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'S9b CLI composition',
+      },
     ],
   },
   {
@@ -484,89 +487,60 @@ const effectRoots = [
     operations: ['Effect.runPromiseExit'],
     owner: 'command cleanup and typed failure invariant test root',
   },
+  {
+    file: 'packages/local/src/commands/agent/_tests_/callback-session.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S7 B1 native adapter invariant tests',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/eval-lifecycle.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S7 B1 native adapter invariant tests',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/hook-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S7 B1 native adapter invariant tests',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/sandbox-lifecycle.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S7 B1 native adapter invariant tests',
+  },
+  {
+    file: 'packages/runtime/src/eval/_tests_/execute-eval.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'S7a native eval test root',
+  },
+  {
+    file: 'packages/runtime/src/eval/_tests_/scheduler.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'S7a native eval test root',
+  },
+  {
+    file: 'packages/runtime/src/eval/_tests_/native-lifecycle.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S7a native eval test root',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/eval-cancellation.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native cancellation generation invariant test root',
+  },
+  {
+    file: 'packages/local/src/run/_tests_/eval-application-fixture.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native eval application test root',
+  },
+  {
+    file: 'packages/cli/src/run-cli.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI application composition root',
+  },
 ];
 
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
-  {
-    file: 'packages/local/src/commands/eval/eval-agent-runner.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise parent of native S6 metrics',
-    bridges: [
-      { operation: 'Effect.runPromiseExit', removalSlice: 'S7b', owner: 'S7b parent lifetime' },
-    ],
-  },
-
-  {
-    file: 'packages/runtime/src/eval/hooks.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise environment caller until S7a',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7a',
-        owner: 'S7a native caller migration',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/adapter/process-session.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'local Promise eval retains native process session scope',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'local eval process session lifetime',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/adapter/websocket-session.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'local WebSocket run lifetime',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'local WebSocket run lifetime',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/adapter/callback-session.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'local callback session owns its receiver scope and joins accepted invocations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'native local invocation session ownership',
-      },
-    ],
-  },
-
-  {
-    file: 'packages/local/src/commands/agent/adapter/invoke-resolved-agent.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'local agent dispatch awaits native executor evidence',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'local agent dispatch awaits native executor evidence',
-      },
-    ],
-  },
-
-  {
-    file: 'packages/local/src/commands/eval/hook-command.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'eval hook process lifetime',
-    bridges: [
-      { operation: 'Effect.runPromise', removalSlice: 'S7b', owner: 'eval hook process lifetime' },
-    ],
-  },
   {
     file: 'packages/local/src/run-control/spawn-eval-run.ts',
     operations: ['Effect.runPromise'],
@@ -579,7 +553,6 @@ const effectMigrationBridges = [
       },
     ],
   },
-
   {
     file: 'packages/local/src/internal/promise-store-owner.ts',
     operations: ['Effect.runPromiseExit'],
@@ -605,18 +578,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/commands/agent/adapter/resolve-native-agent.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/commands/project/project-init-command.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'unmigrated Promise parent of Phase A project operations',
@@ -624,55 +585,6 @@ const effectMigrationBridges = [
       {
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-
-  {
-    file: 'packages/local/src/commands/eval/eval-lifecycle.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/eval/eval-cancellation.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/eval/eval-persistence.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/run/run-configuration.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
         owner: 'declared migration owner',
       },
     ],
@@ -866,6 +778,18 @@ const effectMigrationBridges = [
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S9b',
         owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/adapter/test-native-agent.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise probe parent of native adapters',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'native agent connection probe',
       },
     ],
   },

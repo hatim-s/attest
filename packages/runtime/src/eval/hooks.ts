@@ -1,28 +1,21 @@
-import { valueFromExit } from '../internal/effect-exit.js';
+import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
 import type { EvalRun } from '@attest/contracts';
 import { EvalCaseStageError, isCleanupUncertain } from './errors.js';
+import { observe, ordinaryError, withEvidence, exitError, retainCauses } from './lifecycle.js';
 import type {
-  EvalCaseExecutionContext,
   EvalCaseHookContext,
   EvalCaseIsolation,
   EvalCaseRunner,
   EvalCaseRunnerResult,
   EvalHookContexts,
   EvalHooks,
-  ResolvedEvalCase,
 } from './types.js';
 
 const LIFECYCLE_ERROR_LIMIT = 4096;
 
 const TRUNCATED_SUFFIX = ' [truncated]';
-
-/** What the case stages produced before finalization: evidence, the stopping error, or both. */
-type CaseAttempt = {
-  result?: EvalCaseRunnerResult;
-  error?: unknown;
-  lifecycleFailures: unknown[];
-};
 
 /** Flattens nested lifecycle failures into stable diagnostics without discarding earlier evidence. */
 const lifecycleErrorMessages = (cause: unknown): string[] => {
@@ -67,208 +60,217 @@ const withLifecycleFailures = (
   };
 };
 
-/**
- * Wraps a runner with ordered, awaited hooks and a per-case environment. Every case reaches
- * after_case and environment disposal, even when setup or a stage hook throws.
- */
+/** Owns ordered hooks and the environment until every case finalization step settles. */
 const withEvalHooks = <Payload>(
   run: Readonly<EvalRun>,
   runner: EvalCaseRunner<Payload>,
   hooks: readonly EvalHooks<Payload>[],
   isolation?: EvalCaseIsolation,
 ): EvalCaseRunner<Payload> => {
-  const cleanupFailures: unknown[] = [];
+  const cleanupFailures: Cause.Cause<Error>[] = [];
   let runSignal = new AbortController().signal;
 
-  const dispatch = async <Stage extends keyof EvalHookContexts<Payload>>(
+  const latch = (cause: Cause.Cause<Error>) => {
+    if (
+      cause.reasons.some((reason) => Cause.isFailReason(reason) && isCleanupUncertain(reason.error))
+    )
+      cleanupFailures.push(cause);
+  };
+
+  const dispatch = <Stage extends keyof EvalHookContexts<Payload>>(
     stage: Stage,
     context: EvalHookContexts<Payload>[Stage],
-  ): Promise<void> => {
-    for (const hook of hooks) {
-      await hook[stage]?.(context);
-    }
-  };
+  ) =>
+    Effect.gen(function* () {
+      for (const hook of hooks) yield* Effect.suspend(() => hook[stage]?.(context) ?? Effect.void);
+    });
 
-  /** Runs every hook for a final stage even when an earlier one throws, then reports them all. */
-  const dispatchSettled = async <Stage extends keyof EvalHookContexts<Payload>>(
+  /** Final stages attempt every hook, retaining defects alongside ordinary release failures. */
+  const dispatchSettled = <Stage extends keyof EvalHookContexts<Payload>>(
     stage: Stage,
     context: EvalHookContexts<Payload>[Stage],
-  ): Promise<void> => {
-    const errors: unknown[] = [];
+  ) =>
+    Effect.gen(function* () {
+      const failures: Cause.Cause<Error>[] = [];
 
-    for (const hook of hooks) {
-      try {
-        await hook[stage]?.(context);
-      } catch (error: unknown) {
-        errors.push(error);
-      }
-    }
+      for (const hook of hooks) {
+        const exit = yield* observe(() => hook[stage]?.(context) ?? Effect.void);
 
-    if (errors.length > 0) throw new AggregateError(errors, `Eval ${stage} hooks failed.`);
-  };
-
-  const latchUncertainCleanup = (cause: unknown): void => {
-    if (isCleanupUncertain(cause)) cleanupFailures.push(cause);
-  };
-
-  const runCaseStages = async (
-    runId: string,
-    context: EvalCaseHookContext<Payload>,
-    worker: EvalCaseExecutionContext,
-  ): Promise<CaseAttempt> => {
-    try {
-      context.environment =
-        isolation === undefined
-          ? undefined
-          : // EFFECT-BRIDGE(S7a): removed with the owning Promise caller.
-            await Effect.runPromiseExit(
-              isolation({
-                runId,
-                caseId: context.resolvedCase.case_id,
-                testId: context.resolvedCase.test_id,
-                configuredIndex: context.resolvedCase.configured_index,
-                workerIndex: worker.workerIndex,
-                signal: context.signal,
-              }),
-            ).then(valueFromExit);
-      await dispatch('before_case', context);
-
-      const result = await runner.executeCase(runId, context.resolvedCase, context.signal, {
-        ...worker,
-        environment: context.environment,
-        afterAgent: (execution) => dispatch('after_agent', { ...context, execution }),
-        afterEvaluation: (execution, metrics) =>
-          dispatch('after_evaluation', { ...context, execution, metrics }),
-      });
-
-      return { result, lifecycleFailures: [] };
-    } catch (error: unknown) {
-      latchUncertainCleanup(error);
-
-      if (error instanceof EvalCaseStageError) {
-        return {
-          result: { execution: error.execution, metrics: error.metrics },
-          error: error.cause,
-          lifecycleFailures: [error.cause],
-        };
+        if (Exit.isFailure(exit)) failures.push(exit.cause);
       }
 
-      return { error, lifecycleFailures: [] };
-    }
-  };
-
-  /** Moves the environment into finalization, runs after_case, and disposes; returns each failure. */
-  const finalizeCase = async (
-    context: EvalCaseHookContext<Payload>,
-    attempt: CaseAttempt,
-  ): Promise<unknown[]> => {
-    const failures: unknown[] = [];
-
-    try {
-      if (context.environment)
-        // EFFECT-BRIDGE(S7a): removed with the owning Promise caller.
-        await Effect.runPromiseExit(context.environment.beginFinalization()).then(valueFromExit);
-    } catch (error: unknown) {
-      latchUncertainCleanup(error);
-      failures.push(error);
-    }
-
-    try {
-      await dispatchSettled('after_case', {
-        ...context,
-        result: attempt.result,
-        error: attempt.error,
-      });
-    } catch (error: unknown) {
-      latchUncertainCleanup(error);
-      failures.push(error);
-    }
-
-    try {
-      if (context.environment)
-        // EFFECT-BRIDGE(S7a): removed with the owning Promise caller.
-        await Effect.runPromiseExit(context.environment.dispose()).then(valueFromExit);
-    } catch (error: unknown) {
-      // A failed disposal always leaves the environment's resources unconfirmed.
-      cleanupFailures.push(error);
-      failures.push(error);
-    }
-
-    return failures;
-  };
+      if (failures.length)
+        return yield* Effect.failCause(Cause.fromReasons(failures.flatMap((c) => c.reasons)));
+    });
 
   return {
-    beforeRun: async (runId, signal) => {
-      runSignal = signal;
+    beforeRun: (runId, signal) =>
+      Effect.gen(function* () {
+        runSignal = signal;
 
-      try {
-        await dispatch('before_run', { run, signal });
-        await runner.beforeRun?.(runId, signal);
-      } catch (error: unknown) {
-        latchUncertainCleanup(error);
-        throw error;
-      }
-    },
-    executeCase: async (runId, resolvedCase: ResolvedEvalCase<Payload>, signal, worker) => {
-      const context: EvalCaseHookContext<Payload> = {
-        run,
-        signal,
-        resolvedCase,
-        workerIndex: worker.workerIndex,
-      };
+        const exit = yield* observe(() =>
+          Effect.gen(function* () {
+            yield* dispatch('before_run', { run, signal });
+            yield* Effect.suspend(() => runner.beforeRun?.(runId, signal) ?? Effect.void);
+          }),
+        );
 
-      const attempt = await runCaseStages(runId, context, worker);
-      const finalizationFailures = await finalizeCase(context, attempt);
+        if (Exit.isFailure(exit)) {
+          latch(exit.cause);
 
-      if (attempt.result !== undefined) {
-        return withLifecycleFailures(attempt.result, [
-          ...attempt.lifecycleFailures,
-          ...finalizationFailures,
-        ]);
-      }
+          return yield* Effect.failCause(exit.cause);
+        }
+      }),
+    executeCase: (runId, resolvedCase, signal, worker) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const context: EvalCaseHookContext<Payload> = {
+            run,
+            signal,
+            resolvedCase,
+            workerIndex: worker.workerIndex,
+          };
 
-      const failures = [attempt.error, ...finalizationFailures];
-      throw new AggregateError(
-        failures,
-        boundedLifecycleError(failures.flatMap(lifecycleErrorMessages)),
-      );
-    },
-    cleanup: async (runId) => {
-      const failures = [...cleanupFailures];
+          const primary = yield* Effect.exit(
+            restore(
+              Effect.gen(function* () {
+                if (isolation)
+                  context.environment = yield* Effect.suspend(() =>
+                    isolation({
+                      runId,
+                      caseId: resolvedCase.case_id,
+                      testId: resolvedCase.test_id,
+                      configuredIndex: resolvedCase.configured_index,
+                      workerIndex: worker.workerIndex,
+                      signal,
+                    }),
+                  );
+                yield* dispatch('before_case', context);
 
-      try {
-        await runner.cleanup?.(runId);
-      } catch (error: unknown) {
-        failures.push(error);
-      }
+                return yield* Effect.suspend(() =>
+                  runner.executeCase(runId, resolvedCase, signal, {
+                    ...worker,
+                    environment: context.environment,
+                    afterAgent: (execution) => dispatch('after_agent', { ...context, execution }),
+                    afterEvaluation: (execution, metrics) =>
+                      dispatch('after_evaluation', { ...context, execution, metrics }),
+                  }),
+                );
+              }),
+            ),
+          );
 
-      if (failures.length > 0) {
-        throw Object.assign(new AggregateError(failures, 'Eval cleanup failed.'), {
-          cleanupConfirmed: false,
-        });
-      }
-    },
-    afterRun: async (runId, status, summary) => {
-      const errors: unknown[] = [];
+          if (Exit.isFailure(primary)) latch(primary.cause);
+          const error = Exit.isFailure(primary) ? ordinaryError(primary.cause) : undefined;
 
-      try {
-        await runner.afterRun?.(runId, status, summary);
-      } catch (error: unknown) {
-        errors.push(error);
-      }
+          const result = Exit.isSuccess(primary)
+            ? primary.value
+            : error instanceof EvalCaseStageError
+              ? { execution: error.execution, metrics: error.metrics }
+              : undefined;
 
-      try {
-        await dispatchSettled('after_run', { run, signal: runSignal, status, summary });
-      } catch (error: unknown) {
-        errors.push(error);
-      }
+          const releases: Cause.Cause<Error>[] = [];
 
-      if (errors.length > 0) {
-        throw Object.assign(new AggregateError(errors, 'Eval after_run hooks failed.'), {
-          cleanupConfirmed: !errors.some(isCleanupUncertain),
-        });
-      }
-    },
+          const finalSteps = [
+            () => context.environment?.beginFinalization() ?? Effect.void,
+            () =>
+              dispatchSettled('after_case', {
+                ...context,
+                result,
+                error: error ?? (Exit.isFailure(primary) ? primary.cause : undefined),
+              }),
+            () => context.environment?.dispose() ?? Effect.void,
+          ];
+
+          for (const [index, step] of finalSteps.entries()) {
+            const exit = yield* observe(step);
+
+            if (Exit.isFailure(exit)) {
+              releases.push(exit.cause);
+              latch(exit.cause);
+
+              if (index === 2) cleanupFailures.push(exit.cause);
+            }
+          }
+
+          // Defects and interruption retain their primary Cause after all releases have been observed.
+          if (Exit.isFailure(primary) && error === undefined)
+            return yield* Effect.failCause(withEvidence(primary.cause, releases, result));
+          const fatalRelease = releases.find((c) => ordinaryError(c) === undefined);
+
+          if (fatalRelease)
+            return yield* Effect.failCause(
+              withEvidence(
+                Exit.isFailure(primary) ? primary.cause : fatalRelease,
+                releases,
+                result,
+              ),
+            );
+
+          if (result)
+            return retainCauses(
+              withLifecycleFailures(result, [
+                ...(error instanceof EvalCaseStageError ? [error.cause] : []),
+                ...releases.map((c) => ordinaryError(c)),
+              ]),
+              [...(Exit.isFailure(primary) ? [primary.cause] : []), ...releases],
+            );
+
+          if (Exit.isFailure(primary))
+            return yield* Effect.failCause(withEvidence(primary.cause, releases));
+
+          return yield* Effect.die(new Error('Missing case result.'));
+        }),
+      ),
+    cleanup: (runId) =>
+      Effect.gen(function* () {
+        const exit = yield* observe(() => runner.cleanup?.(runId) ?? Effect.void);
+        const failures = [...cleanupFailures, ...(Exit.isFailure(exit) ? [exit.cause] : [])];
+
+        if (failures.length) {
+          const error = Object.assign(
+            new AggregateError(
+              failures.map((c) => ordinaryError(c) ?? c),
+              'Eval cleanup failed.',
+            ),
+            { cleanupConfirmed: false },
+          );
+
+          const fatal = failures.find((c) => ordinaryError(c) === undefined);
+
+          return yield* Effect.failCause(withEvidence(fatal ?? Cause.fail(error), failures));
+        }
+      }),
+    afterRun: (runId, status, summary) =>
+      Effect.gen(function* () {
+        const first = yield* observe(
+          () => runner.afterRun?.(runId, status, summary) ?? Effect.void,
+        );
+
+        const second = yield* observe(() =>
+          dispatchSettled('after_run', { run, signal: runSignal, status, summary }),
+        );
+
+        const failures = [first, second].filter(Exit.isFailure);
+
+        if (failures.length) {
+          const fatal = failures.find((e) => ordinaryError(e.cause) === undefined);
+
+          const error = Object.assign(
+            new AggregateError(failures.map(exitError), 'Eval after_run hooks failed.'),
+            {
+              cleanupConfirmed: !failures.some((e) => isCleanupUncertain(exitError(e))),
+            },
+          );
+
+          return yield* Effect.failCause(
+            withEvidence(
+              fatal?.cause ?? Cause.fail(error),
+              failures.map((e) => e.cause),
+            ),
+          );
+        }
+      }),
   };
 };
 

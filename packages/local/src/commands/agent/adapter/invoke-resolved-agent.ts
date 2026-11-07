@@ -2,11 +2,14 @@ import { openProcessSession } from './process-session.js';
 import { startWebSocketSession } from './websocket-session.js';
 import type { CaseExecution } from '@attest/runtime';
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../../../internal/effect-exit.js';
+import type * as Cause from 'effect/Cause';
+import { recoverOrdinary } from './lifecycle-cause.js';
+import type * as Scope from 'effect/Scope';
 import { resolve } from 'node:path';
 
 import type { AgentRequest, AgentResource } from '@attest/contracts';
 import {
+  getInvocationPriorAttempts,
   AgentInvocationError,
   CliCleanupError,
   ProcessCleanupError,
@@ -21,6 +24,7 @@ import {
   startBackgroundAgent,
   startJsonlBridgeAgent,
   type InvocationResult,
+  type InvocationAttempt,
 } from '@attest/executor';
 
 import type { ResolvedNativeAgent } from './types.js';
@@ -32,8 +36,8 @@ const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 const SANDBOX_OVERHEAD_MS = 60_000;
 
 type AgentSession = {
-  close(): Promise<void>;
-  invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult>;
+  close(): Effect.Effect<void, Error>;
+  invoke(request: AgentRequest, signal?: AbortSignal): Effect.Effect<InvocationResult, Error>;
 };
 
 type SessionAgent = Extract<
@@ -63,16 +67,16 @@ type InvokeResolvedAgentOptions = {
  * Opens the run-scoped session for transports that keep a process or connection alive between
  * requests; other transports are invoked fresh per request.
  */
-const startAgentRuntime = async (
+const startAgentRuntime = Effect.fn('startAgentRuntime')(function* (
   resolved: ResolvedNativeAgent,
   signal?: AbortSignal,
-): Promise<AgentRuntime> => {
+): Effect.fn.Return<AgentRuntime, Error, Scope.Scope> {
   switch (resolved.kind) {
     case 'background':
       return {
         kind: 'session',
         resolved,
-        session: await openProcessSession(
+        session: yield* openProcessSession(
           startBackgroundAgent(resolved.agent, {
             cwd: resolved.cwd,
             env: resolved.env,
@@ -89,7 +93,7 @@ const startAgentRuntime = async (
       return {
         kind: 'session',
         resolved,
-        session: await openProcessSession(
+        session: yield* openProcessSession(
           startJsonlBridgeAgent(resolved.agent, {
             cwd: resolved.cwd,
             env: resolved.env,
@@ -102,27 +106,27 @@ const startAgentRuntime = async (
       return {
         kind: 'session',
         resolved,
-        session: await startWebSocketSession(resolved.agent, {
+        session: yield* startWebSocketSession(resolved.agent, {
           headers: resolved.headers,
           secrets: resolved.secrets,
           signal,
         }),
       };
     case 'callback':
-      return { kind: 'session', resolved, session: await startCallbackSession(resolved) };
+      return { kind: 'session', resolved, session: yield* startCallbackSession(resolved) };
 
     default:
       return { kind: 'direct', resolved };
   }
-};
+});
 
 /** Sends one request through the transport the agent resolved to. */
-const dispatch = async (
+const dispatch = Effect.fn('dispatch')(function* (
   runtime: AgentRuntime,
   request: AgentRequest,
   options: InvokeResolvedAgentOptions,
-): Promise<InvocationResult> => {
-  if (runtime.kind === 'session') return runtime.session.invoke(request, options.signal);
+): Effect.fn.Return<InvocationResult, Error> {
+  if (runtime.kind === 'session') return yield* runtime.session.invoke(request, options.signal);
   const { resolved } = runtime;
   const responseBytes = options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES;
   const retries = options.agent.retry?.retries ?? 0;
@@ -163,38 +167,25 @@ const dispatch = async (
 
       if (options.signal !== undefined) execution.signal = options.signal;
 
-      // EFFECT-BRIDGE(S7b): removed with the owning Promise caller.
-      return Effect.runPromiseExit(
-        invokeSandbox(resolved.sandbox, invocation, request, execution),
-      ).then(valueFromExit);
+      return yield* invokeSandbox(resolved.sandbox, invocation, request, execution);
     }
 
     case 'stream': {
-      // EFFECT-BRIDGE(S7b)
-      const exit = await Effect.runPromiseExit(
-        invokeStreamingAgent(resolved.agent, request, {
-          headers: resolved.headers,
-          query: resolved.query,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        }),
-      );
-
-      return valueFromExit(exit);
+      return yield* invokeStreamingAgent(resolved.agent, request, {
+        headers: resolved.headers,
+        query: resolved.query,
+        secrets: resolved.secrets,
+        signal: options.signal,
+      });
     }
 
     case 'mapped_http': {
-      // EFFECT-BRIDGE(S7b): removed with the owning Promise caller.
-      const exit = await Effect.runPromiseExit(
-        invokeMappedHttpAgent(resolved.agent, request, {
-          headers: resolved.headers,
-          query: resolved.query,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        }),
-      );
-
-      return valueFromExit(exit);
+      return yield* invokeMappedHttpAgent(resolved.agent, request, {
+        headers: resolved.headers,
+        query: resolved.query,
+        secrets: resolved.secrets,
+        signal: options.signal,
+      });
     }
 
     case 'direct': {
@@ -211,49 +202,72 @@ const dispatch = async (
         invocation.workingDirectory = options.workerDirectory;
       }
 
-      // EFFECT-BRIDGE(S7b): removed with the owning Promise caller.
-      const exit = await Effect.runPromiseExit(invokeAgent(resolved.target, request, invocation));
-
-      try {
-        return valueFromExit(exit);
-      } catch (cause: unknown) {
-        // Completed CLI evidence must reach both eval recording and the connection probe.
-        if (cause instanceof CliCleanupError && cause.attempt !== undefined)
-          return startupFailure(cause, cause.attempt.durationMs);
-        throw cause;
-      }
+      return yield* recoverOrdinary(
+        invokeAgent(resolved.target, request, invocation),
+        (cause, fullCause) =>
+          cause instanceof CliCleanupError && cause.attempt !== undefined
+            ? Effect.succeed(startupFailure(cause, cause.attempt.durationMs, fullCause))
+            : Effect.failCause(fullCause),
+      );
     }
   }
-};
+});
 
 /**
  * Sends one request and applies the artifact caps to whatever came back. The connection probe and
  * the eval runner share this so both enforce the same caps, retries, and sandbox bounds; it is the
  * one place every transport's parsed response passes through.
  */
-const invokeResolvedAgent = async (
+const invokeResolvedAgent = (
   runtime: AgentRuntime,
   request: AgentRequest,
   options: InvokeResolvedAgentOptions,
-): Promise<InvocationResult> => {
-  try {
-    return enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
-  } catch (cause: unknown) {
-    if (
+): Effect.Effect<InvocationResult, Error> =>
+  Effect.map(
+    recoverOrdinary(dispatch(runtime, request, options), (cause, fullCause) =>
       cause instanceof CallbackCleanupError ||
       cause instanceof StreamCleanupError ||
       cause instanceof WebSocketCleanupError
-    )
-      return enforceArtifactLimits(
-        startupFailure(cause, cause.result.durationMs),
-        options.agent.limits,
-      );
-    throw cause;
-  }
-};
+        ? Effect.succeed(startupFailure(cause, cause.result.durationMs))
+        : Effect.failCause(fullCause),
+    ),
+    (result) => enforceArtifactLimits(result, options.agent.limits),
+  );
 
 /** Projects operational startup or completed-attempt cleanup failures into recordable evidence. */
-const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
+const startupFailure = (
+  cause: unknown,
+  durationMs: number,
+  fullCause?: Cause.Cause<Error>,
+): InvocationResult => {
+  const prior = fullCause === undefined ? [] : getInvocationPriorAttempts(fullCause);
+
+  // The executor keeps this error private. Its tag is the boundary for completed sandbox evidence.
+  if (
+    cause instanceof Error &&
+    '_tag' in cause &&
+    cause._tag === 'SandboxAttemptCleanupError' &&
+    'attempt' in cause
+  ) {
+    // SAFETY: this executor-owned tag uniquely identifies its typed completed invocation attempt.
+    const completed = cause.attempt as InvocationAttempt;
+
+    const attempt = {
+      status: 'invocation_error' as const,
+      error: new AgentInvocationError(
+        completed.status === 'invocation_error' ? completed.error.code : 'network',
+        'Vercel sandbox cleanup was not confirmed.',
+        { cause, applicationStarted: true },
+      ),
+      diagnostics: { ...completed.diagnostics, sandboxCleanupConfirmed: false },
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...attempt, attempts: [...prior, attempt] };
+  }
+
   if (cause instanceof ProcessCleanupError && cause.completed !== undefined) {
     const completed = cause.completed;
 
@@ -325,7 +339,7 @@ const startupFailure = (cause: unknown, durationMs: number): InvocationResult =>
       warnings: completed.warnings,
     };
 
-    return { ...attempt, attempts: [attempt] };
+    return { ...attempt, attempts: [...prior, attempt] };
   }
 
   const invocationError =
@@ -345,7 +359,7 @@ const startupFailure = (cause: unknown, durationMs: number): InvocationResult =>
     warnings: [],
   };
 
-  return { ...attempt, attempts: [attempt] };
+  return { ...attempt, attempts: [...prior, attempt] };
 };
 
 /** Maps a failed invocation to the case outcome recorded for it. */

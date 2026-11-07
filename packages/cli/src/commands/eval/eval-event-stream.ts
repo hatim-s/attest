@@ -9,7 +9,11 @@ import {
   type EvalEventStream,
 } from '@attest/contracts';
 
-import { AttestCliError, serializeCliError } from '../../errors/cli-error.js';
+import {
+  AttestCliError,
+  serializeCliError,
+  type SerializedCliFailure,
+} from '../../errors/cli-error.js';
 import { createCliFailureResult } from '../../output/cli-protocol.js';
 import type { CliIo } from '../shared/command-context.js';
 import { issueDiagnostics } from './eval-request.js';
@@ -19,6 +23,8 @@ type EvalEventSource = AsyncIterable<EvalEvent> | Iterable<EvalEvent>;
 type Clock = () => Date;
 
 type CollectEvalEventsOptions = {
+  /** Holds terminal events until application cleanup has settled; progress stays live. */
+  deferTerminal?: (publish: (failure?: SerializedCliFailure) => void) => void;
   io: CliIo;
   now: Clock;
   /** Print each event as a JSONL line as soon as it arrives. */
@@ -159,6 +165,38 @@ const collectEvalEvents = async (
     printed += 1;
   };
 
+  const complete = (terminal: readonly EvalEvent[]): void => {
+    const publish = (failure?: SerializedCliFailure): void => {
+      for (const event of terminal) {
+        const settled =
+          failure === undefined
+            ? event
+            : event.event === 'run_completed'
+              ? { ...event, data: { ...event.data, status: 'failed' } }
+              : event.event === 'result'
+                ? {
+                    ...event,
+                    data: {
+                      exit_code: failure.exitCode,
+                      result: createCliFailureResult('eval.run', failure.error),
+                    },
+                  }
+                : event;
+
+        if (options.streamJsonl) options.io.output(JSON.stringify(settled));
+
+        if (options.watch && failure === undefined) {
+          const rendered = renderHumanProgress(event);
+
+          if (rendered !== undefined) options.io.output(rendered);
+        }
+      }
+    };
+
+    if (options.deferTerminal !== undefined) options.deferTerminal(publish);
+    else publish();
+  };
+
   try {
     for await (const value of source) {
       const event = parseWithSchemaSync(evalEventSchema, value);
@@ -175,7 +213,7 @@ const collectEvalEvents = async (
       if (options.streamJsonl && event.event !== 'run_completed' && event.event !== 'result')
         print(event);
 
-      if (options.watch) {
+      if (options.watch && event.event !== 'run_completed' && event.event !== 'result') {
         const rendered = renderHumanProgress(event);
 
         if (rendered !== undefined) options.io.output(rendered);
@@ -191,13 +229,21 @@ const collectEvalEvents = async (
       });
     }
 
-    if (options.streamJsonl) parsed.value.slice(printed).forEach(print);
+    complete(
+      parsed.value.filter((event) => event.event === 'run_completed' || event.event === 'result'),
+    );
 
     return parsed.value;
   } catch (error: unknown) {
     if (!options.streamJsonl || events.length === 0) throw error;
     const recovered = recoverFailedJsonlStream(events, error, options.now);
-    recovered.slice(printed).forEach((event) => options.io.output(serializeEvalEvent(event)));
+    const remaining = recovered.slice(printed);
+    remaining
+      .filter((event) => event.event !== 'run_completed' && event.event !== 'result')
+      .forEach(print);
+    complete(
+      remaining.filter((event) => event.event === 'run_completed' || event.event === 'result'),
+    );
 
     return recovered;
   }

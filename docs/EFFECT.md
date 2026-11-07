@@ -591,6 +591,72 @@ flowchart TD
   G -->|Failure or defect| E
 ```
 
+## S7a native eval runtime
+
+`executeResolvedEvalPlan` returns `Effect<EvalExecutionResult<Payload, BaselineDiff>, Error>`.
+The runner, stage callbacks, hooks, persistence, baseline, artifact writer and event sink
+all return native Effects with captured dependencies and no remaining environment.
+This is a deliberate TypeScript API break. Local and CLI conversion is S7 phase B;
+Promise callers must compose the native operations at their owning application root.
+There is no reverse Promise adapter in runtime.
+
+Case scheduling uses scoped fibers and a completion Queue. Settlement order is captured
+before the ordered persistence sink. Slots refill before persistence, with per-test caps
+and worker directory affinity preserved. Every accepted case is joined, including when
+a sibling defects. Caller cancellation and run deadlines abort the signal consumed by
+evidence owners; neither races case recording. Native interruption requests abort and
+joins the run, its case writes, cleanup and finalization before returning interruption.
+
+Every final case hook and environment release is observed. Ordinary operational errors
+retain the existing infrastructure and lifecycle evidence. Defects and mixed Causes
+propagate after draining and finalization. Internal Cause annotations and non-enumerable
+receipts retain primary failures, release failures and completed evidence without changing
+wire messages, store shapes or hashes. Failed persistence or cleanup prohibits releasing
+cancellation ownership, even when a later reconciliation succeeds. No library runtime is
+created and no `run*` execution bridge remains in the runtime eval owner.
+
+## S7 local B1 native adapters
+
+Local agent resolution, invocation, sessions, eval hooks, metrics and persistence
+compose Effects directly. `createEvalCaseRunner` now acquires a runner as
+`Effect<EvalCaseRunner<ResolvedEvalCaseInput>, never, Scope.Scope>`. The run owner
+must retain that Scope through every accepted case, runner cleanup and final hooks,
+before closing the store. Returned callbacks require no services. Process and
+WebSocket acquisition use executor scope ownership; callback close joins admitted
+fibers before closing its receiver. The Promise connection probe has an exact S8b
+forward bridge spanning acquisition, invocation and teardown.
+
+B2 still owns application acquisition, event delivery and cancellation services.
+B1 adapter checks do not establish full S7 compilation or integration acceptance.
+
+## S7 local B2 application lifetime
+
+`runConfiguration` and `cancelConfiguration` now return native Effects. Eval hosts
+supply `withEvalApplication` once at their composition root. That root provides one
+`CancellationRegistry` service and one store owner, with one runs/cache handle per
+project path. A returned event source does not own the run lifetime. Runs fork into
+the captured application Scope and the root joins them before closing storage.
+Caller interruption requests abort, joins accepted evidence and cleanup, and retains
+the original failure Cause. SIGINT remains business cancellation input.
+
+Cancellation publication and unregister are masked and joined. The scoped 25ms poller
+accepts only its run token and unregister removes only the matching generation.
+Uncertain persistence or runtime cleanup detaches polling and retains durable ownership.
+The event producer returns an Effect; the single-consumer AsyncIterable is the explicit
+Commander boundary. The CLI root retains native services through Commander completion.
+Eval progress streams immediately; terminal output waits for shared-store release. A failed
+release keeps an earlier command or infrastructure failure and its exit code. Otherwise it
+replaces a pass, failed verdict or cancelled outcome with one catalogued CLI failure.
+The existing Promise dashboard launcher captures a registry at construction and keeps
+its S9a forward bridge. No S7a/S7b production execution bridge remains.
+
+Executor retry failure Causes retain an immutable prior-attempt receipt, inspected by
+`getInvocationPriorAttempts`. Local ordinary recovery receives the full Cause, appends
+the terminal cleanup attempt once, and redacts excerpts using completed cleanup response
+values. Defects and mixed Causes bypass ordinary projection. These are intentional
+TypeScript composition breaks; wire fields, hashes, schemas, scripts and environment
+variables are unchanged.
+
 ## S8c cloud and registry API migration
 
 Local cloud requests, credentials, links, revisions, uploads, token management and

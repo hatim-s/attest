@@ -71,3 +71,5 @@ export { type CaseEnvironment, type CaseEnvironmentFactory } from './isolation/t
 export { vercelSandboxIsolation } from './isolation/vercel.js';
 
 export { EnvironmentCleanupError, getEnvironmentCleanupCause } from './isolation/operation.js';
+
+export { getInvocationPriorAttempts } from './internal/invocation-retry.js';

@@ -1,3 +1,4 @@
+import { evalApplicationFixture } from '../../../run/_tests_/eval-application-fixture.js';
 import { valueFromExit } from '../../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
@@ -229,19 +230,21 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
 
   const events: EvalEvent[] = [];
 
-  const stream = await runConfiguration(
-    parseWithSchemaSync(evalRunRequestSchema, {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'eval.run',
-      output: 'json',
-      test_ids: ['smoke'],
-    }),
-    {
-      argv: ['eval', 'run'],
-      signal: new AbortController().signal,
-      terminalFailure,
-      workingDirectory: root,
-    },
+  const stream = await evalApplicationFixture(
+    runConfiguration(
+      parseWithSchemaSync(evalRunRequestSchema, {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'eval.run',
+        output: 'json',
+        test_ids: ['smoke'],
+      }),
+      {
+        argv: ['eval', 'run'],
+        signal: new AbortController().signal,
+        terminalFailure,
+        workingDirectory: root,
+      },
+    ),
   );
 
   for await (const event of stream) events.push(event);

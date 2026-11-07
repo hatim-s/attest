@@ -1,4 +1,4 @@
-import { valueFromExit } from '../../internal/effect-exit.js';
+import { recoverOrdinary } from '../agent/adapter/lifecycle-cause.js';
 import * as Effect from 'effect/Effect';
 import { isAbsolute, resolve } from 'node:path';
 
@@ -78,21 +78,18 @@ const resolveWorkerDirectory = (
 };
 
 /** Creates a worker directory whose every segment is a real directory inside the project. */
-const prepareWorkerDirectory = async (projectRoot: string, directory: string): Promise<string> =>
-  // EFFECT-BRIDGE(S7b)
-  Effect.runPromiseExit(
-    resolveContainedPath(projectRoot, directory, {
-      allowAbsolute: true,
-      createDirectories: true,
-      expect: 'directory',
-      problem: () =>
-        new LocalError(
-          'project_invalid',
-          'Eval worker directory escapes the project through a symbolic link.',
-          { path: directory },
-        ),
-    }),
-  ).then((exit) => valueFromExit(exit));
+const prepareWorkerDirectory = (projectRoot: string, directory: string) =>
+  resolveContainedPath(projectRoot, directory, {
+    allowAbsolute: true,
+    createDirectories: true,
+    expect: 'directory',
+    problem: () =>
+      new LocalError(
+        'project_invalid',
+        'Eval worker directory escapes the project through a symbolic link.',
+        { path: directory },
+      ),
+  });
 
 type RunHookOptions = {
   command: HookCommand | undefined;
@@ -123,7 +120,7 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   let cleanupConfirmed = true;
 
   /** Runs one argv-only hook with an isolated environment and bounded process cleanup. */
-  const runHook = async (options: RunHookOptions): Promise<void> => {
+  const runHook = Effect.fn('runHook')(function* (options: RunHookOptions) {
     if (options.command === undefined) return;
     const [file, ...argumentsList] = resolveHookArgv(projectRoot, options.command.argv);
 
@@ -132,8 +129,8 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
         ? resolve(projectRoot, file)
         : file;
 
-    try {
-      await runHookCommand({
+    yield* recoverOrdinary(
+      runHookCommand({
         command: {
           ...options.command,
           argv: executable === undefined ? [] : [executable, ...argumentsList],
@@ -143,16 +140,20 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
         phase: options.phase,
         timeoutMs: DEFAULT_HOOK_TIMEOUT_MS,
         signal: options.signal,
-      });
-    } catch (error: unknown) {
-      // Retain cleanup uncertainty until the runner releases cancellation ownership.
-      if (error instanceof HookCommandError && !error.cleanupConfirmed) cleanupConfirmed = false;
-      throw error;
-    }
-  };
+      }),
+      (error) => {
+        if (error instanceof HookCommandError && !error.cleanupConfirmed) cleanupConfirmed = false;
+
+        return Effect.fail(error);
+      },
+    );
+  });
 
   /** Runs one case-scoped hook in the worker directory with the case identity in its env. */
-  const runCasePhase = (phase: CasePhase, request: CasePhaseRequest): Promise<void> => {
+  const runCasePhase = (
+    phase: CasePhase,
+    request: CasePhaseRequest,
+  ): Effect.Effect<void, Error> => {
     const environment: Parameters<typeof runHook>[0]['environment'] = {
       ...runEnvironment,
       ATTEST_CASE_ID: request.context.case_id,
@@ -177,7 +178,7 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
     });
   };
 
-  const prepareCase = async (context: CaseHookContext): Promise<string | undefined> => {
+  const prepareCase = Effect.fn('prepareCase')(function* (context: CaseHookContext) {
     const configuredDirectory = resolveWorkerDirectory(
       projectRoot,
       run.run_id,
@@ -187,14 +188,14 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
 
     if (configuredDirectory === undefined) return undefined;
 
-    return prepareWorkerDirectory(projectRoot, configuredDirectory);
-  };
+    return yield* prepareWorkerDirectory(projectRoot, configuredDirectory);
+  });
 
   return {
     afterRun: (
       status: string,
       summary: Extract<EvalEvent, { event: 'run_completed' }>['data']['summary'],
-    ): Promise<void> =>
+    ): Effect.Effect<void, Error> =>
       runHook({
         command: config?.hooks?.after_run,
         cwd: projectRoot,
@@ -210,7 +211,7 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
         throw new HookCommandError('Eval hook process cleanup could not be confirmed.', false);
       }
     },
-    beforeRun: (signal: AbortSignal): Promise<void> =>
+    beforeRun: (signal: AbortSignal): Effect.Effect<void, Error> =>
       runHook({
         command: config?.hooks?.before_run,
         cwd: projectRoot,

@@ -3,7 +3,6 @@ import {
   resolveProcessEnvironment,
   resolveHttpSecrets,
 } from './metric-secrets.js';
-import { valueFromExit } from '../../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
@@ -15,23 +14,22 @@ import { isProjectPath } from '../../../project/project-path.js';
 import type { ResolvedNativeAgent } from './types.js';
 
 /** Resolves an authored cwd through realpath and rejects symlink escapes from the project. */
-const resolveProcessCwd = async (projectRoot: string, cwd = '.'): Promise<string> => {
-  const candidate = resolve(projectRoot, cwd);
+const resolveProcessCwd = (projectRoot: string, cwd = '.') =>
+  Effect.tryPromise({
+    try: async () => {
+      const resolved = await realpath(resolve(projectRoot, cwd));
 
-  try {
-    const resolved = await realpath(candidate);
+      if (!isProjectPath(projectRoot, resolved)) throw new Error('cwd escapes project');
 
-    if (!isProjectPath(projectRoot, resolved)) throw new Error('cwd escapes project');
-
-    return resolved;
-  } catch (error: unknown) {
-    throw new LocalError('invocation_failed', 'The managed process cwd is unavailable.', {
-      path: cwd,
-      hint: 'Use an existing project-contained directory without symlink traversal.',
-      cause: error,
-    });
-  }
-};
+      return resolved;
+    },
+    catch: (cause) =>
+      new LocalError('invocation_failed', 'The managed process cwd is unavailable.', {
+        path: cwd,
+        hint: 'Use an existing project-contained directory without symlink traversal.',
+        cause,
+      }),
+  });
 
 /** Resolves only explicit relative argv paths against the authored cwd; no shell parsing occurs. */
 const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
@@ -79,16 +77,12 @@ type ProcessTransport = Extract<
 >;
 
 /** Resolves a process-based transport: environment, cwd, argv, and redacted argv values. */
-const resolveProcessAgent = async (
+const resolveProcessAgent = Effect.fn('resolveProcessAgent')(function* (
   agent: AgentResource,
   transport: ProcessTransport,
   projectRoot: string,
-): Promise<ResolvedNativeAgent> => {
-  const { env, variables, secrets } =
-    await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-    Effect.runPromiseExit(resolveProcessEnvironment(transport.env, projectRoot)).then(
-      valueFromExit,
-    );
+): Effect.fn.Return<ResolvedNativeAgent, Error> {
+  const { env, variables, secrets } = yield* resolveProcessEnvironment(transport.env, projectRoot);
 
   if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
     return {
@@ -101,7 +95,7 @@ const resolveProcessAgent = async (
     };
   }
 
-  const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
+  const cwd = yield* resolveProcessCwd(projectRoot, transport.cwd);
   const authoredArgv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
   const argv = resolveProcessArgv(authoredArgv, cwd);
   const processSecrets = [...secrets, ...redactedArgvValues(agent, argv)];
@@ -125,17 +119,12 @@ const resolveProcessAgent = async (
     };
   }
 
-  const invoke =
-    await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-    Effect.runPromiseExit(resolveHttpSecrets(transport.invoke, projectRoot)).then(valueFromExit);
+  const invoke = yield* resolveHttpSecrets(transport.invoke, projectRoot);
 
   const shutdown =
     transport.shutdown === undefined
       ? { headers: {}, query: {}, secrets: [] }
-      : await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-        Effect.runPromiseExit(resolveHttpSecrets(transport.shutdown, projectRoot)).then(
-          valueFromExit,
-        );
+      : yield* resolveHttpSecrets(transport.shutdown, projectRoot);
 
   return {
     agent: { ...agent, transport: { ...transport, start_argv: argv } },
@@ -148,26 +137,22 @@ const resolveProcessAgent = async (
     shutdownHeaders: shutdown.headers,
     shutdownQuery: shutdown.query,
   };
-};
+});
 
 /** Resolves runtime-only secret references into an ephemeral native transport target. */
-const resolveNativeAgent = async (
+const resolveNativeAgent = Effect.fn('resolveNativeAgent')(function* (
   agent: AgentResource,
   projectRoot: string,
-): Promise<ResolvedNativeAgent> => {
+): Effect.fn.Return<ResolvedNativeAgent, Error> {
   const transport = agent.transport;
 
   switch (transport.kind) {
     case 'native_cli':
     case 'background_cli':
     case 'jsonl_bridge':
-      return resolveProcessAgent(agent, transport, projectRoot);
+      return yield* resolveProcessAgent(agent, transport, projectRoot);
     case 'websocket': {
-      const resolved =
-        await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-        Effect.runPromiseExit(resolveHttpSecrets({ headers: transport.headers }, projectRoot)).then(
-          valueFromExit,
-        );
+      const resolved = yield* resolveHttpSecrets({ headers: transport.headers }, projectRoot);
 
       addRedactedRequestValues(agent, resolved);
 
@@ -180,11 +165,7 @@ const resolveNativeAgent = async (
     }
 
     case 'stream': {
-      const resolved =
-        await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-        Effect.runPromiseExit(resolveHttpSecrets(transport.request, projectRoot)).then(
-          valueFromExit,
-        );
+      const resolved = yield* resolveHttpSecrets(transport.request, projectRoot);
 
       addRedactedRequestValues(agent, resolved);
 
@@ -195,9 +176,7 @@ const resolveNativeAgent = async (
     case 'polling': {
       const request = transport.kind === 'polling' ? transport.submit : transport.request;
 
-      const resolved =
-        await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-        Effect.runPromiseExit(resolveHttpSecrets(request, projectRoot)).then(valueFromExit);
+      const resolved = yield* resolveHttpSecrets(request, projectRoot);
 
       addRedactedRequestValues(agent, resolved);
 
@@ -214,27 +193,27 @@ const resolveNativeAgent = async (
     }
 
     case 'callback': {
-      const resolveTemplate = async (request: typeof transport.trigger) => {
-        const resolved =
-          await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
-          Effect.runPromiseExit(resolveHttpSecrets(request, projectRoot)).then(valueFromExit);
+      const resolveTemplate = Effect.fn('resolveTemplate')(function* (
+        request: typeof transport.trigger,
+      ) {
+        const resolved = yield* resolveHttpSecrets(request, projectRoot);
 
         addRedactedRequestValues(agent, resolved);
 
         return resolved;
-      };
+      });
 
-      const trigger = await resolveTemplate(transport.trigger);
+      const trigger = yield* resolveTemplate(transport.trigger);
 
       const artifactFetch =
         transport.artifact_fetch === undefined
           ? undefined
-          : await resolveTemplate(transport.artifact_fetch);
+          : yield* resolveTemplate(transport.artifact_fetch);
 
       const traceFetch =
         transport.trace_fetch === undefined
           ? undefined
-          : await resolveTemplate(transport.trace_fetch);
+          : yield* resolveTemplate(transport.trace_fetch);
 
       return {
         agent: { ...agent, transport },
@@ -255,6 +234,6 @@ const resolveNativeAgent = async (
     default:
       return transport satisfies never;
   }
-};
+});
 
 export { createBaseEnvironment, resolveHttpSecrets, resolveNativeAgent, resolveProcessEnvironment };

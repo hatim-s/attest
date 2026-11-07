@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
+import * as Scope from 'effect/Scope';
+import * as Exit from 'effect/Exit';
+import { onTestFinished as finishNative } from 'vitest';
 import { valueFromExit } from '../../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,7 +28,7 @@ import { REDACTED } from '../../../internal/redaction.js';
 import { openTestStore as openStore, run as executeB2 } from '../../../store/_tests_/b1-fixture.js';
 import { createEvalCaseRunner } from '../eval-agent-runner.js';
 import { createEvalMetricEvaluator } from '../eval-metric-runner.js';
-import { createEvalPersistenceAdapter } from '../eval-persistence.js';
+import { createEvalArtifactWriter, createEvalPersistenceAdapter } from '../eval-persistence.js';
 import type { ResolvedEvalCaseInput } from '../eval-resolver.js';
 
 const directories: string[] = [];
@@ -189,33 +193,37 @@ const runAndRecord = async (
   resolvedCase: ResolvedEvalCase<ResolvedEvalCaseInput>,
 ) => {
   const run = await readRun();
-  const runner = createEvalCaseRunner(root, store.cache, run);
+  const runner = await acquireNative(createEvalCaseRunner(root, store.cache, run));
 
-  const result = await runner.executeCase(run.run_id, resolvedCase, new AbortController().signal, {
-    workerIndex: 0,
-  });
+  const result = await runNative(
+    runner.executeCase(run.run_id, resolvedCase, new AbortController().signal, {
+      workerIndex: 0,
+    }),
+  );
 
-  await runner.cleanup?.(run.run_id);
+  await runNative(runner.cleanup?.(run.run_id) ?? Effect.void);
 
   const persistence = createEvalPersistenceAdapter(store);
-  await persistence.createRun(run);
-  await persistence.recordCase(run.run_id, {
-    kind: 'executed',
-    resolved_case: resolvedCase,
-    execution: result.execution,
-    metrics: result.metrics,
-    normalized: {
-      test_id: resolvedCase.test_id,
-      case_id: resolvedCase.case_id,
-      configured_index: 0,
-      completion_index: 0,
-      outcome: result.execution.outcome,
-      verdict: 'pass',
-      started_at: result.execution.startedAt,
-      duration_ms: result.execution.durationMs,
-      metric_results: result.metrics,
-    },
-  });
+  await runNative(persistence.createRun(run));
+  await runNative(
+    persistence.recordCase(run.run_id, {
+      kind: 'executed',
+      resolved_case: resolvedCase,
+      execution: result.execution,
+      metrics: result.metrics,
+      normalized: {
+        test_id: resolvedCase.test_id,
+        case_id: resolvedCase.case_id,
+        configured_index: 0,
+        completion_index: 0,
+        outcome: result.execution.outcome,
+        verdict: 'pass',
+        started_at: result.execution.startedAt,
+        duration_ms: result.execution.durationMs,
+        metric_results: result.metrics,
+      },
+    }),
+  );
 
   return { result, stored: (await executeB2(store.runs.getRunWithCases(run.run_id))).cases };
 };
@@ -330,4 +338,37 @@ test('concurrent identical judge cases share one provider call', async () => {
     { cache: 'miss' },
     { cache: 'coalesced' },
   ]);
+});
+
+/** Executes native test operations without converting production owners back to Promises. */
+const runNative = async <A, E extends Error>(operation: Effect.Effect<A, E>) =>
+  valueFromExit(await Effect.runPromiseExit(operation));
+
+/** Retains acquisition scope through each test's accepted work and explicit cleanup. */
+const acquireNative = async <A, E extends Error>(operation: Effect.Effect<A, E, Scope.Scope>) => {
+  const scope = await runNative(Scope.make());
+  finishNative(() => runNative(Scope.close(scope, Exit.void)));
+
+  return runNative(Scope.provide(operation, scope));
+};
+
+test('publishes only verified JUnit bytes and leaves no stage after rejection', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'attest-junit-native-')));
+  directories.push(root);
+  const writer = createEvalArtifactWriter(root);
+  const contents = '<testsuites/>\n';
+
+  const payload = {
+    contents,
+    byte_length: Buffer.byteLength(contents),
+    sha256: createHash('sha256').update(contents).digest('hex'),
+  };
+
+  await runNative(writer.writeJUnitAtomically('result.xml', payload));
+  expect(await readFile(join(root, 'result.xml'), 'utf8')).toBe(contents);
+  await expect(
+    runNative(writer.writeJUnitAtomically('result.xml', { ...payload, byte_length: 1 })),
+  ).rejects.toThrow('integrity');
+  expect(await readFile(join(root, 'result.xml'), 'utf8')).toBe(contents);
+  expect(await readdir(root)).toEqual(['result.xml']);
 });

@@ -1,4 +1,9 @@
-import type { EvalEvent, EvalFinalResultData, EvalRun } from '@attest/contracts';
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import * as Fiber from 'effect/Fiber';
+import { observe, ordinaryError, withEvidence } from '../lifecycle.js';
+import type { EvalEvent, EvalFinalResultData } from '@attest/contracts';
 
 import { isCleanupUncertain, safeErrorMessage } from '../errors.js';
 import { withEvalHooks } from '../hooks.js';
@@ -53,119 +58,102 @@ const classifyRunStatus = (inputs: RunStatusInputs): EvalRunStatus => {
   return 'completed';
 };
 
-type PublishedEvalArtifacts<BaselineDiff> = {
-  baselineDiff?: BaselineDiff;
-  junit?: EvalJUnitPayload;
-};
+/** Requests business abort on interruption and joins the evidence owner before returning its Cause. */
+const executeResolvedEvalPlan = <Payload, BaselineDiff = unknown>(
+  plan: ResolvedEvalPlan<Payload>,
+  runner: EvalCaseRunner<Payload>,
+  persistence: EvalPersistenceAdapter<Payload>,
+  options: ExecuteEvalOptions<BaselineDiff, Payload> = {},
+): Effect.Effect<EvalExecutionResult<Payload, BaselineDiff>, Error> =>
+  Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      const controller = new AbortController();
 
-/** Publishes the optional baseline diff and JUnit artifact of a completed run. */
-const publishArtifacts = async <Payload, BaselineDiff>(
-  run: Readonly<EvalRun>,
-  records: readonly EvalCaseRecord<Payload>[],
-  options: ExecuteEvalOptions<BaselineDiff, Payload>,
-  infrastructureErrors: string[],
-): Promise<PublishedEvalArtifacts<BaselineDiff>> => {
-  const published: PublishedEvalArtifacts<BaselineDiff> = {};
-  const baselineRunId = run.effective_command.resolved.baseline_run_id;
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
 
-  if (baselineRunId !== undefined) {
-    if (options.baseline === undefined) {
-      infrastructureErrors.push('Baseline adapter is not configured.');
-    } else {
-      try {
-        published.baselineDiff = await options.baseline.diffRuns({
-          baselineRunId,
-          candidateRunId: run.run_id,
-        });
-      } catch (error: unknown) {
-        infrastructureErrors.push(safeErrorMessage(error, 'Baseline diff failed.'));
-      }
-    }
-  }
+      const child = yield* Effect.forkChild(
+        executeOwned(plan, runner, persistence, { ...options, signal }),
+        { uninterruptible: true },
+      );
 
-  const junitPath = run.effective_command.resolved.junit_path;
+      const waiting = yield* Effect.exit(restore(Fiber.join(child)));
 
-  if (junitPath === undefined || infrastructureErrors.length > 0) {
-    return published;
-  }
+      if (Exit.isSuccess(waiting)) return waiting.value;
 
-  if (options.artifacts === undefined) {
-    infrastructureErrors.push('JUnit artifact writer is not configured.');
+      if (!Cause.hasInterrupts(waiting.cause)) return yield* Effect.failCause(waiting.cause);
+      controller.abort(new Error('Eval owner interrupted.'));
+      const completed = yield* Fiber.await(child);
 
-    return published;
-  }
+      return yield* Effect.failCause(
+        withEvidence(
+          Exit.isFailure(completed) ? completed.cause : waiting.cause,
+          [waiting.cause],
+          completed,
+        ),
+      );
+    }),
+  );
 
-  try {
-    const junit = createEvalJUnitPayload(
-      run.run_id,
-      records.map(({ normalized }) => normalized),
-    );
-
-    await options.artifacts.writeJUnitAtomically(junitPath, junit);
-    published.junit = junit;
-  } catch (error: unknown) {
-    infrastructureErrors.push(safeErrorMessage(error, 'JUnit publication failed.'));
-  }
-
-  return published;
-};
-
-/** Executes a resolved eval plan through persistence, artifacts, and one bounded event stream. */
-const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
+/** Runs callbacks once and records their full Causes until all persistence and release work settles. */
+const executeOwned = <Payload, BaselineDiff>(
   plan: ResolvedEvalPlan<Payload>,
   caseRunner: EvalCaseRunner<Payload>,
   persistence: EvalPersistenceAdapter<Payload>,
-  options: ExecuteEvalOptions<BaselineDiff, Payload> = {},
-): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
-  const run: Readonly<EvalRun> = plan.run;
-  const runner = withEvalHooks(run, caseRunner, options.hooks ?? [], options.isolation);
-  const now = options.now ?? (() => new Date().toISOString());
-  const terminalFailure = options.terminalFailure ?? defaultTerminalFailure;
+  options: ExecuteEvalOptions<BaselineDiff, Payload>,
+) =>
+  Effect.gen(function* () {
+    const run = plan.run;
+    const runner = withEvalHooks(run, caseRunner, options.hooks ?? [], options.isolation);
+    const now = options.now ?? (() => new Date().toISOString());
+    const terminalFailure = options.terminalFailure ?? defaultTerminalFailure;
 
-  const planError =
-    validateResolvedPlan(plan, run) ??
-    (expectedEventCount(plan) > MAXIMUM_EVENTS
-      ? 'Resolved eval plan exceeds the configured event count cap.'
-      : undefined);
+    const early = (status: 'failed' | 'cancelled', message: string) =>
+      preOrchestrationFailure<Payload, BaselineDiff>(run, {
+        time: now(),
+        status,
+        finalResult: terminalFailure(status === 'cancelled' ? 'cancelled' : 'run_failed', message),
+        onEvent: options.onEvent,
+      });
 
-  if (planError !== undefined) {
-    return preOrchestrationFailure(run, {
-      time: now(),
-      status: 'failed',
-      finalResult: terminalFailure('run_failed', planError),
-      onEvent: options.onEvent,
-    });
-  }
+    const planError =
+      validateResolvedPlan(plan, run) ??
+      (expectedEventCount(plan) > MAXIMUM_EVENTS
+        ? 'Resolved eval plan exceeds the configured event count cap.'
+        : undefined);
 
-  if (isAborted(options.signal)) {
-    return preOrchestrationFailure(run, {
-      time: now(),
-      status: 'cancelled',
-      finalResult: terminalFailure(
-        'cancelled',
-        'Eval run was cancelled before orchestration started.',
-      ),
-      onEvent: options.onEvent,
-    });
-  }
+    if (planError) return yield* early('failed', planError);
 
-  try {
-    await persistence.createRun(run);
-  } catch (error: unknown) {
-    return preOrchestrationFailure(run, {
-      time: now(),
-      status: 'failed',
-      finalResult: terminalFailure(
-        'run_failed',
-        safeErrorMessage(error, 'Eval run creation failed.'),
-      ),
-      onEvent: options.onEvent,
-    });
-  }
+    if (isAborted(options.signal))
+      return yield* early('cancelled', 'Eval run was cancelled before orchestration started.');
+    const created = yield* observe(() => persistence.createRun(run));
 
-  const collector = createEventCollector(now, options.onEvent);
+    if (Exit.isFailure(created)) {
+      if (!ordinaryError(created.cause)) return yield* Effect.failCause(created.cause);
 
-  try {
+      return yield* early(
+        'failed',
+        safeErrorMessage(ordinaryError(created.cause), 'Eval run creation failed.'),
+      );
+    }
+
+    const collector = createEventCollector(now, options.onEvent);
+    const causes: Cause.Cause<Error>[] = [];
+    const errors: string[] = [];
+
+    const attempt = <A>(operation: () => Effect.Effect<A, Error>, fallback: string) =>
+      Effect.gen(function* () {
+        const exit = yield* observe(operation);
+
+        if (Exit.isFailure(exit)) {
+          causes.push(exit.cause);
+          errors.push(safeErrorMessage(ordinaryError(exit.cause), fallback));
+        }
+
+        return exit;
+      });
+
     let data: Extract<EvalEvent, { event: 'run_started' }>['data'] = {
       run_id: run.run_id,
       snapshot_hash: run.snapshot_hash,
@@ -174,174 +162,219 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
       timeout_ms: run.effective_command.resolved.timeout_ms,
     };
 
-    if (run.snapshot.selection !== undefined) data = { ...data, selection: run.snapshot.selection };
-    await collector.emit({ event: 'run_started', data });
-  } catch (error: unknown) {
-    const failure = await preOrchestrationFailure<Payload, BaselineDiff>(run, {
-      time: now(),
-      status: 'failed',
-      finalResult: terminalFailure(
-        'run_failed',
-        safeErrorMessage(error, 'Eval start event emission failed.'),
-      ),
-      onEvent: options.onEvent,
-    });
+    if (run.snapshot.selection) data = { ...data, selection: run.snapshot.selection };
 
-    try {
-      await persistence.finalizeRun(run.run_id, 'failed', failure.summary);
-    } catch {
-      // The row may still be running, so its owner must retain cancellation ownership.
-      failure.can_release_cancellation_ownership = false;
-    }
-
-    return failure;
-  }
-
-  // Caller cancellation and the run deadline both abort case work; only the deadline sets timedOut.
-  const deadline = new AbortController();
-  let timedOut = false;
-
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    deadline.abort(new Error('Eval run deadline exceeded.'));
-  }, run.effective_command.resolved.timeout_ms);
-
-  const runSignal =
-    options.signal === undefined
-      ? deadline.signal
-      : AbortSignal.any([options.signal, deadline.signal]);
-
-  let callerCancelled = false;
-
-  let records: EvalCaseRecord<Payload>[] = [];
-  const infrastructureErrors: string[] = [];
-  let cleanupConfirmed = true;
-  let casePersistenceConfirmed = true;
-
-  try {
-    await runner.beforeRun?.(run.run_id, runSignal);
-
-    const execution = await executeCases(
-      run,
-      plan.cases,
-      runner,
-      persistence,
-      runSignal,
-      collector.emit,
+    const started = yield* attempt(
+      () => collector.emit({ event: 'run_started', data }),
+      'Eval start event emission failed.',
     );
 
-    records = execution.records;
-    infrastructureErrors.push(...execution.infrastructureErrors);
-    casePersistenceConfirmed = execution.persistenceConfirmed;
-  } catch (error: unknown) {
-    infrastructureErrors.push(safeErrorMessage(error, 'Eval orchestration failed.'));
-  } finally {
+    if (Exit.isFailure(started)) {
+      const failed = yield* early(
+        'failed',
+        safeErrorMessage(ordinaryError(started.cause), 'Eval start event emission failed.'),
+      );
+
+      const finalized = yield* observe(() =>
+        persistence.finalizeRun(run.run_id, 'failed', failed.summary),
+      );
+
+      failed.can_release_cancellation_ownership = Exit.isSuccess(finalized);
+
+      const all = [
+        ...causes,
+        ...collector.causes,
+        ...(Exit.isFailure(finalized) ? [finalized.cause] : []),
+      ];
+
+      const fatal = all.find((c) => ordinaryError(c) === undefined);
+
+      if (fatal) return yield* Effect.failCause(withEvidence(all[0] ?? fatal, all, failed));
+      Object.defineProperty(failed, 'lifecycleCauses', { value: all });
+
+      return failed;
+    }
+
+    const deadline = new AbortController();
+    let timedOut = false;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      deadline.abort(new Error('Eval run deadline exceeded.'));
+    }, run.effective_command.resolved.timeout_ms);
+
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, deadline.signal])
+      : deadline.signal;
+
+    let records: EvalCaseRecord<Payload>[] = [];
+    let casePersistenceConfirmed = true;
+    yield* attempt(
+      () =>
+        Effect.gen(function* () {
+          if (Exit.isFailure(started)) return;
+          yield* Effect.suspend(() => runner.beforeRun?.(run.run_id, signal) ?? Effect.void);
+
+          const state = yield* executeCases(
+            run,
+            plan.cases,
+            runner,
+            persistence,
+            signal,
+            collector.emit,
+          );
+
+          records = state.records;
+          causes.push(...state.causes);
+          errors.push(...state.infrastructureErrors);
+          casePersistenceConfirmed = state.persistenceConfirmed;
+        }),
+      'Eval orchestration failed.',
+    );
     clearTimeout(timeout);
-    callerCancelled = isAborted(options.signal);
 
-    try {
-      await runner.cleanup?.(run.run_id);
-    } catch (error: unknown) {
-      cleanupConfirmed = false;
-      infrastructureErrors.push(safeErrorMessage(error, 'Eval runner cleanup failed.'));
+    const cleanup = yield* attempt(
+      () => runner.cleanup?.(run.run_id) ?? Effect.void,
+      'Eval runner cleanup failed.',
+    );
+
+    let cleanupConfirmed = Exit.isSuccess(cleanup);
+    const normalized = records.map((r) => r.normalized);
+    const summary = summarizeEvalCases(normalized);
+
+    const statusInputs = (): RunStatusInputs => ({
+      callerCancelled: isAborted(options.signal),
+      timedOut,
+      hasCancelledCase: normalized.some((c) => c.outcome === 'cancelled'),
+      hasCaseError: normalized.some((c) => c.verdict === 'error'),
+      casePersistenceConfirmed,
+      cleanupConfirmed,
+      infrastructureErrorCount: errors.length,
+    });
+
+    let baselineDiff: BaselineDiff | undefined;
+    let junit: EvalJUnitPayload | undefined;
+
+    if (classifyRunStatus(statusInputs()) === 'completed') {
+      const baselineRunId = run.effective_command.resolved.baseline_run_id;
+      const baseline = options.baseline;
+
+      if (baselineRunId !== undefined) {
+        if (!baseline) errors.push('Baseline adapter is not configured.');
+        else {
+          const diff = yield* attempt(
+            () => baseline.diffRuns({ baselineRunId, candidateRunId: run.run_id }),
+            'Baseline diff failed.',
+          );
+
+          if (Exit.isSuccess(diff)) baselineDiff = diff.value;
+        }
+      }
+
+      const path = run.effective_command.resolved.junit_path;
+      const artifacts = options.artifacts;
+
+      if (path !== undefined && errors.length === 0) {
+        if (!artifacts) errors.push('JUnit artifact writer is not configured.');
+        else {
+          const published = yield* attempt(
+            () =>
+              Effect.gen(function* () {
+                const payload = createEvalJUnitPayload(run.run_id, normalized);
+                yield* artifacts.writeJUnitAtomically(path, payload);
+
+                return payload;
+              }),
+            'JUnit publication failed.',
+          );
+
+          if (Exit.isSuccess(published)) junit = published.value;
+        }
+      }
     }
-  }
 
-  const normalizedCases = records.map(({ normalized }) => normalized);
-  const summary = summarizeEvalCases(normalizedCases);
+    if (collector.sinkFailure()) errors.push(collector.sinkFailure()!.message);
+    let status = classifyRunStatus(statusInputs());
+    let finalizationConfirmed = true;
 
-  const statusInputs = (): RunStatusInputs => ({
-    callerCancelled,
-    timedOut,
-    hasCancelledCase: normalizedCases.some(({ outcome }) => outcome === 'cancelled'),
-    hasCaseError: normalizedCases.some(({ verdict }) => verdict === 'error'),
-    casePersistenceConfirmed,
-    cleanupConfirmed,
-    infrastructureErrorCount: infrastructureErrors.length,
-  });
+    const reconcile = () =>
+      Effect.gen(function* () {
+        status = 'failed';
 
-  const published =
-    classifyRunStatus(statusInputs()) === 'completed'
-      ? await publishArtifacts(run, records, options, infrastructureErrors)
-      : {};
+        const exit = yield* attempt(
+          () => persistence.finalizeRun(run.run_id, status, summary),
+          'Eval run failure reconciliation failed.',
+        );
 
-  const sinkFailure = collector.sinkFailure();
-
-  if (sinkFailure !== undefined) infrastructureErrors.push(sinkFailure.message);
-  let status = classifyRunStatus(statusInputs());
-
-  /** Reconciles the stored run to failed after a later step broke; reports whether that held. */
-  const finalizeAsFailed = async (fallback: string): Promise<boolean> => {
-    status = 'failed';
-
-    try {
-      await persistence.finalizeRun(run.run_id, 'failed', summary);
-
-      return true;
-    } catch (error: unknown) {
-      infrastructureErrors.push(safeErrorMessage(error, fallback));
-
-      return false;
-    }
-  };
-
-  let finalizationConfirmed = true;
-
-  try {
-    await persistence.finalizeRun(run.run_id, status, summary);
-  } catch (error: unknown) {
-    infrastructureErrors.push(safeErrorMessage(error, 'Eval run finalization failed.'));
-    finalizationConfirmed = await finalizeAsFailed('Eval run failure reconciliation failed.');
-  }
-
-  try {
-    await runner.afterRun?.(run.run_id, status, summary);
-  } catch (error: unknown) {
-    if (isCleanupUncertain(error)) cleanupConfirmed = false;
-    infrastructureErrors.push(safeErrorMessage(error, 'The after_run hook failed.'));
-    finalizationConfirmed = await finalizeAsFailed('Eval hook failure finalization failed.');
-  }
-
-  let finalResult: EvalFinalResultData = terminalResultFor(run, summary, {
-    status,
-    timedOut,
-    terminalFailure,
-  });
-
-  try {
-    await collector.emit({ event: 'run_completed', data: { run_id: run.run_id, status, summary } });
-    await collector.emit({ event: 'result', data: finalResult });
-  } catch (error: unknown) {
-    infrastructureErrors.push(safeErrorMessage(error, 'Eval terminal event emission failed.'));
-    finalResult = terminalFailure('run_failed', 'Eval terminal event emission failed.');
-    finalizationConfirmed = await finalizeAsFailed('Eval terminal failure reconciliation failed.');
-
-    if (collector.events.at(-1)?.event === 'run_completed') collector.events.pop();
-
-    try {
-      await collector.emit({
-        event: 'run_completed',
-        data: { run_id: run.run_id, status, summary },
+        if (Exit.isFailure(exit)) finalizationConfirmed = false;
       });
-      await collector.emit({ event: 'result', data: finalResult });
-    } catch {
-      // The bounded result object below remains authoritative when the event cap is exhausted.
-    }
-  }
 
-  return {
-    run,
-    status,
-    exit_code: finalResult.exit_code,
-    summary,
-    cases: records,
-    events: collector.events,
-    final_result: finalResult,
-    can_release_cancellation_ownership:
-      cleanupConfirmed && finalizationConfirmed && casePersistenceConfirmed,
-    baseline_diff: published.baselineDiff,
-    junit: published.junit,
-  };
-};
+    const finalized = yield* attempt(
+      () => persistence.finalizeRun(run.run_id, status, summary),
+      'Eval run finalization failed.',
+    );
+
+    if (Exit.isFailure(finalized)) {
+      finalizationConfirmed = false;
+      yield* reconcile();
+    }
+
+    const after = yield* attempt(
+      () => runner.afterRun?.(run.run_id, status, summary) ?? Effect.void,
+      'The after_run hook failed.',
+    );
+
+    if (Exit.isFailure(after)) {
+      if (isCleanupUncertain(ordinaryError(after.cause))) cleanupConfirmed = false;
+      yield* reconcile();
+    }
+
+    let finalResult: EvalFinalResultData = terminalResultFor(run, summary, {
+      status,
+      timedOut,
+      terminalFailure,
+    });
+
+    const terminal = () =>
+      Effect.gen(function* () {
+        yield* collector.emit({
+          event: 'run_completed',
+          data: { run_id: run.run_id, status, summary },
+        });
+        yield* collector.emit({ event: 'result', data: finalResult });
+      });
+
+    const emitted = yield* attempt(terminal, 'Eval terminal event emission failed.');
+
+    if (Exit.isFailure(emitted)) {
+      finalResult = terminalFailure('run_failed', 'Eval terminal event emission failed.');
+      yield* reconcile();
+
+      if (collector.events.at(-1)?.event === 'run_completed') collector.events.pop();
+      yield* attempt(terminal, 'Eval terminal event emission failed.');
+    }
+
+    const result: EvalExecutionResult<Payload, BaselineDiff> = {
+      run,
+      status,
+      exit_code: finalResult.exit_code,
+      summary,
+      cases: records,
+      events: collector.events,
+      final_result: finalResult,
+      can_release_cancellation_ownership:
+        cleanupConfirmed && finalizationConfirmed && casePersistenceConfirmed,
+      baseline_diff: baselineDiff,
+      junit,
+    };
+
+    causes.push(...collector.causes);
+    const fatal = causes.find((c) => ordinaryError(c) === undefined);
+
+    if (fatal) return yield* Effect.failCause(withEvidence(causes[0] ?? fatal, causes, result));
+    Object.defineProperty(result, 'lifecycleCauses', { value: causes });
+
+    return result;
+  });
 
 export { executeResolvedEvalPlan };

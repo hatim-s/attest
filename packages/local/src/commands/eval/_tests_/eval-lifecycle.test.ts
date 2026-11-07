@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +39,9 @@ describe('eval lifecycle worker directories', () => {
 
     const directories = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
-        prepareWorkerDirectory(projectRoot, join(projectRoot, 'workers', 'run-1', `${index}`)),
+        runNative(
+          prepareWorkerDirectory(projectRoot, join(projectRoot, 'workers', 'run-1', `${index}`)),
+        ),
       ),
     );
 
@@ -52,7 +56,7 @@ describe('eval lifecycle worker directories', () => {
         workers: { count: 1, directory: '.' },
       }),
     ).toThrow('Eval worker directory escapes the project');
-    await expect(prepareWorkerDirectory(projectRoot, projectRoot)).rejects.toThrow(
+    await expect(runNative(prepareWorkerDirectory(projectRoot, projectRoot))).rejects.toThrow(
       'Eval worker directory escapes the project through a symbolic link.',
     );
   });
@@ -66,7 +70,7 @@ describe('eval lifecycle worker directories', () => {
     await symlink(outside, join(projectRoot, 'linked'));
 
     await expect(
-      prepareWorkerDirectory(projectRoot, join(projectRoot, 'linked', 'worker-0')),
+      runNative(prepareWorkerDirectory(projectRoot, join(projectRoot, 'linked', 'worker-0'))),
     ).rejects.toThrow('Eval worker directory escapes the project through a symbolic link.');
   });
 
@@ -78,3 +82,7 @@ describe('eval lifecycle worker directories', () => {
     ).toThrow('Eval worker directory must include {worker_index} when worker count exceeds one.');
   });
 });
+
+/** Executes native test operations without converting production owners back to Promises. */
+const runNative = async <A, E extends Error>(operation: Effect.Effect<A, E>) =>
+  valueFromExit(await Effect.runPromiseExit(operation));

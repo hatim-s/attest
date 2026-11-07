@@ -1,6 +1,8 @@
 import { readExitValue } from '../../errors/read-exit-value.js';
 import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
 import {
   COMMAND_REQUEST_SCHEMA_ID,
   type EvalCancelRequest,
@@ -19,6 +21,7 @@ import {
   CliExit,
   renderCliError,
   serializeCliError,
+  type SerializedCliFailure,
 } from '../../errors/cli-error.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import { createCliSuccessResult, serializeCliResult } from '../../output/cli-protocol.js';
@@ -138,16 +141,27 @@ const executeEvalRun = async (
       ).then(readExitValue)
     : undefined;
 
-  const source = await execute(request, {
-    argv: context.argv,
-    project,
-    signal,
-    terminalFailure: (code, message) =>
-      failedRunResult(serializeCliError(new AttestCliError(code, message))),
-    workingDirectory: context.workingDirectory,
-  });
+  const sourceExit = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    execute(request, {
+      argv: context.argv,
+      project,
+      signal,
+      terminalFailure: (code, message) =>
+        failedRunResult(serializeCliError(new AttestCliError(code, message))),
+      workingDirectory: context.workingDirectory,
+    }).pipe(Effect.provideContext(context.evalContext)),
+  );
+
+  if (Exit.isFailure(sourceExit)) throw Cause.squash(sourceExit.cause);
+  const source = sourceExit.value;
+
+  let publishTerminal: (failure?: SerializedCliFailure) => void = () => {};
 
   const events = await collectEvalEvents(source, {
+    deferTerminal: (publish) => {
+      publishTerminal = publish;
+    },
     io: context.io,
     now: () => new Date(),
     streamJsonl: request.output === 'jsonl',
@@ -160,12 +174,23 @@ const executeEvalRun = async (
     throw new AttestCliError('run_failed', 'Eval stream did not produce a final result.');
   }
 
-  if (request.output === 'json') context.io.output(serializeCliResult(final.data.result));
+  context.complete((failure) => {
+    // A terminal infrastructure failure stays primary; pass/fail/cancel outcomes may still
+    // become cleanup failures when the application closes its shared store.
+    const primaryFailed = !final.data.result.ok && final.data.result.error.code !== 'cancelled';
+    const cleanupFailure = primaryFailed ? undefined : failure;
+    publishTerminal(cleanupFailure);
+    const result = cleanupFailure === undefined ? final.data : failedRunResult(cleanupFailure);
 
-  if (request.output === 'human') {
-    if (!final.data.result.ok) context.io.error(renderCliError(final.data.result.error));
-    context.io.output(renderHumanFinalResult(final.data));
-  }
+    if (request.output === 'json') context.io.output(serializeCliResult(result.result));
+
+    if (request.output === 'human') {
+      if (!result.result.ok) context.io.error(renderCliError(result.result.error));
+      context.io.output(renderHumanFinalResult(result));
+    }
+
+    return result.exit_code;
+  });
 
   const completed = events.findLast(
     (
@@ -361,10 +386,16 @@ const registerEvalCommands = (context: CommandContext): void => {
       const request = await readCancelRequest(runId, options, command, context);
       const cancel = context.services?.eval?.cancelConfiguration ?? cancelConfiguration;
 
-      const result = await cancel(request, {
-        project: options.project,
-        workingDirectory: context.workingDirectory,
-      });
+      const resultExit = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        cancel(request, {
+          project: options.project,
+          workingDirectory: context.workingDirectory,
+        }).pipe(Effect.provideContext(context.evalContext)),
+      );
+
+      if (Exit.isFailure(resultExit)) throw Cause.squash(resultExit.cause);
+      const result = resultExit.value;
 
       if (request.output === 'json') {
         const document = createCliSuccessResult(

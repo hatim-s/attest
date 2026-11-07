@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AgentInvocationError, type InvocationErrorCode } from '../../errors.js';
 import type { InvocationAttempt } from '../../types.js';
-import { invokeWithRetries } from '../invocation-retry.js';
+import { getInvocationPriorAttempts, invokeWithRetries } from '../invocation-retry.js';
 
 const failure = (
   code: InvocationErrorCode,
@@ -170,4 +170,34 @@ describe('invokeWithRetries', () => {
 
     expect(result).toMatchObject({ status: 'ok', attempts: [{ status: 'ok' }] });
   });
+});
+
+it('retains earlier retry evidence on later failed Effects without replay or Cause mutation', async () => {
+  const first = failure('network');
+  const error = new Error('second attempt cleanup');
+  const defect = new Error('release defect');
+  const original = Cause.combine(Cause.fail(error), Cause.die(defect));
+
+  const invokeOnce = vi.fn((index: number) =>
+    index === 0 ? Effect.succeed(first) : Effect.failCause(original),
+  );
+
+  const exit = await Effect.runPromiseExit(invokeWithRetries(invokeOnce, 4));
+  expect(invokeOnce).toHaveBeenCalledTimes(2);
+  expect(Exit.isFailure(exit)).toBe(true);
+
+  if (Exit.isFailure(exit)) {
+    expect(exit.cause.reasons.map((reason) => reason._tag)).toEqual(
+      original.reasons.map((reason) => reason._tag),
+    );
+    expect(
+      exit.cause.reasons.some((reason) => Cause.isFailReason(reason) && reason.error === error),
+    ).toBe(true);
+    expect(
+      exit.cause.reasons.some((reason) => Cause.isDieReason(reason) && reason.defect === defect),
+    ).toBe(true);
+    expect(getInvocationPriorAttempts(exit.cause)).toMatchObject([first]);
+    expect(getInvocationPriorAttempts(original)).toEqual([]);
+    expect(Object.isFrozen(getInvocationPriorAttempts(exit.cause))).toBe(true);
+  }
 });
