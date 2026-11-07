@@ -100,6 +100,7 @@ const runCommand = (
         );
       };
 
+      child.stdin?.on('error', onError);
       child.once('error', onError);
       child.stdout?.on('data', onData);
       child.stderr?.on('data', onStderr);
@@ -145,6 +146,7 @@ const runCommand = (
               return yield* Effect.fail(new Error('Metric process cleanup is unconfirmed.'));
           }),
           Effect.sync(() => signal.removeEventListener('abort', abort)),
+          Effect.sync(() => child.stdin?.removeListener('error', onError)),
           Effect.sync(() => child.removeListener('error', onError)),
           Effect.sync(() => child.removeListener('close', onClose)),
           Effect.sync(() => child.stdout?.removeListener('data', onData)),

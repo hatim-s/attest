@@ -69,6 +69,9 @@ const invokeHttpMetric = (
               };
         const reader = response.body.getReader();
         let readFailed = false;
+        void reader.closed.catch(() => {
+          readFailed = true;
+        });
 
         return yield* withRelease(
           Effect.gen(function* () {
@@ -111,7 +114,15 @@ const invokeHttpMetric = (
           }),
           releaseAll([
             // An errored stream has already released its source; cancel would only repeat the read error.
-            Effect.suspend(() => (readFailed ? Effect.void : foreign(() => reader.cancel()))),
+            Effect.suspend(() =>
+              readFailed
+                ? Effect.void
+                : foreign(() =>
+                    reader.cancel().catch((error) => {
+                      if (!readFailed) throw error;
+                    }),
+                  ),
+            ),
             Effect.sync(() => reader.releaseLock()),
           ]),
         );

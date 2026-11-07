@@ -1,3 +1,4 @@
+import { invokeHttpMetric } from '../internal/exec-http.js';
 import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -501,5 +502,58 @@ describe('executeExecutableMetric HTTP metrics', () => {
     ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_request_failed' } });
+  });
+});
+
+it('keeps a non-200 status when its response body has already errored', async () => {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(new Error('reset'));
+    },
+  });
+
+  const stub = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 503 }));
+
+  try {
+    const result = await Effect.runPromiseExit(
+      invokeHttpMetric({ name: 'http', type: 'exec', url: 'http://localhost' }, '{}', {
+        timeoutMs: 1000,
+        outputCapBytes: 1024,
+      }),
+    ).then(valueFromExit);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'http_bad_status', details: { status: 503 } },
+    });
+    expect(body.locked).toBe(false);
+  } finally {
+    stub.mockRestore();
+  }
+});
+
+it('observes a closed metric stdin pipe without an uncaught error', async () => {
+  const context = metricContext();
+  context.execution.output = 'x'.repeat(2 * 1024 * 1024);
+
+  const result = await Effect.runPromiseExit(
+    executeExecutableMetric(
+      {
+        name: 'pipe',
+        type: 'exec',
+        command: [
+          process.execPath,
+          '-e',
+          'process.stdin.destroy(); setTimeout(() => process.exit(7), 25)',
+        ],
+      },
+      context,
+    ),
+  ).then(valueFromExit);
+
+  expect(result).toMatchObject({
+    metricName: 'pipe',
+    status: 'error',
+    error: { kind: 'exec_spawn_failed' },
   });
 });
