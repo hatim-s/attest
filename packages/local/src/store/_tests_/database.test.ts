@@ -6,8 +6,8 @@ import { stripStruct } from '@attest/contracts';
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { basename, delimiter, dirname, join } from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import * as Schema from 'effect/Schema';
@@ -74,6 +74,24 @@ const isLibsqlUnavailable = (cause: unknown): boolean => {
   return code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_DLOPEN_FAILED';
 };
 
+/**
+ * Finds a real Node binary. Under `bun --bun`, a `bun-node-*` directory at the front of PATH holds a
+ * `node` shim that runs Bun, so it is skipped.
+ */
+const nodeBinary = (): string => {
+  if (process.versions.bun === undefined) return process.execPath;
+
+  const path = (process.env.PATH ?? '')
+    .split(delimiter)
+    .filter((directory) => !basename(directory).startsWith('bun-node'))
+    .join(delimiter);
+
+  return execFileSync('which', ['node'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: path },
+  }).trim();
+};
+
 /** Runs a Node subprocess and resolves with its intentional crash exit code. */
 const runCrashWriter = async (
   databasePath: string,
@@ -84,7 +102,7 @@ const runCrashWriter = async (
   return new Promise((resolveExit, reject) => {
     const child = spawn(
       // These loader flags belong to Node; Bun otherwise runs the loader as the entrypoint.
-      process.versions.bun === undefined ? process.execPath : '/usr/local/bin/node',
+      nodeBinary(),
       ['--experimental-strip-types', '--experimental-loader', loaderPath, writerPath, databasePath],
       { cwd: dirname(databasePath) },
     );
