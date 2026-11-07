@@ -96,7 +96,12 @@ const runAgentTestCommand = Effect.fn('runAgentTestCommand')(
                 yield* Effect.tryPromise({
                   try: () => mkdir(join(loaded.root, '.attest'), { recursive: true }),
                   catch: (cause) =>
-                    new LocalError('run_failed', 'Could not open the probe store.', { cause }),
+                    // Same code and message the Promise version surfaced for a raw filesystem error.
+                    new LocalError(
+                      'internal_error',
+                      cause instanceof Error ? cause.message : String(cause),
+                      { cause },
+                    ),
                 });
                 const store = yield* openStore(join(loaded.root, '.attest', 'runs.db'), owner);
 

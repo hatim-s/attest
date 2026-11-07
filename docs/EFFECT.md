@@ -777,10 +777,10 @@ attempts every cleanup, and rolls back its exact no-overwrite publication on fai
 Agent and metric tests, probe input reads, and project initialization now return native Effects.
 Probe execution callbacks return Effects too. Agent sessions and sandboxes close before the probe
 store finalizes its run and closes. Interruption finalizes a recorded probe as cancelled. Init
-publishes and verifies its manifest before native registry registration. Verification, interruption,
-or registration failure rolls back the exact published bytes and removes a newly created directory.
-Registration is the masked commit fence. A registry failure now rolls back the manifest rather than
-leaving an unregistered project behind. Dry runs still write nothing.
+publishes and verifies its manifest before native registry registration. Verification is the commit
+point. A failure or interruption before it rolls back the exact published bytes and removes a newly
+created directory. After it, a registry failure reports `registry_write_failed` and keeps the
+manifest, so `attest projects add` can register it later. Dry runs still write nothing.
 
 The direct Commander callers use the captured CLI application context through exact-file S9b
 adapters, matching the integrated S7 eval boundary. Other Promise CLI actions and guided metric
