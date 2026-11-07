@@ -12,7 +12,7 @@ type CommandExpectation = {
   id: string;
   no_write?: boolean;
   output: 'human' | 'json' | 'jsonl';
-  readiness_probe?: 'view';
+  readiness_probe?: 'web';
   required_error_fields?: string[];
   required_stdout?: string[];
   result_schema?: string;
@@ -176,8 +176,8 @@ const quickstartJourneys: Journeys = {
           argv: ['web', '--no-open', '--port', '0'],
           exit_code: 0,
           output: 'human',
-          readiness_probe: 'view',
-          required_stdout: ['Attest view: http://127.0.0.1:', 'Press Ctrl+C to stop.'],
+          readiness_probe: 'web',
+          required_stdout: ['Attest web: http://127.0.0.1:', 'Press Ctrl+C to stop.'],
         },
         {
           id: 'structured-failure',

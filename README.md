@@ -43,7 +43,7 @@ Registry installation becomes available after the maintainer publishes the alpha
 
 Run `attest web` from a project to open its local dashboard. Use `attest web --all`
 to serve every registered project, or `attest web --no-open` to print the URL without
-launching a browser. `attest view` is an alias for `attest web`.
+launching a browser.
 
 ## Packages
 

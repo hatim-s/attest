@@ -85,11 +85,11 @@ describe('projects commands', () => {
     await expect(access(join(parent, 'second', 'attest.project.json'))).resolves.toBeUndefined();
   });
 
-  it.each(['web', 'view'])('rejects %s --all together with --store', async (command) => {
+  it('rejects web --all together with --store', async () => {
     await useAttestHome();
     const parent = await temporaryDirectory('attest-projects-');
 
-    const run = await runCommand(parent, [command, '--all', '--store', 'x.db', '--no-open']);
+    const run = await runCommand(parent, ['web', '--all', '--store', 'x.db', '--no-open']);
 
     expect(run.exitCode).toBe(2);
     expect(run.errors.join('\n')).toContain(
@@ -97,17 +97,32 @@ describe('projects commands', () => {
     );
   });
 
-  it.each(['web', 'view'])('rejects invalid %s ports before opening a store', async (command) => {
+  it('rejects invalid web ports before opening a store', async () => {
     await useAttestHome();
     const root = await temporaryDirectory('attest-web-invalid-');
 
     for (const port of ['-1', '65536', '1.5', 'invalid']) {
-      const run = await runCommand(root, [command, '--port', port, '--no-open']);
+      const run = await runCommand(root, ['web', '--port', port, '--no-open']);
 
       expect(run.exitCode).toBe(2);
-      expect(run.errors.join('\n')).toContain('View port must be an integer from 0 to 65535.');
+      expect(run.errors.join('\n')).toContain('Web port must be an integer from 0 to 65535.');
     }
 
+    await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects the removed view command without opening a store', async () => {
+    await useAttestHome();
+    const root = await temporaryDirectory('attest-web-only-');
+    const help = await runCommand(root, ['help', 'view']);
+
+    expect(help.exitCode).toBe(2);
+    expect(help.errors.join('\n')).toContain('Unknown help path: view.');
+
+    const run = await runCommand(root, ['view', '--no-open']);
+
+    expect(run.exitCode).toBe(2);
+    expect(run.errors.join('\n')).toContain("unknown command 'view'");
     await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

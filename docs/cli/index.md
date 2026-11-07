@@ -142,7 +142,7 @@ changes nothing and returns the existing entry.
 If the registry cannot be written, `project init` keeps the manifest it already wrote and
 reports the failure with the `attest projects add <dir>` command to run instead.
 
-`attest web` opens the local dashboard. `attest view` is an alias for `attest web`.
+`attest web` opens the local dashboard.
 
 `attest web` inside a project serves that one project. `attest web --all` serves every
 registered project instead, and cannot be combined with `--store`.

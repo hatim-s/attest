@@ -32,7 +32,7 @@ const FIXTURE_ROOT = fileURLToPath(new URL('./fixtures/quickstart', import.meta.
 const RUN_ID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/u;
 
 /** Fetches the dashboard after readiness and verifies browser suppression and SIGINT shutdown. */
-const runViewReadinessProbe = async (
+const runWebReadinessProbe = async (
   packed: PackedCli,
   argv: readonly string[],
   workingDirectory: string,
@@ -95,7 +95,7 @@ const runViewReadinessProbe = async (
     });
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
-      const match = /Attest view: (http:\/\/127\.0\.0\.1:\d+\/)/u.exec(stdout);
+      const match = /Attest web: (http:\/\/127\.0\.0\.1:\d+\/)/u.exec(stdout);
 
       if (match?.[1] === undefined || ready) return;
       ready = true;
@@ -223,7 +223,7 @@ const assertCommand = async (
     expect(result.stdout, `${label}: ${required}`).toContain(materialize(required, runId));
   }
 
-  if (expectation.readiness_probe === 'view') {
+  if (expectation.readiness_probe === 'web') {
     expect(result.readiness?.url, label).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/u);
     expect(result.readiness?.status, label).toBe(200);
     expect(result.readiness?.body, label).toContain('<!doctype html>');
@@ -273,8 +273,8 @@ const runJourney = async (actorId: string): Promise<void> => {
     const timeout = journeys.per_command_timeout_ms;
 
     const result =
-      command.readiness_probe === 'view'
-        ? await runViewReadinessProbe(packed, argv, root, timeout)
+      command.readiness_probe === 'web'
+        ? await runWebReadinessProbe(packed, argv, root, timeout)
         : await runPackedCommand(packed, argv, root, timeout);
 
     runId = await assertCommand(command, result, root, before, runId);
@@ -291,7 +291,6 @@ describe('quickstart journeys through the packed CLI', () => {
   it.each([
     { command: 'web', scope: 'store' },
     { command: 'web', scope: 'all' },
-    { command: 'view', scope: 'store' },
   ])(
     'serves the dashboard with $command/$scope and stops on SIGINT',
     async ({ command, scope }) => {
@@ -299,7 +298,7 @@ describe('quickstart journeys through the packed CLI', () => {
       onTestFinished(() => rm(root, { force: true, recursive: true }));
       const flags = scope === 'all' ? ['--all'] : ['--store', 'custom.db'];
 
-      const result = await runViewReadinessProbe(
+      const result = await runWebReadinessProbe(
         inject('packedCli'),
         [command, ...flags, '--port', '0', '--no-open'],
         root,

@@ -49,7 +49,7 @@ const parsePort = (value: string): number => {
   const port = Number(value);
 
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new AttestCliError('cli_usage', 'View port must be an integer from 0 to 65535.', {
+    throw new AttestCliError('cli_usage', 'Web port must be an integer from 0 to 65535.', {
       path: '--port',
       hint: 'Pass an integer from 0 to 65535.',
     });
@@ -85,7 +85,6 @@ const registerRootCommands = ({
 }: CommandContext): void => {
   program
     .command('web')
-    .alias('view')
     .description('Open the local dashboard over the project run store or every registered project.')
     .option('--store <path>', 'SQLite run store path (default: .attest/runs.db)')
     .option('--all', 'serve every project in the global registry')
@@ -97,7 +96,7 @@ const registerRootCommands = ({
       await withProcessSignals((signal) =>
         runViewCommand({
           onReady: async ({ url }) => {
-            io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`);
+            io.output(`Attest web: ${url}\nPress Ctrl+C to stop.`);
 
             if (options.open) await openBrowser(url);
           },
