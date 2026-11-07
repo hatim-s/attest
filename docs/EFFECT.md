@@ -71,6 +71,8 @@ Cleanup follows these rules rather than Effect's default cause combination:
 - R2. Choose the result from the primary Exit and recorded cleanup. A primary typed failure remains the public failure. A primary interruption remains interruption. Both retain cleanup diagnostics internally. After primary success, cleanup failure becomes the operation's typed error carrying success evidence, or explicit domain flags. Examples are `project_saved_cleanup_failed` with `committed: true` and transaction identity, or false cleanup/completion/ownership-release flags. A store close failure after a successful read still fails the operation.
 - R3. Primary defects stay defects. Edges map them to the internal error code and retain a redacted Cause. Inspect reason tags and `Cause.hasInterrupts`, never rendered Cause text. Capturing a cleanup defect must not turn a primary defect into success.
 
+Project rollback is a compensating durable mutation. If rollback or its journal cleanup fails after a typed transaction failure, return `project_recovery_required` with the transaction identity and retain both Causes internally. After confirmed restoration, preserve a domain error or map foreign failures to `project_transaction_failed` with the restored-state message and transaction identity. Primary defects and interruption keep their runtime Cause. Ordinary descriptor and lock releases still follow R1 through R3 above.
+
 A fallible `acquireUseRelease` release is permitted only when it inspects the primary Exit and can fail solely after primary success, such as post-commit project cleanup. Otherwise use R1. Register cleanup immediately after acquisition and attempt every required cleanup step.
 
 Bound uncooperative foreign cleanup with `Effect.timeoutOption(Effect.interruptible(cleanup), bound)` inside masked release. Capture its entire outcome into diagnostics. A timeout means cleanup is unconfirmed; it does not prove a process or sandbox stopped. Preserve process-tree termination, signal grace and descendant verification. Never reuse an environment with unconfirmed cleanup.
@@ -156,9 +158,14 @@ entries use exactly Schema, SchemaIssue, SchemaAST and JsonSchema, including nam
 imports from the root. No additional data modules were needed. Execution method
 references, including named imports and aliases, require a declared operation in
 an exact-file root or bridge entry. Namespace escapes and dynamic Effect loading
-are rejected to keep ownership visible. Bridge entries carry `file`, `operations`,
-`owner` and `removalSlice`; each operation reference needs an adjacent matching
-`EFFECT-BRIDGE(Sx)` comment. The lint-rules gate checks config routing, declaration
+are rejected to keep ownership visible. Bridge entries carry `file`, `operations`, `owner` and a `bridges` list of
+`{ operation, removalSlice, owner }` associations. One exact-file config block
+preserves every association when a file has multiple removal owners. For example,
+project-registry reads end in S2 and writes end in S8c. Each execution reference
+needs an adjacent real `EFFECT-BRIDGE(Sx)` comment matching its operation's declared
+association. Removal slices are limited to the approved migration plan; stale and
+duplicate associations fail lint. The legacy single `removalSlice` rule option
+remains covered by lint tests, but new ledger entries use associations. The lint-rules gate checks config routing, declaration
 files, stale operations and unmatched tags. Neither tests nor browser entries get
 a general execution exception.
 

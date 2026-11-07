@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { COMMAND_REQUEST_SCHEMA_ID, type AgentResource } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
@@ -66,14 +68,21 @@ describe('agent mutation confirmation', () => {
 
     await expect(remove).rejects.toMatchObject(projectChanged);
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.agents.map(({ id }) => id)).toEqual(['concurrent', 'racer', 'support']);
     expect(loaded.tests).toMatchObject([{ id: 'refund', agent_id: 'support' }]);
   });
 
   it('rejects a write that lands between loading the project and previewing the mutation', async () => {
     const root = await createAgentProject();
-    const loaded = await loadCommandProject({ project: root, workingDirectory: root });
+
+    const loaded = await Effect.runPromiseExit(
+      loadCommandProject({ project: root, workingDirectory: root }),
+    ).then((exit) => valueFromExit(exit));
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = { ...candidate, agents: [...candidate.agents, agent('stale')] };
     await addAgent(root, agent('racer'));
@@ -87,7 +96,11 @@ describe('agent mutation confirmation', () => {
     });
 
     await expect(commit).rejects.toMatchObject(projectChanged);
-    const current = await loadProject({ project: root });
+
+    const current = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(current.agents.map(({ id }) => id)).toEqual(['racer', 'support']);
   });
 });

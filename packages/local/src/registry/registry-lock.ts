@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../internal/effect-exit.js';
 import { open, rm } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 
@@ -35,7 +37,10 @@ const withRegistryLock = async <T>(registryPath: string, update: () => Promise<T
   const lockPath = `${registryPath}.lock`;
 
   try {
-    await createPrivateAncestors(lockPath);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(createPrivateAncestors(lockPath)).then((exit) =>
+      valueFromExit(exit),
+    );
     await acquireLock(lockPath);
   } catch (cause: unknown) {
     throw new LocalError('registry_write_failed', 'Could not lock the project registry.', {

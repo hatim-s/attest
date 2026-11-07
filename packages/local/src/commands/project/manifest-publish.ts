@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { randomUUID } from 'node:crypto';
 import { link, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -47,7 +49,8 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
     if (manifestPublished) {
       try {
         await unlink(manifestPath);
-        await syncPath(root);
+        // EFFECT-BRIDGE(S8b)
+        await Effect.runPromiseExit(syncPath(root)).then((exit) => valueFromExit(exit));
       } catch (rollbackError: unknown) {
         cleanupFailure = rollbackError;
       }
@@ -91,7 +94,8 @@ const rollbackPublishedManifest = async (root: string, expectedContents: string)
     }
 
     await unlink(manifestPath);
-    await syncPath(root);
+    // EFFECT-BRIDGE(S8b)
+    await Effect.runPromiseExit(syncPath(root)).then((exit) => valueFromExit(exit));
   } catch (error: unknown) {
     if (errnoCode(error) !== 'ENOENT') {
       throw error;

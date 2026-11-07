@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
@@ -44,7 +46,12 @@ const openViewCatalog = async (
   }
 
   const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
-  const project = await describeStoreProject(storePath);
+
+  // EFFECT-BRIDGE(S9a)
+  const project = await Effect.runPromiseExit(describeStoreProject(storePath)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   await mkdir(dirname(storePath), { recursive: true });
   const store = await openStore(storePath);
 

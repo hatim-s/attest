@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 /**
  * The local metric bridge. `attest metric test` and eval both dispatch metrics through it, so
  * every exec metric gets the same cwd containment, secret handling and redaction.
@@ -125,13 +127,19 @@ const openMetricDirectory = async (
   const path =
     projectPath === ''
       ? root
-      : await resolveContainedPath(projectRoot, projectPath, {
-          expect: 'directory',
-          problem: () => unsafeMetricDirectory(projectPath),
-        });
+      : // EFFECT-BRIDGE(S6)
+        await Effect.runPromiseExit(
+          resolveContainedPath(projectRoot, projectPath, {
+            expect: 'directory',
+            problem: () => unsafeMetricDirectory(projectPath),
+          }),
+        ).then((exit) => valueFromExit(exit));
 
   try {
-    return await openAnchored(path, { kind: 'directory', root });
+    // EFFECT-BRIDGE(S6)
+    return await Effect.runPromiseExit(openAnchored(path, { kind: 'directory', root })).then(
+      (exit) => valueFromExit(exit),
+    );
   } catch (error: unknown) {
     throw unsafeMetricDirectory(cwd ?? '.', error);
   }

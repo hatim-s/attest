@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import {
   access,
   mkdtemp,
@@ -121,7 +123,11 @@ const createEvalProject = async (options: EvalProjectOptions = {}): Promise<stri
     workingDirectory: root,
   });
   await writeFile(join(root, 'agent.mjs'), options.agentSource ?? ECHO_AGENT);
-  let candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+
+  let candidate = candidateFromLoadedProject(
+    await Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+  );
+
   candidate = {
     ...candidate,
     agents: [
@@ -162,7 +168,9 @@ const createEvalProject = async (options: EvalProjectOptions = {}): Promise<stri
       ...(options.tests ?? []),
     ],
   };
-  await applyProjectMutation({ candidate, projectRoot: root });
+  await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then((exit) =>
+    valueFromExit(exit),
+  );
 
   return root;
 };
@@ -247,7 +255,11 @@ describe('runConfiguration', () => {
     }));
 
     const root = await createEvalProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -257,7 +269,9 @@ describe('runConfiguration', () => {
           : entry,
       ),
     };
-    await applyProjectMutation({ candidate, projectRoot: root });
+    await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     const baseline = await runEval(root, { test_ids: ['smoke'] });
 
@@ -316,7 +330,13 @@ describe('runConfiguration', () => {
     const root = await createEvalProject();
     const baseline = await runEval(root, { test_ids: ['smoke'] });
     await writeFile(join(root, 'fail-after-case.mjs'), 'process.exit(7);\n');
-    let candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+
+    let candidate = candidateFromLoadedProject(
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    );
+
     candidate = {
       ...candidate,
       project: {
@@ -327,7 +347,9 @@ describe('runConfiguration', () => {
         },
       },
     };
-    await applyProjectMutation({ candidate, projectRoot: root });
+    await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     const hooked = await runEval(root, { test_ids: ['smoke'] });
     expect(hooked.events.find(({ event }) => event === 'case_completed')?.data).toMatchObject({

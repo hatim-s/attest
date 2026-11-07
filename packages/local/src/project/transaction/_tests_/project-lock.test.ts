@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -39,11 +41,15 @@ afterEach(async () => {
 describe('project lock', () => {
   it('rejects a concurrent writer while preserving the live owner', async () => {
     const root = await createRoot();
-    const first = await acquireProjectLock(root);
+
+    const first = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let failure: unknown;
 
     try {
-      await acquireProjectLock(root);
+      await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) => valueFromExit(exit));
     } catch (error: unknown) {
       failure = error;
     }
@@ -52,9 +58,14 @@ describe('project lock', () => {
       code: 'project_locked',
       details: { lock_state: 'live' },
     });
-    expect((await inspectProjectLock(root)).state).toBe('live');
-    await releaseProjectLock(first);
-    expect(await inspectProjectLock(root)).toEqual({ state: 'absent' });
+    expect(
+      (await Effect.runPromiseExit(inspectProjectLock(root)).then((exit) => valueFromExit(exit)))
+        .state,
+    ).toBe('live');
+    await Effect.runPromiseExit(releaseProjectLock(first)).then((exit) => valueFromExit(exit));
+    expect(
+      await Effect.runPromiseExit(inspectProjectLock(root)).then((exit) => valueFromExit(exit)),
+    ).toEqual({ state: 'absent' });
   });
 
   it('classifies a dead owner as stale without removing its lock', async () => {
@@ -76,7 +87,7 @@ describe('project lock', () => {
     let acquireFailure: unknown;
 
     try {
-      await acquireProjectLock(root);
+      await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) => valueFromExit(exit));
     } catch (error: unknown) {
       acquireFailure = error;
     }
@@ -94,7 +105,7 @@ describe('project lock', () => {
     let failure: unknown;
 
     try {
-      await acquireProjectLock(root);
+      await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) => valueFromExit(exit));
     } catch (error: unknown) {
       failure = error;
     }

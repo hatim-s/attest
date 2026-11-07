@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../internal/effect-exit.js';
 import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
 import { rm } from 'node:fs/promises';
@@ -29,7 +31,10 @@ const readCloudCredentials = async (
   options: { allowExpired?: boolean } = {},
 ): Promise<CloudCredentials> => {
   try {
-    const text = await readPrivateFile(path);
+    // EFFECT-BRIDGE(S8c)
+    const text = await Effect.runPromiseExit(readPrivateFile(path)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     if (text.length > 16_384) throw new Error('Unsafe credentials');
     const credentials = parseWithSchemaSync(credentialSchema, JSON.parse(text));
@@ -56,7 +61,10 @@ const writeCloudCredentials = async (
   normalizeCloudUrl(credentials.baseUrl);
 
   try {
-    await writePrivateFile(path, JSON.stringify(credentials));
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(writePrivateFile(path, JSON.stringify(credentials))).then(
+      valueFromExit,
+    );
   } catch {
     throw new LocalError('cloud_credentials_failed', 'Could not save private cloud credentials.');
   }
@@ -101,7 +109,8 @@ const resolveCloudCredentials = async (path: string) => {
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
 const removeCloudCredentials = async (path: string): Promise<void> => {
   try {
-    await assertPrivateAncestors(path);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(assertPrivateAncestors(path)).then((exit) => valueFromExit(exit));
     await rm(path, { force: true });
   } catch (cause: unknown) {
     throw new LocalError(

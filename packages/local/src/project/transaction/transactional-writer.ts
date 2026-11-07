@@ -1,12 +1,15 @@
+import { anchoredCall } from '../../internal/open-anchored.js';
+import * as Exit from 'effect/Exit';
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
 import { mkdir, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-
 import { LocalError } from '../../errors/index.js';
 import { syncPath } from '../../internal/sync-path.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { loadProject } from '../project-loader/index.js';
 import { prepareProjectCandidate, type PreparedProjectCandidate } from './candidate-project.js';
-import { acquireProjectLock, releaseProjectLock, type ProjectLockHandle } from './project-lock.js';
+import { withProjectLock, annotateProjectCleanup } from './project-lock.js';
 import { resolveSafeProjectPath } from './project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 import { createSemanticProjectDiff } from './semantic-project-diff.js';
@@ -21,7 +24,9 @@ import {
   type PreparedTransaction,
   type TransactionFileChange,
 } from './transaction-journal.js';
-import type { ProjectMutationRequest, ProjectMutationResult } from './transaction-types.js';
+import type { ProjectMutationRequest } from './transaction-types.js';
+
+type ProjectCommitEvidence = { committed: boolean; transaction_id?: string };
 
 const currentFileHashes = (project: LoadedProject): ReadonlyMap<string, string> => {
   const hashes = new Map<string, string>([['attest.project.json', project.contentHashes.manifest]]);
@@ -84,79 +89,98 @@ const assertExpectedProjectHash = (actual: string, expected?: string): void => {
   }
 };
 
-const createMissingDirectories = async (
+/** Creates the journaled authored parents and fsyncs each parent entry. */
+const createMissingDirectories = Effect.fn('createMissingDirectories')(function* (
   root: string,
   prepared: PreparedTransaction,
-): Promise<void> => {
+) {
   for (const path of prepared.journal.created_directories) {
     const absolutePath = join(root, path);
-    await mkdir(absolutePath);
-    await syncPath(dirname(absolutePath));
+    yield* anchoredCall('mkdir', absolutePath, () => mkdir(absolutePath));
+    yield* syncPath(dirname(absolutePath));
   }
-};
+}, Effect.uninterruptible);
 
 /** Publishes staged paths by atomic rename with the manifest commit point last. */
-const publishPreparedTransaction = async (
+const publishPreparedTransaction = Effect.fn('publishPreparedTransaction')(function* (
   root: string,
   prepared: PreparedTransaction,
-): Promise<void> => {
+) {
   const manifestIndex = prepared.journal.entries.findIndex(
     ({ path }) => path === prepared.journal.manifest_path,
   );
 
   if (manifestIndex !== prepared.journal.entries.length - 1) {
-    throw new ProjectTransactionError(
-      'project_transaction_failed',
-      'Transaction manifest is not the final publish entry.',
+    return yield* Effect.fail(
+      new ProjectTransactionError(
+        'project_transaction_failed',
+        'Transaction manifest is not the final publish entry.',
+      ),
     );
   }
 
   prepared.journal = { ...prepared.journal, status: 'publishing' };
-  await writeTransactionJournal(prepared);
-  await createMissingDirectories(root, prepared);
+  yield* writeTransactionJournal(prepared);
+  yield* createMissingDirectories(root, prepared);
 
   for (const entry of prepared.journal.entries) {
-    const destination = await resolveSafeProjectPath(root, entry.path);
+    const destination = yield* resolveSafeProjectPath(root, entry.path);
 
-    if ((await readByteHash(destination)) !== entry.original_hash) {
-      throw new ProjectTransactionError(
-        'project_recovery_required',
-        'Transaction refused to overwrite a path changed after staging.',
-        {
-          path: entry.path,
-          details: { transaction_id: prepared.journal.transaction_id },
-        },
+    if ((yield* readByteHash(destination)) !== entry.original_hash) {
+      return yield* Effect.fail(
+        new ProjectTransactionError(
+          'project_recovery_required',
+          'Transaction refused to overwrite a path changed after staging.',
+          {
+            path: entry.path,
+            details: { transaction_id: prepared.journal.transaction_id },
+          },
+        ),
       );
     }
 
     if (entry.type === 'write') {
       // Recheck the destination after directory creation to reject symlink swaps.
-      await resolveSafeProjectPath(root, entry.path);
-      await rename(join(prepared.directory, entry.staged_path), destination);
+      yield* resolveSafeProjectPath(root, entry.path);
+      yield* anchoredCall('rename', destination, () =>
+        rename(join(prepared.directory, entry.staged_path), destination),
+      );
     } else {
-      await unlink(destination);
+      yield* anchoredCall('unlink', destination, () => unlink(destination));
     }
 
-    await syncPath(dirname(destination));
+    yield* syncPath(dirname(destination));
   }
-};
+}, Effect.uninterruptible);
 
 /** Marks a verified transaction committed before its recoverable artifacts are removed. */
-const markTransactionCommitted = async (prepared: PreparedTransaction): Promise<void> => {
+const markTransactionCommitted = Effect.fn('markTransactionCommitted')(function* (
+  prepared: PreparedTransaction,
+) {
   prepared.journal = { ...prepared.journal, status: 'committed' };
-  await writeTransactionJournal(prepared);
-};
+  yield* writeTransactionJournal(prepared);
+}, Effect.uninterruptible);
 
-const loadMutationState = async (
+/** Loads the guarded snapshot and computes a synchronous candidate and semantic diff. */
+const loadMutationState = Effect.fn('loadMutationState')(function* (
   request: ProjectMutationRequest,
-): Promise<{
-  after: PreparedProjectCandidate;
-  before: LoadedProject;
-  result: ProjectMutationResult;
-}> => {
-  const before = await loadProject({ project: request.projectRoot });
-  assertExpectedProjectHash(before.projectHash, request.expectedProjectHash);
-  const after = prepareProjectCandidate(request.candidate);
+) {
+  const before = yield* loadProject({ project: request.projectRoot });
+  yield* Effect.try({
+    try: () => assertExpectedProjectHash(before.projectHash, request.expectedProjectHash),
+    catch: (cause) =>
+      cause instanceof LocalError
+        ? cause
+        : new ProjectTransactionError('project_invalid', 'Invalid project hash.', { cause }),
+  });
+
+  const after = yield* Effect.try({
+    try: () => prepareProjectCandidate(request.candidate),
+    catch: (cause) =>
+      cause instanceof LocalError
+        ? cause
+        : new ProjectTransactionError('project_invalid', 'Invalid candidate project.', { cause }),
+  });
 
   const diff = createSemanticProjectDiff(before, after.project, {
     renames: request.renames,
@@ -173,124 +197,143 @@ const loadMutationState = async (
       projectHashBefore: before.projectHash,
     },
   };
-};
+}, Effect.uninterruptible);
 
-const rollbackAfterFailure = async (
-  root: string,
-  prepared: PreparedTransaction,
-  cause: unknown,
-): Promise<never> => {
-  try {
-    await rollbackPreparedTransaction(root, prepared);
-    await cleanupPreparedTransaction(root, prepared);
-  } catch (rollbackFailure: unknown) {
-    throw new ProjectTransactionError(
-      'project_recovery_required',
-      'Transaction failed and automatic rollback could not complete.',
-      {
-        details: { transaction_id: prepared.journal.transaction_id },
-        cause: new AggregateError(
-          [cause, rollbackFailure],
-          'Transaction and rollback both failed.',
-        ),
-      },
-    );
-  }
-
-  if (cause instanceof LocalError) {
-    throw cause;
-  }
-
-  throw new ProjectTransactionError(
-    'project_transaction_failed',
-    'Transaction failed; the prior project was restored.',
-    {
-      details: { transaction_id: prepared.journal.transaction_id },
-      cause,
-    },
-  );
-};
-
-/** Keeps rollback before the durable commit and cleanup after it. */
-const runPreparedTransaction = async (options: {
+/** Rolls back a failed publication while retaining its primary Cause and cleanup uncertainty. */
+const runPreparedTransaction = Effect.fn('runPreparedTransaction')(function* <
+  E extends Error,
+  E2 extends Error,
+>(options: {
   root: string;
   prepared: PreparedTransaction;
-  verify: () => Promise<void>;
-  beforePublish?: () => Promise<void> | void;
-}): Promise<void> => {
+  verify: () => Effect.Effect<unknown, E>;
+  beforePublish?: () => Effect.Effect<unknown, E2>;
+}) {
   const { root, prepared } = options;
 
-  try {
-    await options.beforePublish?.();
-    await publishPreparedTransaction(root, prepared);
-    await options.verify();
-    await markTransactionCommitted(prepared);
-  } catch (cause: unknown) {
-    return rollbackAfterFailure(root, prepared, cause);
-  }
+  const primary = yield* Effect.exit(
+    Effect.gen(function* () {
+      if (options.beforePublish) yield* Effect.suspend(options.beforePublish);
+      yield* publishPreparedTransaction(root, prepared);
+      yield* Effect.suspend(options.verify);
+      yield* markTransactionCommitted(prepared);
+    }),
+  );
 
-  try {
-    await completePreparedTransaction(root, prepared);
-    await cleanupPreparedTransaction(root, prepared);
-  } catch (cause: unknown) {
-    throw new ProjectTransactionError(
-      'project_saved_cleanup_failed',
-      'Project change was saved, but Attest could not finish the transaction.',
-      {
-        details: { committed: true, transaction_id: prepared.journal.transaction_id },
-        hint: 'Run attest project validate in this project to finish cleanup. Do not repeat the mutation.',
-        cause,
-      },
+  if (Exit.isFailure(primary)) {
+    // Interrupting observation is never evidence that foreign publication rolled back.
+    if (Cause.hasInterrupts(primary.cause)) return yield* Effect.failCause(primary.cause);
+
+    const compensation = yield* Effect.exit(
+      Effect.gen(function* () {
+        yield* rollbackPreparedTransaction(root, prepared);
+        yield* cleanupPreparedTransaction(root, prepared);
+      }),
+    );
+
+    // Compensation determines whether another mutation is safe. Preserve the original Cause
+    // as evidence, but report recovery-required when durable rollback cannot be confirmed.
+    if (Exit.isFailure(compensation)) {
+      const cause = Cause.hasDies(primary.cause)
+        ? primary.cause
+        : Cause.map(
+            primary.cause,
+            () =>
+              new ProjectTransactionError(
+                'project_recovery_required',
+                'Transaction failed and automatic rollback could not complete.',
+                {
+                  details: { transaction_id: prepared.journal.transaction_id },
+                  cause: primary.cause,
+                },
+              ),
+          );
+
+      return yield* Effect.failCause(annotateProjectCleanup(cause, compensation.cause));
+    }
+
+    if (Cause.hasDies(primary.cause)) return yield* Effect.failCause(primary.cause);
+
+    return yield* Effect.failCause(
+      Cause.map(primary.cause, (cause) =>
+        cause instanceof LocalError
+          ? cause
+          : new ProjectTransactionError(
+              'project_transaction_failed',
+              'Transaction failed; the prior project was restored.',
+              { details: { transaction_id: prepared.journal.transaction_id }, cause },
+            ),
+      ),
     );
   }
-};
 
-/** Applies one complete candidate atomically or returns its identical write-free preview. */
-const applyProjectMutation = async (
+  const cleanup = yield* Effect.exit(
+    Effect.gen(function* () {
+      yield* completePreparedTransaction(root, prepared);
+      yield* cleanupPreparedTransaction(root, prepared);
+    }),
+  );
+
+  if (Exit.isFailure(cleanup))
+    return yield* Effect.fail(
+      new ProjectTransactionError(
+        'project_saved_cleanup_failed',
+        'Project change was saved, but Attest could not finish the transaction.',
+        {
+          details: { committed: true, transaction_id: prepared.journal.transaction_id },
+          hint: 'Run attest project validate in this project to finish cleanup. Do not repeat the mutation.',
+          cause: cleanup.cause,
+        },
+      ),
+    );
+}, Effect.uninterruptible);
+
+/** Applies one complete candidate or returns its write-free preview before lock acquisition. */
+const applyProjectMutation = Effect.fn('applyProjectMutation')(function* (
   request: ProjectMutationRequest,
-): Promise<ProjectMutationResult> => {
-  if (request.dryRun === true) {
-    // This branch intentionally runs before mkdir, lock acquisition, journal staging, or recovery.
-    return (await loadMutationState(request)).result;
-  }
+) {
+  if (request.dryRun === true) return (yield* loadMutationState(request)).result;
 
-  let lock: ProjectLockHandle | undefined;
+  return yield* withProjectLock(
+    request.projectRoot,
+    (lock) =>
+      Effect.gen(function* () {
+        yield* recoverProjectTransactions(request.projectRoot, lock);
+        const state = yield* loadMutationState(request);
+        const changes = createFileChanges(state.before, state.after);
 
-  try {
-    lock = await acquireProjectLock(request.projectRoot);
-    await recoverProjectTransactions(request.projectRoot, lock);
-    const state = await loadMutationState(request);
-    const changes = createFileChanges(state.before, state.after);
+        if (changes.length === 0) return { ...state.result, committed: true };
+        const prepared = yield* prepareTransaction(request.projectRoot, changes);
+        yield* runPreparedTransaction({
+          root: request.projectRoot,
+          prepared,
+          verify: () =>
+            Effect.gen(function* () {
+              const verified = yield* loadProject({ project: request.projectRoot });
 
-    if (changes.length === 0) {
-      return { ...state.result, committed: true };
-    }
+              if (verified.projectHash !== state.after.projectHash)
+                return yield* Effect.fail(
+                  new ProjectTransactionError(
+                    'project_transaction_failed',
+                    'Published project hash does not match the candidate.',
+                    { details: { current_hash: verified.projectHash } },
+                  ),
+                );
+            }),
+        });
 
-    const prepared = await prepareTransaction(request.projectRoot, changes);
+        return { ...state.result, committed: true, transactionId: prepared.journal.transaction_id };
+      }),
+    (value) => {
+      const details: ProjectCommitEvidence = { committed: value.committed };
 
-    await runPreparedTransaction({
-      root: request.projectRoot,
-      prepared,
-      verify: async () => {
-        const verified = await loadProject({ project: request.projectRoot });
+      if ('transactionId' in value && value.transactionId)
+        details.transaction_id = value.transactionId;
 
-        if (verified.projectHash !== state.after.projectHash) {
-          throw new ProjectTransactionError(
-            'project_transaction_failed',
-            'Published project hash does not match the candidate.',
-            { details: { current_hash: verified.projectHash } },
-          );
-        }
-      },
-    });
-
-    return { ...state.result, committed: true, transactionId: prepared.journal.transaction_id };
-  } finally {
-    if (lock !== undefined) {
-      await releaseProjectLock(lock);
-    }
-  }
-};
+      return details;
+    },
+  );
+}, Effect.uninterruptible);
 
 export {
   applyProjectMutation,

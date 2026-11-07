@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { access, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,7 +108,9 @@ describe('agent commands', () => {
 
     expect(result.exitCode).toBe(0);
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
 
     // docs/integrations/callbacks.md agent.json without `retry`, plus the header and query flags.
     expect(loaded.agents).toEqual([
@@ -191,7 +195,10 @@ describe('agent commands', () => {
 
     expect(imported.exitCode).toBe(0);
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.agents.map(({ id }) => id)).toEqual(['guided', 'imported', 'requested']);
     expect(loaded.agents.find(({ id }) => id === 'guided')?.transport).toEqual(
       agent('guided').transport,
@@ -274,7 +281,13 @@ describe('agent commands', () => {
     ]);
 
     expect(added.exitCode).toBe(0);
-    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+    expect(
+      (
+        await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+          valueFromExit(exit),
+        )
+      ).agents[0]?.transport,
+    ).toMatchObject({
       kind: 'native_cli',
       sandbox,
     });
@@ -369,7 +382,9 @@ describe('agent commands', () => {
     expect(removed.document).toMatchObject({
       result: { warnings: ['Removed dependent tests: refund'] },
     });
-    await expect(loadProject({ project: root })).resolves.toMatchObject({ agents: [], tests: [] });
+    await expect(
+      Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+    ).resolves.toMatchObject({ agents: [], tests: [] });
   });
 
   it('accepts common options before the namespace and rejects a repeated --output', async () => {
@@ -654,7 +669,11 @@ describe('agent commands', () => {
     ]);
 
     expect(bridge.exitCode).toBe(0);
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.agents.find(({ id }) => id === 'stream-auth')?.transport).toMatchObject({
       request: { headers: { Authorization: { from_env: 'STREAM_TOKEN' } } },
       terminal_pointer: '/state',
@@ -810,7 +829,10 @@ describe('WebSocket agent commands', () => {
 
     expect(wizard.exitCode).toBe(0);
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.agents.map(({ id }) => id)).toEqual(['flags', 'imported', 'json', 'wizard']);
 
     for (const agent of loaded.agents) {
@@ -834,7 +856,13 @@ describe('WebSocket agent commands', () => {
     ]);
 
     expect(added.exitCode).toBe(0);
-    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+    expect(
+      (
+        await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+          valueFromExit(exit),
+        )
+      ).agents[0]?.transport,
+    ).toMatchObject({
       kind: 'websocket',
       lifecycle: 'per_case',
       connection_mode: 'serial',

@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { METRIC_PRESETS, type MetricPresetId } from '@attest/contracts';
 import { loadCommandProject } from '@attest/local/project';
 
@@ -73,11 +75,14 @@ const guidedTraceCapability = async (
   options: MetricAddOptions,
   context: CommandContext,
 ): Promise<string> => {
-  const loaded = await loadCommandProject({
-    project: options.project,
-    recover: options.dryRun !== true,
-    workingDirectory: context.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      recover: options.dryRun !== true,
+      workingDirectory: context.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const defaultAgent = loaded.agents[0];
 

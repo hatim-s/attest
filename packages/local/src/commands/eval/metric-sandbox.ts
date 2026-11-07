@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize } from 'node:path';
 
@@ -13,10 +15,13 @@ import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 /** Reads a project-contained regular file, or returns undefined for anything else. */
 const readProjectFile = async (projectRoot: string, path: string): Promise<string | undefined> => {
   try {
-    const resolved = await resolveContainedPath(projectRoot, path, {
-      expect: 'file',
-      problem: (problem) => new Error(problem),
-    });
+    // EFFECT-BRIDGE(S5)
+    const resolved = await Effect.runPromiseExit(
+      resolveContainedPath(projectRoot, path, {
+        expect: 'file',
+        problem: (problem) => new Error(problem),
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     return await readFile(resolved, 'utf8');
   } catch {

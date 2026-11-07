@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import { randomUUID } from 'node:crypto';
 import { lstat, readlink, rename, symlink, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -20,26 +22,21 @@ type PrepareEvalProjectFileOptions = {
  * directories when asked. Every failure, including filesystem errors, becomes the caller's
  * error so no path detail beyond the configured value reaches the user.
  */
-const prepareEvalProjectFile = async (
+const prepareEvalProjectFile = Effect.fn('prepareEvalProjectFile')(function* (
   projectRoot: string,
   configuredPath: string,
   options: PrepareEvalProjectFileOptions,
-): Promise<string> => {
+) {
   const unsafe = (): LocalError =>
     new LocalError(options.errorCode, options.message, { path: configuredPath });
 
-  try {
-    return await resolveContainedPath(projectRoot, configuredPath, {
-      allowAbsolute: options.allowAbsolute,
-      createDirectories: options.createDirectories,
-      expect: 'file',
-      problem: unsafe,
-    });
-  } catch (error: unknown) {
-    if (error instanceof LocalError) throw error;
-    throw unsafe();
-  }
-};
+  return yield* resolveContainedPath(projectRoot, configuredPath, {
+    allowAbsolute: options.allowAbsolute,
+    createDirectories: options.createDirectories,
+    expect: 'file',
+    problem: unsafe,
+  }).pipe(Effect.mapError((error) => (error instanceof LocalError ? error : unsafe())));
+});
 
 const sameDirectoryIdentity = (
   left: Awaited<ReturnType<typeof lstat>>,
@@ -97,11 +94,14 @@ const retainCapturedStoreAlias = (
 
 /** Atomically captures the validated .attest directory through SQLite open and migration. */
 const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> => {
-  const storePath = await prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
-    createDirectories: true,
-    errorCode: 'run_failed',
-    message: 'The eval run store is not a safe project file.',
-  });
+  // EFFECT-BRIDGE(S7b)
+  const storePath = await Effect.runPromiseExit(
+    prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
+      createDirectories: true,
+      errorCode: 'run_failed',
+      message: 'The eval run store is not a safe project file.',
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const directory = dirname(storePath);
   const resolvedRoot = dirname(directory);

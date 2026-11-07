@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
 import { discoverProject } from '../../project/discover-project.js';
@@ -44,10 +46,13 @@ const importAgentResource = async (
     options.sourceText ??
     (await readCurlDocument(request.source, options.workingDirectory, options.readStdin));
 
-  const { root } = await discoverProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const { root } = await Effect.runPromiseExit(
+    discoverProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const imported = await createImportedCurlAgentResource(request, curlSource, root);
 
@@ -73,11 +78,14 @@ const runAgentImportCommand = async (
   const { request } = options;
   const { agent, preview } = await importAgentResource(request, options);
 
-  const loaded = await loadCommandProject({
-    project: options.project,
-    recover: request.dry_run !== true,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      recover: request.dry_run !== true,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   assertNewId('agent', loaded.agents, agent.id);
 

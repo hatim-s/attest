@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { projectManifestSchema } from '@attest/contracts';
 
 import { PROJECT_MANIFEST_FILE } from './discover-project.js';
@@ -10,8 +11,15 @@ type ProjectIdentity = { name: string; projectId: string };
  * Reads only the manifest's display name and id, for callers that list a project rather than
  * load it. Returns undefined when `root` has no manifest; an invalid manifest still throws.
  */
-const readProjectIdentity = async (root: string): Promise<ProjectIdentity | undefined> => {
-  const manifest = await loadJsonResource(
+const readProjectIdentity = Effect.fn('readProjectIdentity')(function* (
+  root: string,
+): Effect.fn.Return<
+  ProjectIdentity | undefined,
+  | import('../internal/open-anchored.js').AnchoredCleanupFailure
+  | import('../internal/open-anchored.js').AnchoredFileFailure
+  | ProjectLoadError
+> {
+  const manifest = yield* loadJsonResource(
     root,
     PROJECT_MANIFEST_FILE,
     undefined,
@@ -24,11 +32,13 @@ const readProjectIdentity = async (root: string): Promise<ProjectIdentity | unde
 
   if (manifest.diagnostics.every(({ code }) => code === 'source_missing')) return undefined;
 
-  throw new ProjectLoadError(
-    'project_invalid',
-    `Project manifest validation failed with ${manifest.diagnostics.length} diagnostic(s).`,
-    manifest.diagnostics,
+  return yield* Effect.fail(
+    new ProjectLoadError(
+      'project_invalid',
+      `Project manifest validation failed with ${manifest.diagnostics.length} diagnostic(s).`,
+      manifest.diagnostics,
+    ),
   );
-};
+});
 
 export { readProjectIdentity };

@@ -172,7 +172,16 @@ const effectBoundariesRule = {
           },
           browser: { type: 'boolean' },
           operations: { type: 'array', items: { type: 'string' } },
-          removalSlice: { type: 'string' },
+          removalSlice: { type: 'string', enum: ['S1c', 'S2', 'S3', 'S4a', 'S4b', 'S4c', 'S5', 'S6', 'S7a', 'S7b', 'S8b', 'S8c', 'S9a', 'S9b', 'S9c', 'S10'] },
+          bridges: { type: 'array', minItems: 1, uniqueItems: true, items: {
+            type: 'object', additionalProperties: false,
+            required: ['operation', 'removalSlice', 'owner'],
+            properties: {
+              operation: { type: 'string' },
+              removalSlice: { type: 'string', enum: ['S1c', 'S2', 'S3', 'S4a', 'S4b', 'S4c', 'S5', 'S6', 'S7a', 'S7b', 'S8b', 'S8c', 'S9a', 'S9b', 'S9c', 'S10'] },
+              owner: { type: 'string', minLength: 1 },
+            },
+          } },
         },
         additionalProperties: false,
       },
@@ -185,6 +194,8 @@ const effectBoundariesRule = {
     const bindings = [];
     const used = new Set();
     const taggedComments = new Set();
+    const usedBridges = new Set();
+    const bridges = options.bridges ?? [];
     const source = context.sourceCode;
     const bridgeComments = source
       .getAllComments()
@@ -247,15 +258,21 @@ const effectBoundariesRule = {
         return;
       }
       used.add(operation);
-      if (options.removalSlice) {
+      if (options.removalSlice || bridges.length) {
+        const declared = bridges.filter((entry) => entry.operation === operation);
         const adjacent = bridgeComments.filter(
           ({ comment, slices }) =>
             comment.loc.end.line === node.loc.start.line - 1 &&
-            slices.includes(options.removalSlice),
+            slices.some((slice) => slice === options.removalSlice || declared.some((entry) => entry.removalSlice === slice)),
         );
-        if (adjacent.length === 0)
+        if (adjacent.length === 0 || (bridges.length && adjacent.some(({ slices }) => slices.length !== 1)))
           report(node, 'Bridge execution needs an adjacent matching EFFECT-BRIDGE(Sx) tag.');
-        for (const { comment } of adjacent) taggedComments.add(comment);
+        for (const { comment, slices } of adjacent) {
+          taggedComments.add(comment);
+          for (const entry of declared) {
+            if (slices.includes(entry.removalSlice)) usedBridges.add(entry);
+          }
+        }
       }
     }
     function inspectReference(identifier, module) {
@@ -322,9 +339,16 @@ const effectBoundariesRule = {
           if (!used.has(operation))
             report(program, `Unused execution ledger operation: ${operation}.`);
         }
+        const associations = new Set();
+        for (const entry of bridges) {
+          const key = `${entry.operation}/${entry.removalSlice}`;
+          if (associations.has(key)) report(program, `Duplicate bridge association: ${key}.`);
+          associations.add(key);
+          if (!usedBridges.has(entry)) report(program, `Unused bridge association: ${entry.operation}/${entry.removalSlice}.`);
+        }
         for (const { comment, slices } of bridgeComments) {
           for (const slice of slices) {
-            if (!options.removalSlice || slice !== options.removalSlice)
+            if (slice !== options.removalSlice && !bridges.some((entry) => entry.removalSlice === slice))
               report(comment, 'Bridge tag has no matching migration ledger entry.');
             else if (!taggedComments.has(comment))
               report(comment, 'Bridge tag has no adjacent execution operation.');

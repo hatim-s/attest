@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type { StoredMetricEvaluation } from '@attest/core';
 import type { MetricContext } from '@attest/runtime';
 
@@ -33,7 +35,11 @@ const withoutDuration = (evaluation: StoredMetricEvaluation) => {
 const runMetricTestCommand = async (
   options: MetricTestCommandOptions,
 ): Promise<CommandResult<'metric-test', MetricTestResult>> => {
-  const loaded = await loadCommandProject(options);
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(loadCommandProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   const metric = findResource('metric', loaded.metrics, options.metricId ?? '');
 
   const fixture = await readMetricTestFixture(

@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -141,7 +143,9 @@ const interruptAfterFirstPublish = async (
 
   if (first?.type !== 'write') throw new Error('Expected a staged write first.');
   prepared.journal = { ...prepared.journal, status: 'publishing' };
-  await writeTransactionJournal(prepared);
+  await Effect.runPromiseExit(writeTransactionJournal(prepared)).then((exit) =>
+    valueFromExit(exit),
+  );
   await rename(join(prepared.directory, first.staged_path), join(root, first.path));
 };
 

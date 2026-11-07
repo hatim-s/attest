@@ -17,7 +17,8 @@
     "@attest/contracts": "workspace:*",
     "@attest/core": "workspace:*",
     "@attest/local": "workspace:*",
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "effect": "4.1.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

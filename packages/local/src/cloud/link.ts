@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
@@ -31,11 +33,14 @@ type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient; signa
 
 /** Resolves cloud state without following project-local symlinks. */
 const cloudLinkPath = async (root: string, create = false): Promise<string> =>
-  resolveContainedPath(root, '.attest/cloud.json', {
-    createDirectories: create,
-    expect: 'file',
-    problem: () => new LocalError('project_invalid', 'Cloud link path is unsafe.'),
-  });
+  // EFFECT-BRIDGE(S8c)
+  Effect.runPromiseExit(
+    resolveContainedPath(root, '.attest/cloud.json', {
+      createDirectories: create,
+      expect: 'file',
+      problem: () => new LocalError('project_invalid', 'Cloud link path is unsafe.'),
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 /** Reads the origin-bound project link, rejecting malformed state rather than resetting it. */
 const readCloudLink = async (root: string): Promise<CloudLink | undefined> => {
@@ -70,10 +75,12 @@ const writeCloudLink = async (root: string, link: CloudLink): Promise<void> => {
       flag: 'wx',
       mode: 0o600,
     });
-    await syncPath(temporary);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(syncPath(temporary)).then((exit) => valueFromExit(exit));
     await cloudLinkPath(root);
     await rename(temporary, path);
-    await syncPath(dirname(path));
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(syncPath(dirname(path))).then((exit) => valueFromExit(exit));
   } finally {
     await unlink(temporary).catch((cause: unknown) => {
       if (errnoCode(cause) !== 'ENOENT') throw cause;
@@ -83,7 +90,11 @@ const writeCloudLink = async (root: string, link: CloudLink): Promise<void> => {
 
 /** Resolves a linked project and prevents credentials for another origin from being used. */
 const resolveCloudProject = async (options: CloudProjectOptions) => {
-  const { root } = await discoverProject(options);
+  // EFFECT-BRIDGE(S8c)
+  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   const link = await readCloudLink(root);
 
   if (link === undefined) {
@@ -103,7 +114,10 @@ const resolveCloudProject = async (options: CloudProjectOptions) => {
 
 /** Links an existing cloud project without claiming the local files match a revision. */
 const linkCloudProject = async (options: CloudProjectOptions & { projectId: string }) => {
-  const { root } = await discoverProject(options);
+  // EFFECT-BRIDGE(S8c)
+  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
 
   const response = await options.client.request(
     'GET',
@@ -115,7 +129,10 @@ const linkCloudProject = async (options: CloudProjectOptions & { projectId: stri
     throw new LocalError('cloud_request_failed', 'Cloud returned a different or invalid project.');
   }
 
-  const lock = await acquireProjectLock(root);
+  // EFFECT-BRIDGE(S8c)
+  const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+    valueFromExit(exit),
+  );
 
   try {
     const current = await readCloudLink(root);
@@ -144,7 +161,8 @@ const linkCloudProject = async (options: CloudProjectOptions & { projectId: stri
 
     return { project_id: link.project_id, revision_id: link.revision_id ?? null };
   } finally {
-    await releaseProjectLock(lock);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
   }
 };
 

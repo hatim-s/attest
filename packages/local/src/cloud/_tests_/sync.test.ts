@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import { contentHash } from '@attest/core';
@@ -292,30 +294,39 @@ describe('cloud pull crash recovery', () => {
       const root = await createDirectory();
       await writeFile(join(root, 'attest.project.json'), 'unchanged manifest');
       await writeFile(join(root, 'attest/code.ts'), 'old code');
-      const lock = await acquireProjectLock(root);
+
+      const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+        valueFromExit(exit),
+      );
 
       try {
-        const transaction = await prepareTransaction(root, [
-          { path: 'attest/code.ts', type: 'write', contents: 'new code' },
-          { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
-        ]);
+        const transaction = await Effect.runPromiseExit(
+          prepareTransaction(root, [
+            { path: 'attest/code.ts', type: 'write', contents: 'new code' },
+            { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
+          ]),
+        ).then((exit) => valueFromExit(exit));
 
         if (phase === 'partial') {
           await interruptAfterFirstPublish(root, transaction);
           expect(await readFile(join(root, 'attest/code.ts'), 'utf8')).toBe('new code');
         } else if (phase === 'published') {
-          await publishPreparedTransaction(root, transaction);
+          await Effect.runPromiseExit(publishPreparedTransaction(root, transaction)).then((exit) =>
+            valueFromExit(exit),
+          );
         }
 
-        expect(await recoverProjectTransactions(root, lock)).toEqual([
-          { action: 'rolled_back', transactionId: transaction.journal.transaction_id },
-        ]);
+        expect(
+          await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+            valueFromExit(exit),
+          ),
+        ).toEqual([{ action: 'rolled_back', transactionId: transaction.journal.transaction_id }]);
         expect(await readFile(join(root, 'attest/code.ts'), 'utf8')).toBe('old code');
         expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe(
           'unchanged manifest',
         );
       } finally {
-        await releaseProjectLock(lock);
+        await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
       }
     },
   );
@@ -347,25 +358,38 @@ it.each(['changed', 'unchanged'])(
     };
 
     await writeCloudLink(root, before);
-    const lock = await acquireProjectLock(root);
+
+    const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     try {
-      let transaction = await prepareTransaction(
-        root,
-        [
-          { type: 'write', path: 'attest/code.ts', contents: 'new code' },
-          { type: 'write', path: 'attest.project.json', contents: manifest },
-        ],
-        {
-          completion: { path: '.attest/cloud.json', contents: serializeCloudLink(after) },
-        },
-      );
+      let transaction = await Effect.runPromiseExit(
+        prepareTransaction(
+          root,
+          [
+            { type: 'write', path: 'attest/code.ts', contents: 'new code' },
+            { type: 'write', path: 'attest.project.json', contents: manifest },
+          ],
+          {
+            completion: { path: '.attest/cloud.json', contents: serializeCloudLink(after) },
+          },
+        ),
+      ).then((exit) => valueFromExit(exit));
 
-      await publishPreparedTransaction(root, transaction);
+      await Effect.runPromiseExit(publishPreparedTransaction(root, transaction)).then((exit) =>
+        valueFromExit(exit),
+      );
       transaction = { ...transaction, journal: { ...transaction.journal, status: 'committed' } };
-      await writeTransactionJournal(transaction);
+      await Effect.runPromiseExit(writeTransactionJournal(transaction)).then((exit) =>
+        valueFromExit(exit),
+      );
       expect(await readCloudLink(root)).toEqual(before);
-      expect(await recoverProjectTransactions(root, lock)).toEqual([
+      expect(
+        await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+          valueFromExit(exit),
+        ),
+      ).toEqual([
         { action: 'completed_commit', transactionId: transaction.journal.transaction_id },
       ]);
       expect(await readCloudLink(root)).toEqual(after);
@@ -377,7 +401,7 @@ it.each(['changed', 'unchanged'])(
         }),
       ).toContainEqual({ type: 'write', path: 'attest/code.ts', contents: 'third revision' });
     } finally {
-      await releaseProjectLock(lock);
+      await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
     }
   },
 );

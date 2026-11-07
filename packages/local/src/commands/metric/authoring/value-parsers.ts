@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../../internal/effect-exit.js';
 import {
   parseWithSchema,
   assertionCheckSchema,
@@ -154,11 +156,14 @@ const readExclusiveText = async (
   if (literal?.trim()) return literal.trim();
 
   if (source !== undefined) {
-    const text = await readSourceText(source, {
-      path: sourcePath,
-      readStdin: fields.readStdin,
-      workingDirectory: fields.workingDirectory,
-    });
+    // EFFECT-BRIDGE(S8b)
+    const text = await Effect.runPromiseExit(
+      readSourceText(source, {
+        path: sourcePath,
+        readStdin: fields.readStdin,
+        workingDirectory: fields.workingDirectory,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     if (text.trim()) return text;
   }

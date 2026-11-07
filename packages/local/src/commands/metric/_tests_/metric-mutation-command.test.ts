@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -69,7 +71,11 @@ const snapshotFiles = async (root: string): Promise<Record<string, string>> => {
 describe('runMetricMutationCommand', () => {
   it('renames every reference and removes a referenced metric only with detach', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -107,11 +113,13 @@ describe('runMetricMutationCommand', () => {
           : entry,
       ),
     };
-    await applyProjectMutation({
-      candidate,
-      expectedProjectHash: loaded.projectHash,
-      projectRoot: root,
-    });
+    await Effect.runPromiseExit(
+      applyProjectMutation({
+        candidate,
+        expectedProjectHash: loaded.projectHash,
+        projectRoot: root,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     await expect(
       mutate(root, { schema, command: 'metric.remove', metric_id: 'correct', yes: true }),
@@ -132,7 +140,11 @@ describe('runMetricMutationCommand', () => {
       metric_id: 'correct',
       new_id: 'correctness',
     });
-    const renamed = await loadProject({ project: root });
+
+    const renamed = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(renamed.tests[0]?.metrics[0]?.metric_id).toBe('correctness');
     expect(renamed.tests[0]?.cases[0]?.metric_overrides?.[0]?.metric_id).toBe('correctness');
     expect(renamed.datasets[0]?.cases[0]?.metric_overrides?.[0]?.metric_id).toBe('correctness');
@@ -151,7 +163,11 @@ describe('runMetricMutationCommand', () => {
         message: 'Detached 3 metric references before removal.',
       },
     ]);
-    const detached = await loadProject({ project: root });
+
+    const detached = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(detached.metrics).toEqual([]);
     expect(detached.tests[0]?.metrics).toEqual([]);
     expect(detached.tests[0]?.cases[0]?.metric_overrides).toEqual([]);

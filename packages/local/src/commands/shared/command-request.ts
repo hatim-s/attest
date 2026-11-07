@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import {
   parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
@@ -70,7 +72,10 @@ const readRequestDocument = async (
   source: string,
   options: ReadRequestDocumentOptions,
 ): Promise<JsonValue> => {
-  const text = await readSourceText(source, { ...options, path: '--from-json' });
+  // EFFECT-BRIDGE(S8b)
+  const text = await Effect.runPromiseExit(
+    readSourceText(source, { ...options, path: '--from-json' }),
+  ).then((exit) => valueFromExit(exit));
 
   return parseJsonText(text, { path: '--from-json', hint: options.hint });
 };

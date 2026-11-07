@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import {
   applyProjectMutation,
   type ProjectMutationRequest,
@@ -19,17 +21,23 @@ type ExecuteProjectMutationOptions = {
 const executeProjectMutation = async (
   options: ExecuteProjectMutationOptions,
 ): Promise<ProjectMutationResult> => {
-  const preview = await applyProjectMutation({ ...options.mutation, dryRun: true });
+  // EFFECT-BRIDGE(S8b)
+  const preview = await Effect.runPromiseExit(
+    applyProjectMutation({ ...options.mutation, dryRun: true }),
+  ).then((exit) => valueFromExit(exit));
 
   if (options.dryRun) return preview;
 
   await options.confirm?.(preview);
 
-  return applyProjectMutation({
-    ...options.mutation,
-    dryRun: false,
-    expectedProjectHash: preview.projectHashBefore,
-  });
+  // EFFECT-BRIDGE(S8b)
+  return Effect.runPromiseExit(
+    applyProjectMutation({
+      ...options.mutation,
+      dryRun: false,
+      expectedProjectHash: preview.projectHashBefore,
+    }),
+  ).then((exit) => valueFromExit(exit));
 };
 
 export { executeProjectMutation };

@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -249,7 +251,11 @@ const runProjectInitCommand = async (
     await assertUninitialized(inspected.root);
     await publishProjectManifest(inspected.root, manifest.contents);
     published = true;
-    const loaded = await loadProject({ project: inspected.root });
+
+    // EFFECT-BRIDGE(S8b)
+    const loaded = await Effect.runPromiseExit(loadProject({ project: inspected.root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     if (loaded.projectHash !== prepared.projectHash) {
       throw new LocalError('init_failed', 'Published project verification failed.', {

@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest, MetricResource, ProjectResources } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
@@ -200,13 +202,15 @@ const runMetricMutationCommand = async (
   options: MetricMutationCommandOptions,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   // Dry-run must not acquire a write-capable reader lock or recover transaction journals.
-  const loaded =
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
     options.request.dry_run === true
-      ? await loadProject({ project: options.project, workingDirectory: options.workingDirectory })
-      : await loadCommandProject({
+      ? loadProject({ project: options.project, workingDirectory: options.workingDirectory })
+      : loadCommandProject({
           project: options.project,
           workingDirectory: options.workingDirectory,
-        });
+        }),
+  ).then((exit) => valueFromExit(exit));
 
   const built = await buildMetricMutation(loaded, options.request, options);
 

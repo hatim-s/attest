@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { LocalError } from '../../errors/index.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
@@ -11,11 +13,14 @@ const runAgentRemoveCommand = async (
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   const { request } = options;
 
-  const loaded = await loadCommandProject({
-    project: options.project,
-    recover: request.dry_run !== true,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      recover: request.dry_run !== true,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   findResource('agent', loaded.agents, request.agent_id);
 

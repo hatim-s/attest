@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { loadProject } from '../../project/project-loader/index.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
 import { executeProjectMutation } from '../shared/project-mutation.js';
@@ -10,13 +12,15 @@ const runTestMutationCommand = async (
   options: TestMutationCommandOptions,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   // A preview must not recover journals or acquire a reader lock because that would write locally.
-  const loaded =
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
     options.request.dry_run === true
-      ? await loadProject({ project: options.project, workingDirectory: options.workingDirectory })
-      : await loadCommandProject({
+      ? loadProject({ project: options.project, workingDirectory: options.workingDirectory })
+      : loadCommandProject({
           project: options.project,
           workingDirectory: options.workingDirectory,
-        });
+        }),
+  ).then((exit) => valueFromExit(exit));
 
   const built = await buildMutation(loaded, options.request, options);
 

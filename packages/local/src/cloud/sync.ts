@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -66,7 +68,12 @@ const createCloudBundle = async (project: LoadedProject): Promise<PortableProjec
   const files: Record<string, string> = {};
 
   for (const path of projectFilePaths(project)) {
-    const bytes = await readFile(await resolveSafeProjectPath(project.root, path));
+    const bytes = await readFile(
+      // EFFECT-BRIDGE(S8c)
+      await Effect.runPromiseExit(resolveSafeProjectPath(project.root, path)).then((exit) =>
+        valueFromExit(exit),
+      ),
+    );
 
     try {
       files[path] = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -103,14 +110,30 @@ const createCloudBundle = async (project: LoadedProject): Promise<PortableProjec
 const pushCloudProject = async (
   options: CloudProjectOptions & { acknowledgeNoSecrets?: boolean },
 ) => {
-  const { root } = await discoverProject(options);
-  const lock = await acquireProjectLock(root);
+  // EFFECT-BRIDGE(S8c)
+  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
+  // EFFECT-BRIDGE(S8c)
+  const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+    valueFromExit(exit),
+  );
 
   try {
-    await recoverProjectTransactions(root, lock);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+      valueFromExit(exit),
+    );
     const { link, projectId } = await resolveCloudProject(options);
 
-    const bundle = await createCloudBundle(await loadProject({ project: root }));
+    const bundle = await createCloudBundle(
+      // EFFECT-BRIDGE(S8c)
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    );
+
     const hashes = fileHashes(bundle.files);
 
     const unchanged =
@@ -161,7 +184,8 @@ const pushCloudProject = async (
       file_count: Object.keys(bundle.files).length,
     };
   } finally {
-    await releaseProjectLock(lock);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
   }
 };
 
@@ -175,7 +199,16 @@ const planPullChanges = async (
   const conflicts: string[] = [];
 
   for (const path of new Set([...Object.keys(base), ...Object.keys(files)])) {
-    const currentHash = await readByteHash(await resolveSafeProjectPath(root, path));
+    // EFFECT-BRIDGE(S8c)
+    const destination = await Effect.runPromiseExit(resolveSafeProjectPath(root, path)).then(
+      (exit) => valueFromExit(exit),
+    );
+
+    // EFFECT-BRIDGE(S8c)
+    const currentHash = await Effect.runPromiseExit(readByteHash(destination)).then((exit) =>
+      valueFromExit(exit),
+    );
+
     const next = files[path];
     const nextHash = next === undefined ? null : byteHash(next);
 
@@ -209,11 +242,21 @@ const planPullChanges = async (
 
 /** Pulls one validated revision using the existing recoverable transaction journal. */
 const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: string }) => {
-  const { root } = await discoverProject(options);
-  const lock = await acquireProjectLock(root);
+  // EFFECT-BRIDGE(S8c)
+  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
+  // EFFECT-BRIDGE(S8c)
+  const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+    valueFromExit(exit),
+  );
 
   try {
-    await recoverProjectTransactions(root, lock);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+      valueFromExit(exit),
+    );
     const { link, projectId } = await resolveCloudProject(options);
 
     const selected =
@@ -235,42 +278,49 @@ const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: st
     resolvePortableProject(response.bundle);
     const changes = await planPullChanges(root, link.file_hashes, response.bundle.files);
 
-    const prepared = await prepareTransaction(root, changes, {
-      completion: {
-        path: '.attest/cloud.json',
-        contents: serializeCloudLink({
-          ...link,
-          revision_id: response.revision.id,
-          file_hashes: fileHashes(response.bundle.files),
-        }),
-      },
-    });
+    // EFFECT-BRIDGE(S8c)
+    const prepared = await Effect.runPromiseExit(
+      prepareTransaction(root, changes, {
+        completion: {
+          path: '.attest/cloud.json',
+          contents: serializeCloudLink({
+            ...link,
+            revision_id: response.revision.id,
+            file_hashes: fileHashes(response.bundle.files),
+          }),
+        },
+      }),
+    ).then((exit) => valueFromExit(exit));
 
-    await runPreparedTransaction({
-      root,
-      prepared,
-      beforePublish: () => {
-        // A non-Attest editor may write after conflict planning but before staging.
-        for (const entry of prepared.journal.entries) {
-          const incoming = response.bundle.files[entry.path];
-          const nextHash = incoming === undefined ? null : byteHash(incoming);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(
+      runPreparedTransaction({
+        root,
+        prepared,
+        beforePublish: () =>
+          Effect.gen(function* () {
+            // A non-Attest editor may write after conflict planning but before staging.
+            for (const entry of prepared.journal.entries) {
+              const incoming = response.bundle.files[entry.path];
+              const nextHash = incoming === undefined ? null : byteHash(incoming);
 
-          if (
-            entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
-            entry.original_hash !== nextHash
-          ) {
-            throw new LocalError(
-              'project_changed',
-              'A local file changed while cloud pull was staging.',
-              { path: entry.path },
-            );
-          }
-        }
-      },
-      verify: async () => {
-        await loadProject({ project: root });
-      },
-    });
+              if (
+                entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
+                entry.original_hash !== nextHash
+              ) {
+                return yield* Effect.fail(
+                  new LocalError(
+                    'project_changed',
+                    'A local file changed while cloud pull was staging.',
+                    { path: entry.path },
+                  ),
+                );
+              }
+            }
+          }),
+        verify: () => loadProject({ project: root }),
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     return {
       project_id: projectId,
@@ -278,7 +328,8 @@ const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: st
       file_count: Object.keys(response.bundle.files).length,
     };
   } finally {
-    await releaseProjectLock(lock);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
   }
 };
 

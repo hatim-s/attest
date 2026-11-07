@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type {
   CommandResult,
   ProjectShowResult,
@@ -14,10 +16,13 @@ type ProjectInspectionOptions = {
 const runProjectShowCommand = async (
   options: ProjectInspectionOptions,
 ): Promise<CommandResult<'project-show', ProjectShowResult>> => {
-  const loaded = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   return {
     operation: 'project-show',
@@ -35,10 +40,13 @@ const runProjectShowCommand = async (
 const runProjectValidateCommand = async (
   options: ProjectInspectionOptions,
 ): Promise<CommandResult<'project-validate', ProjectValidateResult>> => {
-  const loaded = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const counts = {
     agents: loaded.agents.length,

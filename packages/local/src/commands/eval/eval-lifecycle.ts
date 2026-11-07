@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { isAbsolute, resolve } from 'node:path';
 
 import type { EvalRun, EvalEvent } from '@attest/contracts';
@@ -77,17 +79,20 @@ const resolveWorkerDirectory = (
 
 /** Creates a worker directory whose every segment is a real directory inside the project. */
 const prepareWorkerDirectory = async (projectRoot: string, directory: string): Promise<string> =>
-  resolveContainedPath(projectRoot, directory, {
-    allowAbsolute: true,
-    createDirectories: true,
-    expect: 'directory',
-    problem: () =>
-      new LocalError(
-        'project_invalid',
-        'Eval worker directory escapes the project through a symbolic link.',
-        { path: directory },
-      ),
-  });
+  // EFFECT-BRIDGE(S7b)
+  Effect.runPromiseExit(
+    resolveContainedPath(projectRoot, directory, {
+      allowAbsolute: true,
+      createDirectories: true,
+      expect: 'directory',
+      problem: () =>
+        new LocalError(
+          'project_invalid',
+          'Eval worker directory escapes the project through a symbolic link.',
+          { path: directory },
+        ),
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 type RunHookOptions = {
   command: HookCommand | undefined;

@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { resolve } from 'node:path';
 
 import { readProjectIdentity } from '../project/read-project-identity.js';
@@ -17,7 +19,11 @@ type AddProjectOptions = {
  */
 const addProject = async (options: AddProjectOptions): Promise<RegistryEntry> => {
   const root = resolve(options.workingDirectory, options.directory);
-  const identity = await readProjectIdentity(root);
+
+  // EFFECT-BRIDGE(S8c)
+  const identity = await Effect.runPromiseExit(readProjectIdentity(root)).then((exit) =>
+    valueFromExit(exit),
+  );
 
   return registerProject({
     registryPath: options.registryPath,

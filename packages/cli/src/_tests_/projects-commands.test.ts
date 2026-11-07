@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { access, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -25,7 +27,11 @@ describe('projects commands', () => {
     const parent = await realpath(await temporaryDirectory('attest-projects-'));
 
     expect((await runJson(parent, ['project', 'init', 'demo', '--name', 'Demo'])).exitCode).toBe(0);
-    const demo = await loadProject({ project: join(parent, 'demo') });
+
+    const demo = await Effect.runPromiseExit(loadProject({ project: join(parent, 'demo') })).then(
+      (exit) => valueFromExit(exit),
+    );
+
     await mkdir(join(parent, 'plain'));
     const added = await runJson(parent, ['projects', 'add', 'plain']);
 

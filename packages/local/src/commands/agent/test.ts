@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -33,11 +35,14 @@ const readAgentTestInput = async (options: AgentTestInputOptions): Promise<JsonV
   const hint = 'Pass any valid JSON scalar, array, or object.';
 
   if (options.inputFile !== undefined) {
-    const text = await readSourceText(options.inputFile, {
-      path: '--input-file',
-      readStdin: options.readStdin,
-      workingDirectory: options.workingDirectory,
-    });
+    // EFFECT-BRIDGE(S8b)
+    const text = await Effect.runPromiseExit(
+      readSourceText(options.inputFile, {
+        path: '--input-file',
+        readStdin: options.readStdin,
+        workingDirectory: options.workingDirectory,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     return parseJsonText(text, { path: '--input-file', hint });
   }
@@ -88,10 +93,13 @@ const runAgentTestCommand = async (
 ): Promise<CommandResult<'agent-test', AgentTestResult>> => {
   const { request } = options;
 
-  const loaded = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const agent = findResource('agent', loaded.agents, request.agent_id);
 

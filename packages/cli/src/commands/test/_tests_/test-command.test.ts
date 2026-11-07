@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -356,7 +358,13 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
 
     expect(accepted.exitCode).toBe(0);
     expect(promptCount).toBe(0);
-    const guided = (await loadProject({ project: root })).tests.find(({ id }) => id === 'guided');
+
+    const guided = (
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      )
+    ).tests.find(({ id }) => id === 'guided');
+
     expect(guided?.cases).toHaveLength(1);
   });
 

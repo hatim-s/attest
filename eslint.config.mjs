@@ -51,6 +51,91 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/local/src/internal/_tests_/open-anchored.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'anchored descriptor cleanup and interruption invariants',
+  },
+  {
+    file: 'packages/cli/src/_tests_/project-commands.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI project fixture test root',
+  },
+  {
+    file: 'packages/cli/src/_tests_/projects-commands.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI project fixture test root',
+  },
+  {
+    file: 'packages/cli/src/commands/agent/_tests_/agent-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI project fixture test root',
+  },
+  {
+    file: 'packages/cli/src/commands/metric/_tests_/metric-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI project fixture test root',
+  },
+  {
+    file: 'packages/cli/src/commands/test/_tests_/test-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI project fixture test root',
+  },
+  {
+    file: 'packages/local/src/commands/agent/_tests_/agent-authoring.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/agent/_tests_/agent-mutation.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/eval-run-callback.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/metric/_tests_/metric-mutation-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/test/_tests_/test-mutation-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/_tests_/discover-project.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/_tests_/load-project.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/transaction/_tests_/semantic-project-diff.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/transaction/_tests_/transactional-writer.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/run/_tests_/run-configuration.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'project source and consumer invariant test root',
+  },
+  {
+    file: 'packages/local/src/internal/_tests_/private-file.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'private filesystem publication interruption and confinement invariant tests',
+  },
+  {
     file: 'packages/contracts/src/schema/parse.ts',
     operations: ['Effect.runSyncExit'],
     owner: 'public synchronous schema decoding boundary',
@@ -60,12 +145,516 @@ const effectRoots = [
     operations: ['Effect.runSync'],
     owner: 'contracts decoder invariant tests',
   },
+  {
+    file: 'packages/local/src/_tests_/support/project-transaction.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'transaction and caller invariant test root',
+  },
+  {
+    file: 'packages/local/src/cloud/_tests_/sync.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'transaction and caller invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/project/_tests_/load-command-project.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'transaction and caller invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/transaction/_tests_/journal-boundary.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'transaction and caller invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/transaction/_tests_/project-lock.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'transaction and caller invariant test root',
+  },
+  {
+    file: 'packages/local/src/project/transaction/_tests_/transaction-lifecycle.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'transaction and caller invariant test root',
+  },
 ];
 
-// Each entry: { file, operations, removalSlice, owner }. Removed in S10.
-const effectMigrationBridges = [];
+// Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
+const effectMigrationBridges = [
+  {
+    file: 'packages/local/src/commands/agent/adapter/resolve-native-agent.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/import.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/cloud/link.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/cloud/sync.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/run-store/readonly-run-store.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S2',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/cloud/upload.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/registry/add-project.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/project/project-init-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/eval-metric-runner.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S6',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/eval-lifecycle.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/eval-project-path.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/eval-cancellation.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/eval-persistence.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/metric-sandbox.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S5',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/run/run-configuration.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/metric/metric-mutation-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/test/test-mutation-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/report/run-report-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S2',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/view/run-view-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'unmigrated Promise parent of Phase A project operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9a',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/cloud/credentials.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/authoring/resource-import.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/metric/authoring/resource-readers.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/metric/authoring/value-parsers.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/shared/command-request.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/registry/project-registry.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S2',
+        owner: 'registry catalog read',
+      },
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/registry/registry-lock.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary Promise parent of native S1c file operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8c',
+        owner: 'foreign command or registry write parent',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/add.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/remove.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/rename.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/list/list-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/metric/metric-test-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/project/manifest-publish.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/project/project-inspection-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/shared/project-mutation.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/show/show-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/test/test-read-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/run-control/list-project-tests.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9a',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/metric/guided-metric-add.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise caller of native local operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S8b',
+        owner: 'declared migration owner',
+      },
+    ],
+  },
+];
 
-const effectExecutionBlock = ({ file, operations, removalSlice }) => {
+const effectExecutionBlock = ({ file, operations, removalSlice, bridges }) => {
   const dataOnly =
     /^(packages\/core\/src\/(records|analytics)\/|packages\/api\/src\/contract\/)/.test(file);
 
@@ -78,6 +667,8 @@ const effectExecutionBlock = ({ file, operations, removalSlice }) => {
   const options = { operations, dataOnly, browser };
 
   if (removalSlice) options.removalSlice = removalSlice;
+
+  if (bridges) options.bridges = bridges;
 
   return { files: [file], rules: { 'anti-slop/effect-boundaries': ['error', options] } };
 };

@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { createBundle, StoreError, type RunStore } from '@attest/core';
 
 import { withReadonlyRunStore } from '../commands/run-store/readonly-run-store.js';
@@ -29,7 +31,11 @@ const resolveCloudUploadProject = async (options: CloudProjectOptions) => {
     return { client: options.client, signal: options.signal, root, projectId };
   }
 
-  const { root } = await discoverProject(options);
+  // EFFECT-BRIDGE(S8c)
+  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   const link = await readCloudLink(root);
 
   if (link !== undefined && link.base_url !== options.client.baseUrl) {

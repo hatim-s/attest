@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -28,12 +30,15 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
     const outside = await createRoot();
     const empty = join(outside, 'empty');
     await mkdir(empty);
-    const lock = await acquireProjectLock(root);
+
+    const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     try {
-      const prepared = await prepareTransaction(root, [
-        { type: 'write', path: 'attest.project.json', contents: 'new' },
-      ]);
+      const prepared = await Effect.runPromiseExit(
+        prepareTransaction(root, [{ type: 'write', path: 'attest.project.json', contents: 'new' }]),
+      ).then((exit) => valueFromExit(exit));
 
       const journal = prepared.journal;
       const entry = journal.entries[0]!;
@@ -61,7 +66,11 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
 
       const raw = JSON.stringify(forged);
       await writeFile(prepared.journalPath, raw);
-      await expect(recoverProjectTransactions(root, lock)).rejects.toMatchObject({
+      await expect(
+        Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+          valueFromExit(exit),
+        ),
+      ).rejects.toMatchObject({
         code: 'project_recovery_required',
         message: 'Transaction journal is malformed or has an unsupported shape.',
       });
@@ -70,7 +79,7 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
       expect(await readFile(join(outside, 'attest.project.json'), 'utf8')).toBe('old');
       expect(await readdir(empty)).toEqual([]);
     } finally {
-      await releaseProjectLock(lock);
+      await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
     }
   },
 );
@@ -80,7 +89,9 @@ it('rejects symlinked state at .attest', async () => {
   const outside = await createRoot();
   await symlink(outside, join(root, '.attest'));
 
-  await expect(acquireProjectLock(root)).rejects.toMatchObject({ code: 'project_invalid' });
+  await expect(
+    Effect.runPromiseExit(acquireProjectLock(root)).then((exit) => valueFromExit(exit)),
+  ).rejects.toMatchObject({ code: 'project_invalid' });
   expect(await readdir(outside)).toEqual(['attest.project.json']);
 });
 
@@ -89,17 +100,26 @@ it('rejects symlinked state at .attest/transactions', async () => {
   const outside = await createRoot();
   await mkdir(join(root, '.attest'));
   await symlink(outside, join(root, '.attest/transactions'));
-  const lock = await acquireProjectLock(root);
+
+  const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+    valueFromExit(exit),
+  );
 
   try {
-    await expect(recoverProjectTransactions(root, lock)).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).rejects.toMatchObject({
       code: 'project_recovery_required',
     });
-    await expect(prepareTransaction(root, [])).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(prepareTransaction(root, [])).then((exit) => valueFromExit(exit)),
+    ).rejects.toMatchObject({
       code: 'project_invalid',
     });
   } finally {
-    await releaseProjectLock(lock);
+    await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
   }
 
   expect(await readdir(outside)).toEqual(['attest.project.json']);

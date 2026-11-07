@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../../internal/effect-exit.js';
 import {
   parseWithSchema,
   commandRequestSchema,
@@ -21,7 +23,10 @@ const readImportedMetricResource = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<MetricResource> => {
-  const text = await readSourceText(source, { path: '<path|->', readStdin, workingDirectory });
+  // EFFECT-BRIDGE(S8b)
+  const text = await Effect.runPromiseExit(
+    readSourceText(source, { path: '<path|->', readStdin, workingDirectory }),
+  ).then((exit) => valueFromExit(exit));
 
   const value = parseJsonText(text, {
     path: '<path|->',
@@ -54,7 +59,10 @@ const readMetricTestFixture = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<MetricTestFixture> => {
-  const text = await readSourceText(source, { path: '--fixture', readStdin, workingDirectory });
+  // EFFECT-BRIDGE(S8b)
+  const text = await Effect.runPromiseExit(
+    readSourceText(source, { path: '--fixture', readStdin, workingDirectory }),
+  ).then((exit) => valueFromExit(exit));
 
   const value = parseJsonText(text, {
     path: '--fixture',

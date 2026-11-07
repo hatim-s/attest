@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
 import { assertNewId, findResource } from '../shared/resource-lookup.js';
@@ -10,11 +12,14 @@ const runAgentRenameCommand = async (
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   const { request } = options;
 
-  const loaded = await loadCommandProject({
-    project: options.project,
-    recover: request.dry_run !== true,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      recover: request.dry_run !== true,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const current = findResource('agent', loaded.agents, request.agent_id);
 

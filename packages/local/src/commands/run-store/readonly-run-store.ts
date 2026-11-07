@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type { BigIntStats } from 'node:fs';
 import { lstat, realpath, type FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -124,7 +126,11 @@ const withReadonlyRunStoreFile = async <T>(
   let result: T;
 
   try {
-    const anchored = await openAnchored(resolvedStore, { kind: 'file', root: resolvedDirectory });
+    // EFFECT-BRIDGE(S2)
+    const anchored = await Effect.runPromiseExit(
+      openAnchored(resolvedStore, { kind: 'file', root: resolvedDirectory }),
+    ).then((exit) => valueFromExit(exit));
+
     anchor = anchored.handle;
 
     // The anchor must be the inode inspected before containment checks, not a later swap.

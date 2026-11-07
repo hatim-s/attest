@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../internal/effect-exit.js';
 import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { realpath } from 'node:fs/promises';
@@ -71,7 +73,10 @@ const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
   let text: string;
 
   try {
-    text = await readPrivateFile(registryPath);
+    // EFFECT-BRIDGE(S2)
+    text = await Effect.runPromiseExit(readPrivateFile(registryPath)).then((exit) =>
+      valueFromExit(exit),
+    );
   } catch (cause: unknown) {
     if (errnoCode(cause) === 'ENOENT') return EMPTY_REGISTRY;
     throw invalidRegistry(registryPath, cause);
@@ -87,7 +92,10 @@ const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
 /** Replaces the registry atomically with a private temporary file and a rename. */
 const writeRegistry = async (registryPath: string, registry: ProjectRegistry): Promise<void> => {
   try {
-    await writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`);
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(
+      writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`),
+    ).then((exit) => valueFromExit(exit));
   } catch (cause: unknown) {
     throw new LocalError('registry_write_failed', 'Could not save the project registry.', {
       path: registryPath,

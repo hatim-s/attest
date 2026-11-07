@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { expandTestCases } from '@attest/core';
 import type { TestSummary } from '@attest/core/records';
 
@@ -8,7 +10,11 @@ import { loadCommandProject } from '../commands/project/load-command-project.js'
  * their tags are offered for filtering. Loads through the same path as `attest test list`.
  */
 const listProjectTests = async (projectRoot: string): Promise<TestSummary[]> => {
-  const project = await loadCommandProject({ project: projectRoot, workingDirectory: projectRoot });
+  // EFFECT-BRIDGE(S9a)
+  const project = await Effect.runPromiseExit(
+    loadCommandProject({ project: projectRoot, workingDirectory: projectRoot }),
+  ).then((exit) => valueFromExit(exit));
+
   const datasetsById = new Map(project.datasets.map((dataset) => [dataset.metadata.id, dataset]));
 
   return project.tests.map((test) => {

@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -47,7 +49,11 @@ describe('project commands', () => {
 
     if (!init.document.ok) throw new Error('Expected project.init success.');
     const projectRoot = join(parent, 'demo');
-    const loaded = await loadProject({ project: projectRoot });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: projectRoot })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(init.document.project_hash_after).toBe(loaded.projectHash);
 
     for (const argv of [
@@ -74,12 +80,20 @@ describe('project commands', () => {
       },
     });
     expect(questions).toEqual(['Project name [guided]: ']);
-    await expect(loadProject({ project: join(parent, 'guided') })).resolves.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(loadProject({ project: join(parent, 'guided') })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).resolves.toMatchObject({
       project: { name: 'Guided Project' },
     });
 
     await runCommand(parent, ['project', 'init', 'automatic']);
-    await expect(loadProject({ project: join(parent, 'automatic') })).resolves.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(loadProject({ project: join(parent, 'automatic') })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).resolves.toMatchObject({
       project: { name: 'automatic' },
     });
   });
@@ -250,7 +264,13 @@ describe('project commands', () => {
 
   it('redacts authored transport credentials from human and JSON resource output', async () => {
     const root = await createFixtureProject();
-    let candidate = projectResources(await loadProject({ project: root }));
+
+    let candidate = projectResources(
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    );
+
     candidate = {
       ...candidate,
       agents: candidate.agents.map((entry, index) =>
@@ -290,7 +310,9 @@ describe('project commands', () => {
         },
       ],
     };
-    await applyProjectMutation({ candidate, projectRoot: root });
+    await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     const human = await runCommand(root, ['show', 'agent', 'support']);
     const json = await runJson(root, ['show', 'agent', 'worker']);

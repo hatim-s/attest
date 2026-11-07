@@ -1,123 +1,126 @@
+import * as Exit from 'effect/Exit';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import * as Effect from 'effect/Effect';
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-
-import { errnoCode } from '../../internal/errno-code.js';
 import type { ProjectResources } from '@attest/contracts';
-
+import {
+  anchoredCall,
+  AnchoredCleanup,
+  AnchoredCleanupFailure,
+} from '../../internal/open-anchored.js';
 import { discoverProject } from '../../project/discover-project.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
 import {
-  acquireProjectLock,
   inspectProjectLock,
+  withProjectLock,
+  throwForExistingLock,
+} from '../../project/transaction/project-lock.js';
+import {
   ProjectTransactionError,
   recoverProjectTransactions,
-  releaseProjectLock,
   TRANSACTIONS_DIRECTORY,
-  throwForExistingLock,
 } from '../../project/transaction/index.js';
 
 const MAX_READ_ATTEMPTS = 3;
 
-type LoadCommandProjectOptions = {
-  project?: string;
-  recover?: boolean;
-  workingDirectory: string;
-};
+type LoadCommandProjectOptions = { project?: string; recover?: boolean; workingDirectory: string };
 
-/** Detects transaction journals without following a replacement transactions directory. */
-const hasRecoveryArtifacts = async (root: string): Promise<boolean> => {
+/** Inspects recovery residue without following a symlinked transaction directory. */
+const hasRecoveryArtifacts = Effect.fn('hasRecoveryArtifacts')(function* (root: string) {
   const path = join(root, TRANSACTIONS_DIRECTORY);
 
-  try {
-    const metadata = await lstat(path);
+  return yield* Effect.gen(function* () {
+    const metadata = yield* anchoredCall('lstat', path, () => lstat(path));
 
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-      throw new ProjectTransactionError(
-        'project_recovery_required',
-        'The project transaction directory is not safe to inspect.',
-        { path: TRANSACTIONS_DIRECTORY },
+    if (!metadata.isDirectory() || metadata.isSymbolicLink())
+      return yield* Effect.fail(
+        new ProjectTransactionError(
+          'project_recovery_required',
+          'The project transaction directory is not safe to inspect.',
+          { path: TRANSACTIONS_DIRECTORY },
+        ),
       );
-    }
 
-    return (await readdir(path)).length > 0;
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') return false;
-    throw error;
-  }
-};
+    return (yield* anchoredCall('readdir', path, () => readdir(path))).length > 0;
+  }).pipe(
+    Effect.catch((error) => (error.code === 'ENOENT' ? Effect.succeed(false) : Effect.fail(error))),
+  );
+});
 
-/** Recovers interrupted journals under the same exclusive boundary used by project writers. */
-const recoverBeforeRead = async (root: string): Promise<void> => {
-  if (!(await hasRecoveryArtifacts(root))) return;
-  const lock = await acquireProjectLock(root);
-  let recoveryFailure: unknown;
+/** Converts the existing synchronous lock classifier into its typed operational failure. */
+const rejectLock = (
+  inspection: Exclude<Effect.Success<ReturnType<typeof inspectProjectLock>>, { state: 'absent' }>,
+) =>
+  Effect.try({
+    try: () => throwForExistingLock(inspection),
+    catch: (cause) =>
+      cause instanceof ProjectTransactionError
+        ? cause
+        : new ProjectTransactionError('project_locked', 'Could not classify project lock.', {
+            cause,
+          }),
+  });
 
-  try {
-    await recoverProjectTransactions(root, lock);
-  } catch (error: unknown) {
-    recoveryFailure = error;
-  }
+/** Loads a verified snapshot; retries reads only, never recovery or mutation. */
+const loadCommandProject = Effect.fn('loadCommandProject')(function* (
+  options: LoadCommandProjectOptions,
+) {
+  const discovered = yield* discoverProject(options);
 
-  try {
-    await releaseProjectLock(lock);
-  } catch (error: unknown) {
-    if (recoveryFailure === undefined) throw error;
-  }
-
-  if (recoveryFailure instanceof Error) throw recoveryFailure;
-
-  if (recoveryFailure !== undefined) {
-    throw new ProjectTransactionError(
-      'project_recovery_required',
-      'Project recovery failed with an invalid error value.',
-      { cause: recoveryFailure },
+  if (yield* hasRecoveryArtifacts(discovered.root)) {
+    if (options.recover === false)
+      return yield* Effect.fail(
+        new ProjectTransactionError(
+          'project_recovery_required',
+          'The project has an interrupted transaction that requires recovery.',
+          {
+            path: TRANSACTIONS_DIRECTORY,
+            hint: 'Run a non-dry-run project command to recover before previewing changes.',
+          },
+        ),
+      );
+    yield* withProjectLock(discovered.root, (lock) =>
+      recoverProjectTransactions(discovered.root, lock),
     );
   }
-};
-
-/** Loads a hash-verified old or new snapshot while rejecting a concurrent publication window. */
-const loadCommandProject = async (options: LoadCommandProjectOptions): Promise<LoadedProject> => {
-  const discovered = await discoverProject(options);
-
-  if (options.recover === false && (await hasRecoveryArtifacts(discovered.root))) {
-    throw new ProjectTransactionError(
-      'project_recovery_required',
-      'The project has an interrupted transaction that requires recovery.',
-      {
-        path: TRANSACTIONS_DIRECTORY,
-        hint: 'Run a non-dry-run project command to recover before previewing changes.',
-      },
-    );
-  }
-
-  if (options.recover !== false) await recoverBeforeRead(discovered.root);
 
   for (let attempt = 1; ; attempt += 1) {
-    const before = await inspectProjectLock(discovered.root);
+    const before = yield* inspectProjectLock(discovered.root);
 
-    if (before.state !== 'absent') return throwForExistingLock(before);
+    if (before.state !== 'absent') return yield* rejectLock(before);
 
-    try {
-      const loaded = await loadProject({
-        project: discovered.root,
-        workingDirectory: discovered.root,
-      });
+    const loaded = yield* Effect.exit(
+      loadProject({ project: discovered.root, workingDirectory: discovered.root }),
+    );
 
-      const after = await inspectProjectLock(discovered.root);
+    if (Exit.isFailure(loaded)) {
+      const cleanup = Context.getOrUndefined(Cause.annotations(loaded.cause), AnchoredCleanup);
 
-      if (after.state !== 'absent') return throwForExistingLock(after);
+      const failedClose = loaded.cause.reasons.some(
+        (reason) => Cause.isFailReason(reason) && reason.error instanceof AnchoredCleanupFailure,
+      );
 
-      return loaded;
-    } catch (error: unknown) {
-      const after = await inspectProjectLock(discovered.root);
-
-      if (after.state !== 'absent') return throwForExistingLock(after);
-
-      // A writer can publish and release entirely between the two lock inspections.
-      if (attempt === MAX_READ_ATTEMPTS) throw error;
+      // A later writer cannot replace a crashed read or unconfirmed descriptor cleanup.
+      if (
+        cleanup !== undefined ||
+        failedClose ||
+        Cause.hasDies(loaded.cause) ||
+        Cause.hasInterrupts(loaded.cause)
+      )
+        return yield* Effect.failCause(loaded.cause);
     }
+
+    const after = yield* inspectProjectLock(discovered.root);
+
+    if (after.state !== 'absent') return yield* rejectLock(after);
+
+    if (Exit.isSuccess(loaded)) return loaded.value;
+
+    if (attempt === MAX_READ_ATTEMPTS) return yield* Effect.failCause(loaded.cause);
   }
-};
+});
 
 /**
  * Copies the authored resources out of a loaded project into a candidate that a command can

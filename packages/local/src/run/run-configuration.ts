@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -123,10 +125,13 @@ const runConfiguration = async (
   request: EvalRunRequest,
   options: RunConfigurationOptions,
 ): Promise<AsyncIterable<EvalEvent>> => {
-  const project = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S7b)
+  const project = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const resolved = resolveEvalRun(project, request, { argv: options.argv });
   const identity = createRunIdentity();
@@ -146,10 +151,13 @@ const runConfiguration = async (
 
   const configuredStorePath = join('.attest', 'runs.db');
 
-  const storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
-    errorCode: 'run_failed',
-    message: 'The eval run store is not a safe project file.',
-  });
+  // EFFECT-BRIDGE(S7b)
+  const storePath = await Effect.runPromiseExit(
+    prepareEvalProjectFile(project.root, configuredStorePath, {
+      errorCode: 'run_failed',
+      message: 'The eval run store is not a safe project file.',
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   // Confirm the baseline exists before any candidate side effect.
   const baselineRunId = resolved.effectiveCommand.resolved.baseline_run_id;
@@ -233,10 +241,13 @@ const cancelConfiguration = async (
   request: EvalCancelRequest,
   options: CancelConfigurationOptions,
 ): Promise<CancelConfigurationResult> => {
-  const project = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S7b)
+  const project = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const result = { projectHash: project.projectHash, runId: request.run_id };
   const requested = await signalRegisteredEvalRun(project.root, request.run_id);

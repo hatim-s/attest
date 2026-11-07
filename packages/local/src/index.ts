@@ -6,3 +6,5 @@ export {
 } from './commands/shared/command-result.js';
 
 export { LocalError, type LocalErrorCode } from './errors/index.js';
+
+export { valueFromExit } from './internal/effect-exit.js';

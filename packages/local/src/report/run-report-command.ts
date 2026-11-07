@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { randomUUID } from 'node:crypto';
 import { link, open, rename, unlink } from 'node:fs/promises';
 
@@ -38,11 +40,14 @@ const runReportCommand = async (
 ): Promise<RunReportCommandResult> => {
   const configuredStorePath = options.storePath ?? '.attest/runs.db';
 
-  const storePath = await prepareEvalProjectFile(options.workingDirectory, configuredStorePath, {
-    allowAbsolute: true,
-    errorCode: 'project_read_failed',
-    message: 'The report run store is not a safe project file.',
-  });
+  // EFFECT-BRIDGE(S2)
+  const storePath = await Effect.runPromiseExit(
+    prepareEvalProjectFile(options.workingDirectory, configuredStorePath, {
+      allowAbsolute: true,
+      errorCode: 'project_read_failed',
+      message: 'The report run store is not a safe project file.',
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const runNotFound = (cause?: unknown): LocalError =>
     new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
@@ -62,8 +67,12 @@ const runReportCommand = async (
 
   const cases = runWithCases.cases;
   const truncated = runWithCases.totalCaseCount > cases.length;
+
   // Reports are shared beyond this machine, so the local root path stays out of them.
-  const { key, name, projectId } = await describeStoreProject(storePath);
+  // EFFECT-BRIDGE(S2)
+  const { key, name, projectId } = await Effect.runPromiseExit(
+    describeStoreProject(storePath),
+  ).then((exit) => valueFromExit(exit));
 
   const snapshot: ReportSnapshot = {
     generatedAt: new Date().toISOString(),
@@ -73,16 +82,19 @@ const runReportCommand = async (
     truncated: truncated,
   };
 
-  const outputPath = await prepareEvalProjectFile(
-    options.workingDirectory,
-    options.outputPath ?? `attest-report-${options.runId}.html`,
-    {
-      allowAbsolute: true,
-      createDirectories: true,
-      errorCode: 'output_write_failed',
-      message: 'The report output path is not a safe project file.',
-    },
-  );
+  // EFFECT-BRIDGE(S2)
+  const outputPath = await Effect.runPromiseExit(
+    prepareEvalProjectFile(
+      options.workingDirectory,
+      options.outputPath ?? `attest-report-${options.runId}.html`,
+      {
+        allowAbsolute: true,
+        createDirectories: true,
+        errorCode: 'output_write_failed',
+        message: 'The report output path is not a safe project file.',
+      },
+    ),
+  ).then((exit) => valueFromExit(exit));
 
   const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
   let handle: Awaited<ReturnType<typeof open>> | undefined;

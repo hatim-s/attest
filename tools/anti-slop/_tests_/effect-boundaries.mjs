@@ -225,8 +225,13 @@ for (const entry of [...effectRoots, ...effectMigrationBridges]) {
   files.add(entry.file);
   assert.ok(entry.owner?.trim());
   assert.ok(entry.operations.length);
-  if (effectMigrationBridges.includes(entry))
-    assert.match(entry.removalSlice, /^S(?:[1-9]|10)[a-z]?(?:\.[0-9])?$/);
+  if (effectMigrationBridges.includes(entry)) {
+    for (const bridge of entry.bridges) {
+      assert.match(bridge.removalSlice, /^S(?:[1-9]|10)[a-z]?(?:\.[0-9])?$/);
+      assert.ok(entry.operations.includes(bridge.operation));
+      assert.ok(bridge.owner.trim());
+    }
+  }
   readFileSync(entry.file, 'utf8');
   const results = await eslint.lintFiles(entry.file);
   assert.equal(
@@ -249,3 +254,27 @@ for (const [file, modules] of [
   assert.deepEqual(options.schemaConstructionModules, modules, file);
   assert.equal(options.operations, undefined, file);
 }
+
+const mixedOptions = [{
+  operations: ['Effect.runPromiseExit'],
+  bridges: [
+    { operation: 'Effect.runPromiseExit', removalSlice: 'S2', owner: 'registry read' },
+    { operation: 'Effect.runPromiseExit', removalSlice: 'S8c', owner: 'registry write' },
+  ],
+}];
+const mixedCode = "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2)\nEffect.runPromiseExit(read);\n// EFFECT-BRIDGE(S8c)\nEffect.runPromiseExit(write);";
+tester.run('Mixed bridge owners retain per-execution enforcement', effectBoundariesRule, {
+  valid: [{ code: mixedCode, options: mixedOptions }],
+  invalid: [
+    { code: mixedCode.replace('// EFFECT-BRIDGE(S2)\n', ''), options: mixedOptions, errors: [error, error] },
+    { code: mixedCode.replace('EFFECT-BRIDGE(S2)', 'EFFECT-BRIDGE(S7b)'), options: mixedOptions, errors: [error, error, error] },
+    { code: mixedCode.replace('// EFFECT-BRIDGE(S8c)\nEffect.runPromiseExit(write);', ''), options: mixedOptions, errors: [error] },
+    { code: mixedCode.replace('// EFFECT-BRIDGE(S2)', '"EFFECT-BRIDGE(S2)";'), options: mixedOptions, errors: [error, error] },
+    { code: mixedCode.replace('EFFECT-BRIDGE(S2)', 'EFFECT-BRIDGE(S2'), options: mixedOptions, errors: [error, error, error] },
+  ],
+});
+const mixedRegistry = await eslint.calculateConfigForFile('packages/local/src/registry/project-registry.ts');
+assert.deepEqual(
+  mixedRegistry.rules['anti-slop/effect-boundaries'][1].bridges.map(({ removalSlice }) => removalSlice),
+  ['S2', 'S8c'],
+);

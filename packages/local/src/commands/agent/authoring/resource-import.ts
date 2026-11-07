@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../../internal/effect-exit.js';
 import { isAbsolute, resolve } from 'node:path';
 
 import {
@@ -94,7 +96,10 @@ const readImportedAgentResource = async (
 ): Promise<AgentResource> => {
   const text = REMOTE_SOURCE.test(source)
     ? await readRemoteJson(source, 'source')
-    : await readSourceText(source, { path: 'source', readStdin, workingDirectory });
+    : // EFFECT-BRIDGE(S8b)
+      await Effect.runPromiseExit(
+        readSourceText(source, { path: 'source', readStdin, workingDirectory }),
+      ).then((exit) => valueFromExit(exit));
 
   const value = parseJsonText(text, { path: 'source' });
   const parsed = parseWithSchema(agentResourceSchema, value);
@@ -130,7 +135,10 @@ const readCurlDocument = async (
     });
   }
 
-  const text = await readSourceText(source, { path: 'source', readStdin, workingDirectory });
+  // EFFECT-BRIDGE(S8b)
+  const text = await Effect.runPromiseExit(
+    readSourceText(source, { path: 'source', readStdin, workingDirectory }),
+  ).then((exit) => valueFromExit(exit));
 
   if (Buffer.byteLength(text) > MAX_CURL_BYTES) {
     throw new LocalError('cli_usage', 'The cURL source exceeds the size limit.', {
@@ -160,10 +168,15 @@ const readCurlBodyFile = async (
   let entry: AnchoredEntry | undefined;
 
   try {
-    entry = await openAnchored(candidate, { kind: 'file', root: projectRoot });
-    const { handle } = entry;
+    // EFFECT-BRIDGE(S8b)
+    const opened = await Effect.runPromiseExit(
+      openAnchored(candidate, { kind: 'file', root: projectRoot }),
+    ).then((exit) => valueFromExit(exit));
 
-    if (entry.identity.size > BigInt(maximumBytes)) {
+    entry = opened;
+    const { handle } = opened;
+
+    if (opened.identity.size > BigInt(maximumBytes)) {
       throw new Error('body file exceeds the request cap');
     }
 

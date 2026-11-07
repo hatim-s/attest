@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { createServer, type IncomingMessage } from 'node:http';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -174,7 +176,9 @@ const createCallbackProject = async (origin: string): Promise<string> => {
     workingDirectory: root,
   });
 
-  let candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+  let candidate = candidateFromLoadedProject(
+    await Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+  );
 
   candidate = {
     ...candidate,
@@ -203,7 +207,9 @@ const createCallbackProject = async (origin: string): Promise<string> => {
       },
     ],
   };
-  await applyProjectMutation({ candidate, projectRoot: root });
+  await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then((exit) =>
+    valueFromExit(exit),
+  );
 
   return root;
 };

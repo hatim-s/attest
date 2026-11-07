@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type {
   CommandResult,
   ResourceListResult,
@@ -23,7 +25,11 @@ type TestReadCommandOptions = {
 const runTestDatasetRemovePreflight = async (
   options: TestReadCommandOptions & { datasetId: string },
 ): Promise<void> => {
-  const loaded = await loadCommandProject(options);
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(loadCommandProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   assertDatasetRemovable(loaded, options.datasetId);
 };
 
@@ -43,7 +49,11 @@ const runTestShowCommand = async (
 const runTestCaseListCommand = async (
   options: TestReadCommandOptions & { testId: string },
 ): Promise<CommandResult<'test-case-list', TestCaseListResult>> => {
-  const loaded = await loadCommandProject(options);
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(loadCommandProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   const test = findResource('test', loaded.tests, options.testId);
 
   const items = test.cases.map(
@@ -76,7 +86,11 @@ const runTestCaseListCommand = async (
 const runTestCaseShowCommand = async (
   options: TestReadCommandOptions & { caseId: string; testId: string },
 ): Promise<CommandResult<'test-case-show', TestCaseShowResult>> => {
-  const loaded = await loadCommandProject(options);
+  // EFFECT-BRIDGE(S8b)
+  const loaded = await Effect.runPromiseExit(loadCommandProject(options)).then((exit) =>
+    valueFromExit(exit),
+  );
+
   const test = findResource('test', loaded.tests, options.testId);
   const testCase = test.cases.find(({ id }) => id === options.caseId);
 

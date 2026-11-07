@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -90,8 +92,15 @@ describe('transactional project writer', () => {
   it('returns the commit semantic model while a dry run performs zero writes or locks', async () => {
     const dryRoot = await createProject();
     const commitRoot = await createProject();
-    const loadedDry = await loadProject({ project: dryRoot });
-    const loadedCommit = await loadProject({ project: commitRoot });
+
+    const loadedDry = await Effect.runPromiseExit(loadProject({ project: dryRoot })).then((exit) =>
+      valueFromExit(exit),
+    );
+
+    const loadedCommit = await Effect.runPromiseExit(loadProject({ project: commitRoot })).then(
+      (exit) => valueFromExit(exit),
+    );
+
     let dryCandidate = candidateFromLoadedProject(loadedDry);
     let commitCandidate = candidateFromLoadedProject(loadedCommit);
     dryCandidate = {
@@ -108,18 +117,22 @@ describe('transactional project writer', () => {
     };
     const before = await snapshotProjectFiles(dryRoot);
 
-    const preview = await applyProjectMutation({
-      candidate: dryCandidate,
-      dryRun: true,
-      expectedProjectHash: loadedDry.projectHash,
-      projectRoot: dryRoot,
-    });
+    const preview = await Effect.runPromiseExit(
+      applyProjectMutation({
+        candidate: dryCandidate,
+        dryRun: true,
+        expectedProjectHash: loadedDry.projectHash,
+        projectRoot: dryRoot,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
-    const committed = await applyProjectMutation({
-      candidate: commitCandidate,
-      expectedProjectHash: loadedCommit.projectHash,
-      projectRoot: commitRoot,
-    });
+    const committed = await Effect.runPromiseExit(
+      applyProjectMutation({
+        candidate: commitCandidate,
+        expectedProjectHash: loadedCommit.projectHash,
+        projectRoot: commitRoot,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     expectSnapshotsEqual(await snapshotProjectFiles(dryRoot), before);
     await expect(stat(join(dryRoot, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -131,18 +144,24 @@ describe('transactional project writer', () => {
 
   it('fails an optimistic hash mismatch before any transaction artifact is created', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = { ...candidate, project: { ...candidate.project, name: 'Changed' } };
     const before = await snapshotProjectFiles(root);
     let failure: unknown;
 
     try {
-      await applyProjectMutation({
-        candidate,
-        expectedProjectHash: '0'.repeat(64),
-        projectRoot: root,
-      });
+      await Effect.runPromiseExit(
+        applyProjectMutation({
+          candidate,
+          expectedProjectHash: '0'.repeat(64),
+          projectRoot: root,
+        }),
+      ).then((exit) => valueFromExit(exit));
     } catch (error: unknown) {
       failure = error;
     }
@@ -156,7 +175,11 @@ describe('transactional project writer', () => {
 
   it('publishes multiple resources with canonical bytes and a verified manifest commit point', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -171,8 +194,14 @@ describe('transactional project writer', () => {
       ),
     };
 
-    const result = await applyProjectMutation({ candidate, projectRoot: root });
-    const verified = await loadProject({ project: root });
+    const result = await Effect.runPromiseExit(
+      applyProjectMutation({ candidate, projectRoot: root }),
+    ).then((exit) => valueFromExit(exit));
+
+    const verified = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     const agentBytes = await readFile(join(root, 'attest/agents/support.json'), 'utf8');
     const metricBytes = await readFile(join(root, 'attest/metrics/correct.json'), 'utf8');
 
@@ -187,7 +216,11 @@ describe('transactional project writer', () => {
 
   it('rolls back every published path when a later publish step fails', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -202,10 +235,16 @@ describe('transactional project writer', () => {
       ),
     };
     const changes = createFileChanges(loaded, prepareProjectCandidate(candidate));
-    const lock = await acquireProjectLock(root);
+
+    const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     try {
-      const prepared = await prepareTransaction(root, changes);
+      const prepared = await Effect.runPromiseExit(prepareTransaction(root, changes)).then((exit) =>
+        valueFromExit(exit),
+      );
+
       const [first, second] = prepared.journal.entries;
 
       if (first?.type !== 'write' || second?.type !== 'write') {
@@ -218,18 +257,30 @@ describe('transactional project writer', () => {
       await rm(join(prepared.directory, second.staged_path));
 
       await expect(
-        runPreparedTransaction({ root, prepared, verify: async () => {} }),
+        Effect.runPromiseExit(
+          runPreparedTransaction({ root, prepared, verify: () => Effect.void }),
+        ).then((exit) => valueFromExit(exit)),
       ).rejects.toMatchObject({ code: 'project_transaction_failed' });
       expect(await readFile(firstPath, 'utf8')).toBe(firstBytes);
-      expect((await loadProject({ project: root })).projectHash).toBe(loaded.projectHash);
+      expect(
+        (
+          await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+            valueFromExit(exit),
+          )
+        ).projectHash,
+      ).toBe(loaded.projectHash);
     } finally {
-      await releaseProjectLock(lock);
+      await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
     }
   });
 
   it('rolls an interrupted pre-manifest publish back from its recovery journal', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -245,9 +296,14 @@ describe('transactional project writer', () => {
     };
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
-    const lock = await acquireProjectLock(root);
 
-    const prepared = await prepareTransaction(root, changes);
+    const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
+
+    const prepared = await Effect.runPromiseExit(prepareTransaction(root, changes)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     try {
       const firstPath = join(root, prepared.journal.entries[0]!.path);
@@ -255,18 +311,30 @@ describe('transactional project writer', () => {
       await interruptAfterFirstPublish(root, prepared);
       expect(await readFile(firstPath, 'utf8')).not.toBe(beforeBytes);
 
-      expect(await recoverProjectTransactions(root, lock)).toEqual([
-        { action: 'rolled_back', transactionId: prepared.journal.transaction_id },
-      ]);
-      expect((await loadProject({ project: root })).projectHash).toBe(loaded.projectHash);
+      expect(
+        await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+          valueFromExit(exit),
+        ),
+      ).toEqual([{ action: 'rolled_back', transactionId: prepared.journal.transaction_id }]);
+      expect(
+        (
+          await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+            valueFromExit(exit),
+          )
+        ).projectHash,
+      ).toBe(loaded.projectHash);
     } finally {
-      await releaseProjectLock(lock);
+      await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
     }
   });
 
   it('completes cleanup when recovery finds the new manifest commit point', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -276,28 +344,45 @@ describe('transactional project writer', () => {
     };
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
-    const lock = await acquireProjectLock(root);
 
-    const prepared = await prepareTransaction(root, changes);
+    const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
+
+    const prepared = await Effect.runPromiseExit(prepareTransaction(root, changes)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     try {
-      await publishPreparedTransaction(root, prepared);
-
-      expect(await recoverProjectTransactions(root, lock)).toEqual([
-        { action: 'completed_commit', transactionId: prepared.journal.transaction_id },
-      ]);
-      expect((await loadProject({ project: root })).projectHash).toBe(
-        preparedCandidate.projectHash,
+      await Effect.runPromiseExit(publishPreparedTransaction(root, prepared)).then((exit) =>
+        valueFromExit(exit),
       );
+
+      expect(
+        await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+          valueFromExit(exit),
+        ),
+      ).toEqual([{ action: 'completed_commit', transactionId: prepared.journal.transaction_id }]);
+      expect(
+        (
+          await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+            valueFromExit(exit),
+          )
+        ).projectHash,
+      ).toBe(preparedCandidate.projectHash);
       expect(await readdir(join(root, TRANSACTIONS_DIRECTORY))).toEqual([]);
     } finally {
-      await releaseProjectLock(lock);
+      await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
     }
   });
 
   it('preserves an external edit and leaves the journal when recovery cannot prove ownership', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     let candidate = candidateFromLoadedProject(loaded);
     candidate = {
       ...candidate,
@@ -313,9 +398,14 @@ describe('transactional project writer', () => {
     };
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
-    const lock = await acquireProjectLock(root);
 
-    const prepared = await prepareTransaction(root, changes);
+    const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
+      valueFromExit(exit),
+    );
+
+    const prepared = await Effect.runPromiseExit(prepareTransaction(root, changes)).then((exit) =>
+      valueFromExit(exit),
+    );
 
     const externalBytes = '{"authored":"outside-attest"}\n';
 
@@ -326,7 +416,9 @@ describe('transactional project writer', () => {
       let failure: unknown;
 
       try {
-        await recoverProjectTransactions(root, lock);
+        await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
+          valueFromExit(exit),
+        );
       } catch (error: unknown) {
         failure = error;
       }
@@ -337,7 +429,7 @@ describe('transactional project writer', () => {
         prepared.journal.transaction_id,
       );
     } finally {
-      await releaseProjectLock(lock);
+      await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
     }
   });
 });

@@ -1,5 +1,14 @@
+import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import {
+  anchoredCall,
+  withAnchored,
+  AnchoredCleanup,
+  AnchoredFileFailure,
+} from '../../internal/open-anchored.js';
 import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import * as Schema from 'effect/Schema';
@@ -8,33 +17,35 @@ import type { JsonValue } from '@attest/contracts';
 
 import { contentHash } from '@attest/core';
 
-import { errnoCode } from '../../internal/errno-code.js';
 import { toJsonPointer } from '../../internal/json-pointer.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 import { isProjectPath } from '../project-path.js';
 import type { LoadedJsonResource } from './types.js';
 
 /** Reads one project-relative file only after lexical and realpath containment checks. */
-const readProjectSource = async (
+const readProjectSource = Effect.fn('readProjectSource')(function* (
   root: string,
   source: string,
-): Promise<{ diagnostics: ProjectDiagnostic[]; text?: string }> => {
+): Effect.fn.Return<
+  { diagnostics: ProjectDiagnostic[]; text?: string },
+  | import('../../internal/open-anchored.js').AnchoredCleanupFailure
+  | import('../../internal/open-anchored.js').AnchoredFileFailure
+> {
   const candidate = resolve(root, source);
 
-  if (!isProjectPath(root, candidate)) {
+  if (!isProjectPath(root, candidate))
     return {
       diagnostics: [
         { code: 'path_unsafe', message: 'path resolves outside the project root', source },
       ],
     };
-  }
 
-  let resolvedSource: string;
+  const resolved = yield* Effect.result(
+    anchoredCall('realpath', candidate, () => realpath(candidate)),
+  );
 
-  try {
-    resolvedSource = await realpath(candidate);
-  } catch (error: unknown) {
-    const missing = errnoCode(error) === 'ENOENT';
+  if (resolved._tag === 'Failure') {
+    const missing = resolved.failure.code === 'ENOENT';
 
     return {
       diagnostics: [
@@ -47,7 +58,7 @@ const readProjectSource = async (
     };
   }
 
-  if (!isProjectPath(root, resolvedSource)) {
+  if (!isProjectPath(root, resolved.success))
     return {
       diagnostics: [
         {
@@ -57,26 +68,40 @@ const readProjectSource = async (
         },
       ],
     };
-  }
 
-  try {
-    if (!(await stat(resolvedSource)).isFile()) {
-      return {
+  // Preserve accepted in-root aliases, then read only through the validated descriptor.
+  return yield* withAnchored(resolved.success, { root, kind: 'file' }, (entry) =>
+    anchoredCall('readFile', source, () => entry.handle.readFile('utf8')),
+  ).pipe(
+    Effect.map((text) => ({ diagnostics: [], text })),
+    Effect.catchCause((cause) => {
+      // A diagnostic-valued read failure must not erase cleanup uncertainty or runtime causes.
+      if (
+        Cause.hasDies(cause) ||
+        Cause.hasInterrupts(cause) ||
+        Context.getOrUndefined(Cause.annotations(cause), AnchoredCleanup) !== undefined
+      )
+        return Effect.failCause(cause);
+      const reason = cause.reasons.find(Cause.isFailReason);
+
+      if (reason === undefined || !(reason.error instanceof AnchoredFileFailure))
+        return Effect.failCause(cause);
+
+      return Effect.succeed({
         diagnostics: [
-          { code: 'source_unreadable', message: 'authored path is not a regular file', source },
+          {
+            code: 'source_unreadable' as const,
+            message:
+              reason.error.operation === 'validateKind'
+                ? 'authored path is not a regular file'
+                : 'authored file is not readable',
+            source,
+          },
         ],
-      };
-    }
-
-    return { diagnostics: [], text: await readFile(resolvedSource, 'utf8') };
-  } catch {
-    return {
-      diagnostics: [
-        { code: 'source_unreadable', message: 'authored file is not readable', source },
-      ],
-    };
-  }
-};
+      });
+    }),
+  );
+});
 
 /** Parses JSON without forwarding parser excerpts that may contain authored secret values. */
 type ParsedProjectJson = { diagnostics: ProjectDiagnostic[]; value?: JsonValue };
@@ -104,13 +129,17 @@ const schemaDiagnostics = (
   }));
 
 /** Loads, validates, and hashes one canonical JSON resource while retaining every issue. */
-const loadJsonResource = async <Value>(
+const loadJsonResource = Effect.fn('loadJsonResource')(function* <Value>(
   root: string,
   source: string,
   expectedHash: string | undefined,
   schema: Schema.ConstraintDecoder<Value>,
-): Promise<LoadedJsonResource<Value>> => {
-  const loaded = await readProjectSource(root, source);
+): Effect.fn.Return<
+  LoadedJsonResource<Value>,
+  | import('../../internal/open-anchored.js').AnchoredCleanupFailure
+  | import('../../internal/open-anchored.js').AnchoredFileFailure
+> {
+  const loaded = yield* readProjectSource(root, source);
 
   if (loaded.text === undefined) return { diagnostics: loaded.diagnostics, source };
   const parsed = parseJson(loaded.text, source);
@@ -137,6 +166,6 @@ const loadJsonResource = async <Value>(
   }
 
   return { diagnostics, hash, source, value: validated.value };
-};
+});
 
 export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics };

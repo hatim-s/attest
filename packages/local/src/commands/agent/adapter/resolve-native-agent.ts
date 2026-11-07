@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, resolve } from 'node:path';
@@ -39,13 +41,18 @@ const readSecretReference = async (
   let entry: AnchoredEntry | undefined;
 
   try {
-    entry = await openAnchored(candidate, { kind: 'file', root: projectRoot });
+    // EFFECT-BRIDGE(S7b)
+    const opened = await Effect.runPromiseExit(
+      openAnchored(candidate, { kind: 'file', root: projectRoot }),
+    ).then((exit) => valueFromExit(exit));
 
-    if ((entry.identity.mode & 0o077n) !== 0n) {
+    entry = opened;
+
+    if ((opened.identity.mode & 0o077n) !== 0n) {
       throw new Error('secret file must not be readable by group or others');
     }
 
-    return await entry.handle.readFile('utf8');
+    return await opened.handle.readFile('utf8');
   } catch (error: unknown) {
     throw new LocalError('invocation_failed', 'A referenced secret file is unavailable.', {
       path: reference.from_file,

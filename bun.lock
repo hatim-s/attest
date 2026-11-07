@@ -46,6 +46,7 @@
         "@attest/core": "workspace:*",
         "@attest/local": "workspace:*",
         "commander": "^15.0.0",
+        "effect": "4.1.2",
       },
       "devDependencies": {
         "@attest/client": "workspace:*",

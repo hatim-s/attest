@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { createHash, randomUUID } from 'node:crypto';
 import { open, rename, unlink } from 'node:fs/promises';
 
@@ -112,12 +114,15 @@ const createEvalArtifactWriter = (projectRoot: string): EvalArtifactWriter => ({
   writeJUnitAtomically: async (path, payload) => {
     verifyJUnitPayload(payload);
 
-    const outputPath = await prepareEvalProjectFile(projectRoot, path, {
-      allowAbsolute: true,
-      createDirectories: true,
-      errorCode: 'output_write_failed',
-      message: 'The JUnit output path is not a safe project file.',
-    });
+    // EFFECT-BRIDGE(S7b)
+    const outputPath = await Effect.runPromiseExit(
+      prepareEvalProjectFile(projectRoot, path, {
+        allowAbsolute: true,
+        createDirectories: true,
+        errorCode: 'output_write_failed',
+        message: 'The JUnit output path is not a safe project file.',
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
     let handle: Awaited<ReturnType<typeof open>> | undefined;

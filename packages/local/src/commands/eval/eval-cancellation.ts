@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
@@ -43,15 +45,14 @@ const registryKey = (projectRoot: string, runId: string): string => `${projectRo
 
 /** Publishes one atomic active-run record that can be safely addressed by a separate CLI process. */
 const registerEvalRun = async (projectRoot: string, runId: string): Promise<EvalRegistryHandle> => {
-  const path = await prepareEvalProjectFile(
-    projectRoot,
-    join(EVAL_REGISTRY_DIRECTORY, `${runId}.json`),
-    {
+  // EFFECT-BRIDGE(S7b)
+  const path = await Effect.runPromiseExit(
+    prepareEvalProjectFile(projectRoot, join(EVAL_REGISTRY_DIRECTORY, `${runId}.json`), {
       createDirectories: true,
       errorCode: 'run_failed',
       message: 'The eval cancellation registry is unsafe.',
-    },
-  );
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const directory = dirname(path);
 
@@ -174,14 +175,13 @@ const signalRegisteredEvalRun = async (
   projectRoot: string,
   runId: string,
 ): Promise<'cancellation_requested' | 'not_active'> => {
-  const path = await prepareEvalProjectFile(
-    projectRoot,
-    join(EVAL_REGISTRY_DIRECTORY, `${runId}.json`),
-    {
+  // EFFECT-BRIDGE(S7b)
+  const path = await Effect.runPromiseExit(
+    prepareEvalProjectFile(projectRoot, join(EVAL_REGISTRY_DIRECTORY, `${runId}.json`), {
       errorCode: 'run_failed',
       message: 'The eval cancellation registry is unsafe.',
-    },
-  );
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   let record: EvalRegistryRecord | undefined;
 
@@ -193,7 +193,10 @@ const signalRegisteredEvalRun = async (
 
   if (record === undefined) return 'not_active';
 
-  if (!isProcessPresent(record.pid)) {
+  if (
+    // EFFECT-BRIDGE(S7b)
+    !(await Effect.runPromiseExit(isProcessPresent(record.pid)).then((exit) => valueFromExit(exit)))
+  ) {
     await unlink(path).catch(() => undefined);
 
     return 'not_active';

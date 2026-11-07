@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type { JsonValue } from '@attest/contracts';
 
 import type { LoadedProject } from '../../project/project-loader/index.js';
@@ -65,10 +67,13 @@ const showResource = async (
 const runShowCommand = async (
   options: ShowCommandOptions,
 ): Promise<CommandResult<'show', ResourceShowResult>> => {
-  const project = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S8b)
+  const project = await Effect.runPromiseExit(
+    loadCommandProject({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const resource = await showResource(project, options.resourceType, options.id);
 
