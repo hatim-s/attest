@@ -263,7 +263,8 @@ function DailyActivity({
               <g
                 aria-hidden={dense || undefined}
                 role={inert ? undefined : 'button'}
-                tabIndex={inert ? undefined : 0}
+                // Keep the focused mark reachable until the chooser takes focus.
+                tabIndex={!inert || (dense && focused === day.day) ? 0 : undefined}
                 data-chart-mark={inert ? undefined : ''}
                 data-day={day.day}
                 aria-pressed={inert ? undefined : selectedDay === day.day}
