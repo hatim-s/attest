@@ -133,7 +133,7 @@ Allow core `effect` imports only. Ban platform subpaths `effect/http`, `http-api
 
 Track permanent execution roots in the `effectRoots` ESLint block and temporary forward bridges in `effectMigrationBridges`. Ban Effect.run* and ManagedRuntime.make elsewhere. Every temporary bridge carries an adjacent EFFECT-BRIDGE(Sx) tag and a ledger owner/removal slice. The lint-rules gate checks tags against listed files in both directions. S10 removes the temporary block and the typecheck-only tools/effect-probe workspace.
 
-Server packages support Node 22.15+ and Bun 1.4+. Choose portable core Effect APIs first. Do not add Bun-only SQL/process implementations as defaults for Node. S0 measures node:sqlite import support, readonly opening of an existing fixture and rejection of a missing fixture without creating it on Bun 1.4; retain the explicit readonly error if unsupported. Keep Kysely, node:sqlite and libsql rather than switching SQL drivers. Existing process support does not become Worker-compatible through Effect. S1a records web bundle size before/after and updates the client dependency documentation from Zod to Effect. S9c measures the Workers client bundle. The consumer handler/fetch API stays Promise as a foreign boundary. Browser builds catch platform imports.
+Server packages support Node 22.15+ and Bun 1.4+. Choose portable core Effect APIs first. Do not add Bun-only SQL/process implementations as defaults for Node. S0 measures node:sqlite import support, readonly opening of an existing fixture and rejection of a missing fixture without creating it on Bun 1.4; retain the explicit readonly error if unsupported. Keep Kysely, node:sqlite and libsql rather than switching SQL drivers. Existing process support does not become Worker-compatible through Effect. S1a records web bundle size before/after and updates the client dependency documentation from Zod to Effect. S9c measures the Workers client bundle. The native client handler and request APIs return Effect; actual host callbacks remain foreign Promise boundaries. Browser builds catch platform imports.
 
 ## Security and validation
 
@@ -621,3 +621,50 @@ reports `registry_write_failed`. HTTP body release failure reports
 under R1 through R3; primary public failure codes take precedence. Cloud body
 cancellation has a one-second acknowledgement bound. Expiry retains unconfirmed
 cleanup and does not imply remote completion.
+
+## Native client runner ownership
+
+Client handlers and operations now return native Effects. `createAgentRunner` and the Node
+listener require an explicit Scope. `withAgentRunner(options, use)` brackets use and shutdown,
+keeping the primary Cause and retaining all failed cleanup. Prefer it when the caller needs a
+typed result for the complete lifetime. Low-level scoped constructors retain release receipts;
+call `close()` before scope disposal when shutdown failure must reach the caller's E channel.
+Accepted invocations live in a runner-owned FiberSet and survive completion of the trigger's
+request root. Node HTTP callbacks run one request Effect each and retain their Promise roots
+until listener shutdown joins them. None owns the accepted handler's lifetime.
+
+Runner admission is capped at 64 active handlers and 10,000 retained registration tokens.
+At the receipt limit, admission evicts the oldest terminal receipt, never active work. A retained
+registration is never replayed. An evicted token is treated as a new registration. Handlers receive shutdown
+through the context AbortSignal, have three seconds for cooperative terminal evidence, and then
+face native interruption. Terminal handler and delivery Exits remain internal receipts. Scope shutdown has a separate receipt.
+Drain retains failures from all receipts still in its retention window.
+Drain observes for 35 seconds; explicit close then interrupts outstanding work. Foreign Promise
+interruption does not prove cancellation of the remote operation.
+
+Completion delivery preserves three attempts and the 250 ms/1 second delays for confirmed 5xx.
+Opaque rejection or timeout now prohibits replay. A confirmed 2xx stays delivered even if body
+release fails, with cleanup Causes retained. Failed cleanup after 5xx prohibits retry. A late
+foreign response releases its body through its foreign callback and updates the same receipt.
+The browser bundle/import receipt covers portable dependencies, not a Workers deployment or
+private host lifetime policy. Node and Pi imports remain separate subpaths.
+
+Cleanup bounds belong to the resource owner. Request readers and process teardown use explicit
+foreign-call bounds. Pi workspace removal is joined until the local filesystem operation settles.
+Runner close has its own drain bound and receives no shorter outer timeout. Nested releases append
+their Causes without replacing the primary failure. Foreign handlers should use `Effect.tryPromise`
+to classify expected operational failures; `Effect.promise` turns rejections into defects, which
+remain in terminal receipts and are reported through drain or close.
+
+```mermaid
+flowchart TD
+  A[Authenticated trigger] --> B{Admission and retained-token check}
+  B -->|New registration| C[Runner-owned FiberSet]
+  B -->|Retained duplicate| D[Return 202 without replay]
+  C --> E[Handler result and completion delivery]
+  E --> F[Terminal receipt in bounded retention window]
+  G[Close stops admission] --> H[Abort signal and cooperative grace]
+  H --> I[Drain delivery and join accepted work]
+  I --> J[Interrupt remaining fibers and retain shutdown Exit]
+  F --> I
+```

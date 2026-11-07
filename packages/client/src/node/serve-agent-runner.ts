@@ -1,3 +1,4 @@
+import { Effect, Exit, Scope } from 'effect';
 import { isString } from '@attest/contracts';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
@@ -10,35 +11,54 @@ type ServeAgentRunnerOptions = {
   port: number;
 };
 
+type ListenerCleanup = { exit?: Exit.Exit<void, Error> };
+
 type ServedAgentRunner = {
   /** Origin such as `http://127.0.0.1:8790`, without a trailing slash. */
   url: string;
   /** Stops listening. Accepted invocations keep running; call `runner.drain()` to wait. */
-  close: () => Promise<void>;
+  close: () => Effect.Effect<void, Error>;
+  /** Retained listener and request-root release evidence. Never serialize Causes. */
+  cleanup: ListenerCleanup;
 };
 
 /**
  * Streams a Node request body into a Web stream, pausing the socket while the stream is full so
  * the runner's byte cap stops reading early.
  */
-const toWebBody = (incoming: IncomingMessage): ReadableStream<Uint8Array> =>
-  new ReadableStream({
+const toWebBody = (incoming: IncomingMessage): ReadableStream<Uint8Array> => {
+  let ended = false;
+
+  return new ReadableStream({
     start: (controller) => {
       incoming.on('data', (chunk: Buffer) => {
+        if (ended) return;
         controller.enqueue(chunk);
 
         if ((controller.desiredSize ?? 0) <= 0) incoming.pause();
       });
-      incoming.on('end', () => controller.close());
-      incoming.on('error', (error) => controller.error(error));
+      incoming.on('end', () => {
+        if (!ended) {
+          ended = true;
+          controller.close();
+        }
+      });
+      incoming.on('error', (error) => {
+        if (!ended) {
+          ended = true;
+          controller.error(error);
+        }
+      });
     },
     pull: () => {
       incoming.resume();
     },
     cancel: () => {
+      ended = true;
       incoming.destroy();
     },
   });
+};
 
 /** Bridges a Node request to a Web `Request`. */
 const toWebRequest = (incoming: IncomingMessage, origin: string): Request => {
@@ -72,48 +92,92 @@ const writeWebResponse = async (response: Response, outgoing: ServerResponse): P
 
 /**
  * Serves a runner over `node:http`. Bun and Workers do not need this: pass `runner.fetch` to
- * `Bun.serve({ fetch })` or export it as a Worker's `fetch`.
+ * a host-owned Effect execution root. The host must keep the runner scope alive.
  */
-const serveAgentRunner = async (
+const serveAgentRunner = (
   runner: AgentRunner,
   { host = '127.0.0.1', port }: ServeAgentRunnerOptions,
-): Promise<ServedAgentRunner> => {
-  let origin = '';
+): Effect.Effect<ServedAgentRunner, Error, Scope.Scope> =>
+  Effect.gen(function* () {
+    let origin = '';
+    const requests = new Set<Promise<void>>();
 
-  const respond = async (incoming: IncomingMessage, outgoing: ServerResponse): Promise<void> => {
-    try {
-      await writeWebResponse(await runner.fetch(toWebRequest(incoming, origin)), outgoing);
-    } catch (error) {
-      console.error('[attest-client] request failed:', error);
+    const respond = async (incoming: IncomingMessage, outgoing: ServerResponse): Promise<void> => {
+      try {
+        const exit = await Effect.runPromiseExit(runner.fetch(toWebRequest(incoming, origin)));
 
-      if (!outgoing.headersSent) outgoing.writeHead(500);
-      outgoing.end();
+        if (Exit.isFailure(exit)) {
+          outgoing.writeHead(500);
+          outgoing.end();
+
+          return;
+        }
+
+        await writeWebResponse(exit.value, outgoing);
+      } catch (error) {
+        console.error('[attest-client] request failed:', error);
+
+        if (!outgoing.headersSent) outgoing.writeHead(500);
+        outgoing.end();
+      }
+    };
+
+    const server = createServer((incoming, outgoing) => {
+      const pending = respond(incoming, outgoing);
+      requests.add(pending);
+      void pending.finally(() => requests.delete(pending));
+    });
+
+    const cleanup: ListenerCleanup = {};
+
+    const closed = yield* Effect.cached(
+      Effect.tryPromise({
+        try: () =>
+          new Promise<void>((resolve, reject) => {
+            server.close((error) => (error === undefined ? resolve() : reject(error)));
+            server.closeAllConnections();
+          }),
+        catch: (cause) => new Error('Runner listener close failed.', { cause }),
+      }).pipe(
+        Effect.andThen(
+          Effect.tryPromise({
+            try: () => Promise.all([...requests]),
+            catch: (cause) => new Error('Runner request roots failed to join.', { cause }),
+          }),
+        ),
+        Effect.asVoid,
+        Effect.timeout(12_000),
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            cleanup.exit = exit;
+          }),
+        ),
+      ),
+    );
+
+    yield* Effect.addFinalizer(() => Effect.asVoid(Effect.exit(closed)));
+    yield* Effect.tryPromise({
+      try: () =>
+        new Promise<void>((resolve, reject) => {
+          server.once('error', reject);
+          server.listen(port, host, resolve);
+        }),
+      catch: (cause) => new Error('Runner listen failed.', { cause }),
+    });
+
+    const address = server.address();
+
+    if (address === null || isString(address)) {
+      return yield* Effect.fail(new Error('The runner server did not bind a TCP port.'));
     }
-  };
 
-  const server = createServer((incoming, outgoing) => void respond(incoming, outgoing));
+    origin = `http://${address.family === 'IPv6' ? `[${address.address}]` : address.address}:${String(address.port)}`;
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, resolve);
+    return {
+      url: origin,
+      close: () => closed,
+      cleanup,
+    };
   });
-
-  const address = server.address();
-
-  if (address === null || isString(address)) {
-    throw new Error('The runner server did not bind a TCP port.');
-  }
-
-  origin = `http://${address.family === 'IPv6' ? `[${address.address}]` : address.address}:${String(address.port)}`;
-
-  return {
-    url: origin,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
-      }),
-  };
-};
 
 export { serveAgentRunner, type ServeAgentRunnerOptions, type ServedAgentRunner };

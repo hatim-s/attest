@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+import { withCleanup } from '../runner/lifetime.js';
 import { isJsonObject, isString, type JsonValue } from '@attest/contracts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -36,7 +38,7 @@ type PiHandlerOptions = {
   /** Passed as `--system-prompt` (text or a file path). */
   systemPrompt?: string;
   /** Picks the working directory. Defaults to a fresh temporary directory, removed afterwards. */
-  workspace?: (invocation: AgentInvocation) => Promise<string>;
+  workspace?: (invocation: AgentInvocation) => Effect.Effect<string, Error>;
   /**
    * Variables Pi gets on top of `PATH`, `HOME`, `TMPDIR` and `LC_ALL`, such as a provider API key.
    * Undefined values are left out, so `{ KEY: process.env.KEY }` works.
@@ -149,66 +151,85 @@ const createPiHandler = ({
 
   if (systemPrompt !== undefined) command.push('--system-prompt', systemPrompt);
 
-  return async (invocation, { signal }) => {
-    const message = promptOf(invocation.input);
+  return (invocation, { signal }) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const message = promptOf(invocation.input);
 
-    if (message === undefined) {
-      return {
-        error: {
-          code: 'invalid_input',
-          message:
-            'The Pi handler needs `input` to be a string or an object with a string `prompt`.',
-        },
-      };
-    }
+        if (message === undefined) {
+          return {
+            error: {
+              code: 'invalid_input',
+              message:
+                'The Pi handler needs `input` to be a string or an object with a string `prompt`.',
+            },
+          };
+        }
 
-    const cwd =
-      workspace === undefined
-        ? await mkdtemp(join(tmpdir(), 'attest-pi-'))
-        : await workspace(invocation);
+        const cwd =
+          workspace === undefined
+            ? yield* Effect.tryPromise({
+                try: () => mkdtemp(join(tmpdir(), 'attest-pi-')),
+                catch: (cause) => new Error('Pi workspace creation failed.', { cause }),
+              })
+            : yield* workspace(invocation);
 
-    try {
-      const before = await hashFiles(cwd);
-      const trace = createPiTraceBuilder(model);
-      let last: PiAssistantMessage | undefined;
+        return yield* withCleanup(
+          restore(
+            Effect.gen(function* () {
+              const before = yield* hashFiles(cwd);
+              const trace = createPiTraceBuilder(model);
+              let last: PiAssistantMessage | undefined;
 
-      const outcome = await runPiProcess({
-        argv: command,
-        cwd,
-        env: environment,
-        message,
-        signal,
-        timeoutMs,
-        onRecord: (record) => {
-          trace.record(record);
+              const outcome = yield* runPiProcess({
+                argv: command,
+                cwd,
+                env: environment,
+                message,
+                signal,
+                timeoutMs,
+                onRecord: (record) => {
+                  trace.record(record);
 
-          if (record.type === 'message_end' && record.message !== null) last = record.message;
-        },
-      });
+                  if (record.type === 'message_end' && record.message !== null)
+                    last = record.message;
+                },
+              });
 
-      const after = await hashFiles(cwd);
+              const after = yield* hashFiles(cwd);
 
-      const changed = new Set(
-        [...after].flatMap(([path, hash]) => (before.get(path) === hash ? [] : [path])),
-      );
+              const changed = new Set(
+                [...after].flatMap(([path, hash]) => (before.get(path) === hash ? [] : [path])),
+              );
 
-      const collected = await collectArtifacts(cwd, { include: (path) => changed.has(path) });
+              const collected = yield* collectArtifacts(cwd, {
+                include: (path) => changed.has(path),
+              });
 
-      for (const skipped of collected.skipped) {
-        trace.note('artifact_skipped', { path: skipped.path, reason: skipped.reason });
-      }
+              for (const skipped of collected.skipped) {
+                trace.note('artifact_skipped', { path: skipped.path, reason: skipped.reason });
+              }
 
-      const result = outcomeOf(outcome, last, timeoutMs);
+              const result = outcomeOf(outcome, last, timeoutMs);
 
-      return {
-        ...result,
-        artifacts: collected.artifacts,
-        trace: trace.finish('error' in result ? result.error.message : undefined),
-      };
-    } finally {
-      if (workspace === undefined) await rm(cwd, { recursive: true, force: true });
-    }
-  };
+              return {
+                ...result,
+                artifacts: collected.artifacts,
+                trace: trace.finish('error' in result ? result.error.message : undefined),
+              };
+            }),
+          ),
+          workspace === undefined
+            ? Effect.tryPromise({
+                try: () => rm(cwd, { recursive: true, force: true }),
+                catch: (cause) => new Error('Pi workspace removal failed.', { cause }),
+              })
+            : Effect.void,
+          // Local removal must settle before its workspace ownership ends.
+          undefined,
+        );
+      }),
+    );
 };
 
 export { createPiHandler, type PiHandlerOptions };

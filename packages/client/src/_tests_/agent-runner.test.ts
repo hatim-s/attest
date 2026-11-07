@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+import { createRunner, serveRunner } from './support/native-owner.js';
 import {
   parseWithSchemaSync,
   AGENT_PROTOCOL,
@@ -7,13 +9,7 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  createAgentRunner,
-  type AgentHandler,
-  type HandlerResult,
-  type RunnerFailure,
-} from '../index.js';
-import { serveAgentRunner } from '../node.js';
+import { type AgentHandler, type HandlerResult, type RunnerFailure } from '../index.js';
 import { startCompletionReceiver, type CompletionReceiver } from './support/completion-receiver.js';
 
 const RUN_ID = '01J9Z3K4X5Y6Z7A8B9C0D1E2F3';
@@ -61,14 +57,13 @@ const trigger = (
       }),
   });
 
-const echo: AgentHandler = (invocation) =>
-  Promise.resolve({ output: { echoed: invocation.input } });
+const echo: AgentHandler = (invocation) => Effect.succeed({ output: { echoed: invocation.input } });
 
 describe('createAgentRunner', () => {
   it('accepts a trigger with 202 and posts the completion with the bearer token', async () => {
     const completions = await receiver();
-    const runner = createAgentRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });
-    const served = await serveAgentRunner(runner, { port: 0 });
+    const runner = await createRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });
+    const served = await serveRunner(runner, { port: 0 });
 
     try {
       const response = await fetch(trigger(completions.url, { runnerUrl: `${served.url}/` }));
@@ -96,13 +91,13 @@ describe('createAgentRunner', () => {
     });
   });
 
-  it('turns a handler throw into a handler_failed error completion', async () => {
+  it('turns a typed handler failure into a handler_failed error completion', async () => {
     const completions = await receiver();
     const failures: RunnerFailure[] = [];
 
-    const runner = createAgentRunner({
+    const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
-      handler: () => Promise.reject(new Error('model offline')),
+      handler: () => Effect.fail(new Error('model offline')),
       onError: (failure) => failures.push(failure),
     });
 
@@ -119,7 +114,7 @@ describe('createAgentRunner', () => {
     const completions = await receiver([503]);
     const failures: RunnerFailure[] = [];
 
-    const runner = createAgentRunner({
+    const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
       handler: echo,
       onError: (failure) => failures.push(failure),
@@ -137,10 +132,10 @@ describe('createAgentRunner', () => {
     const completions = await receiver();
     const failures: RunnerFailure[] = [];
 
-    const runner = createAgentRunner({
+    const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
       handler: () =>
-        Promise.resolve({
+        Effect.succeed({
           output: 'done',
           artifacts: [
             {
@@ -170,14 +165,15 @@ describe('createAgentRunner', () => {
     let release = (): void => undefined;
     const released = new Promise<void>((resolve) => (release = resolve));
 
-    const runner = createAgentRunner({
+    const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
-      handler: async (invocation) => {
-        tokens.push(invocation.callback.token);
-        await released;
+      handler: (invocation) =>
+        Effect.gen(function* () {
+          tokens.push(invocation.callback.token);
+          yield* Effect.promise(() => released);
 
-        return { output: null };
-      },
+          return { output: null };
+        }),
     });
 
     await runner.fetch(trigger(completions.url));
@@ -197,11 +193,15 @@ describe('createAgentRunner', () => {
   it('aborts running handlers on close, posts cancelled and refuses new triggers', async () => {
     const completions = await receiver();
 
-    const runner = createAgentRunner({
+    const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
       handler: (_invocation, { signal }) =>
-        new Promise<HandlerResult>((_resolve, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('aborted')));
+        Effect.tryPromise({
+          try: () =>
+            new Promise<HandlerResult>((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(new Error('aborted')));
+            }),
+          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
         }),
     });
 
@@ -221,9 +221,9 @@ describe('createAgentRunner', () => {
 
     trace.self = trace;
 
-    const runner = createAgentRunner({
+    const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
-      handler: () => Promise.resolve({ output: 'done', trace }),
+      handler: () => Effect.succeed({ output: 'done', trace }),
       onError: (failure) => failures.push(failure),
     });
 
@@ -239,7 +239,7 @@ describe('createAgentRunner', () => {
 
   it('refuses triggers it must not run', async () => {
     const completions = await receiver();
-    const runner = createAgentRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });
+    const runner = await createRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });
 
     const statusOf = async (request: Request): Promise<number> =>
       (await runner.fetch(request)).status;
@@ -265,7 +265,9 @@ describe('createAgentRunner', () => {
     ).toBe(400);
     expect(await statusOf(new Request('http://runner.test/'))).toBe(405);
     expect(await statusOf(new Request('http://runner.test/other', { method: 'POST' }))).toBe(404);
-    expect(() => createAgentRunner({ handler: echo, triggerToken: '' })).toThrow(/triggerToken/u);
+    await expect(createRunner({ handler: echo, triggerToken: '' })).rejects.toThrow(
+      /triggerToken/u,
+    );
     expect(runner.pending()).toBe(0);
     expect(completions.received).toEqual([]);
   });

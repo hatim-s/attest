@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { parseWithSchema, artifactPathSchema, type InlineArtifact } from '@attest/contracts';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -87,52 +88,63 @@ const toInlineArtifact = (path: string, bytes: Buffer): InlineArtifact => {
  * past the count or byte budget, and names the artifact path schema rejects, are reported in
  * `skipped` rather than failing the collection.
  */
-const collectArtifacts = async (
+const collectArtifacts = (
   root: string,
   {
     include = () => true,
     maxBytes = DEFAULT_MAX_BYTES,
     maxCount = DEFAULT_MAX_COUNT,
   }: CollectArtifactsOptions = {},
-): Promise<CollectedArtifacts> => {
-  const artifacts: InlineArtifact[] = [];
-  const skipped: SkippedFile[] = [];
-  let totalBytes = 0;
+): Effect.Effect<CollectedArtifacts, Error> =>
+  Effect.gen(function* () {
+    const artifacts: InlineArtifact[] = [];
+    const skipped: SkippedFile[] = [];
+    let totalBytes = 0;
 
-  for (const path of await listFiles(root)) {
-    if (!include(path)) continue;
+    for (const path of yield* listFiles(root)) {
+      if (!include(path)) continue;
 
-    if (!parseWithSchema(artifactPathSchema, path).ok) {
-      skipped.push({ path, reason: 'invalid_path' });
-      continue;
+      if (!parseWithSchema(artifactPathSchema, path).ok) {
+        skipped.push({ path, reason: 'invalid_path' });
+        continue;
+      }
+
+      if (artifacts.length >= maxCount) {
+        skipped.push({ path, reason: 'max_count' });
+        continue;
+      }
+
+      const absolute = join(root, path);
+
+      if (
+        totalBytes +
+          (yield* Effect.tryPromise({
+            try: () => stat(absolute),
+            catch: (cause) => new Error('Artifact stat failed.', { cause }),
+          })).size >
+        maxBytes
+      ) {
+        skipped.push({ path, reason: 'max_bytes' });
+        continue;
+      }
+
+      const bytes = yield* Effect.tryPromise({
+        try: () => readFile(absolute),
+        catch: (cause) => new Error('Artifact read failed.', { cause }),
+      });
+
+      // The file may have grown between stat and read.
+      if (totalBytes + bytes.length > maxBytes) {
+        skipped.push({ path, reason: 'max_bytes' });
+        continue;
+      }
+
+      totalBytes += bytes.length;
+      artifacts.push(toInlineArtifact(path, bytes));
     }
 
-    if (artifacts.length >= maxCount) {
-      skipped.push({ path, reason: 'max_count' });
-      continue;
-    }
-
-    const absolute = join(root, path);
-
-    if (totalBytes + (await stat(absolute)).size > maxBytes) {
-      skipped.push({ path, reason: 'max_bytes' });
-      continue;
-    }
-
-    const bytes = await readFile(absolute);
-
-    // The file may have grown between stat and read.
-    if (totalBytes + bytes.length > maxBytes) {
-      skipped.push({ path, reason: 'max_bytes' });
-      continue;
-    }
-
-    totalBytes += bytes.length;
-    artifacts.push(toInlineArtifact(path, bytes));
-  }
-
-  return { artifacts, skipped };
-};
+    return { artifacts, skipped };
+  });
 
 export {
   collectArtifacts,

@@ -50,6 +50,24 @@ const coreForbidden = [
 
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
+  ...[
+    'packages/client/src/_tests_/support/native-owner.ts',
+    'packages/client/src/_tests_/collect-artifacts.test.ts',
+    'packages/client/src/_tests_/pi-handler.test.ts',
+    'packages/client/src/_tests_/native-lifetimes.test.ts',
+    'packages/client/examples/pi-runner.ts',
+    'packages/cli/src/acceptance/_tests_/callback-pi-journey.test.ts',
+  ].map((file) => ({
+    file,
+    operations: ['Effect.runPromise'],
+    owner: 'Explicit client fixture or process owner scopes',
+  })),
+  {
+    file: 'packages/client/src/node/serve-agent-runner.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Node HTTP request callback root; runner scope retains accepted invocations',
+  },
+
   {
     file: 'packages/runtime/src/eval/_tests_/portability.check.mjs',
     operations: ['Effect.runPromise'],

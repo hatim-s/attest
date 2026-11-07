@@ -1,58 +1,99 @@
 import type { AgentCallback } from '@attest/contracts';
+import { Cause, Effect, Exit } from 'effect';
 
-// Three attempts: at once, then after 250 ms, then after 1 s.
 const RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
-const ATTEMPT_TIMEOUT_MS = 30_000;
+type LateDeliveryCleanup = { cleanupConfirmed?: boolean };
 
-type DeliveryOutcome = { delivered: true } | { delivered: false; reason: string };
+type DeliveryOutcome = {
+  delivered: boolean;
+  reason: string;
+  uncertain: boolean;
+  cleanup: readonly Cause.Cause<unknown>[];
+  late: LateDeliveryCleanup;
+};
 
-const sleep = (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-/**
- * Posts a serialized completion to the callback URL with its bearer token. Network errors and 5xx
- * answers are retried until `stopRetrying` aborts; any other non-2xx answer is final because the
- * receiver has already judged the completion (401 bad token, 409 duplicate, 413 too large).
- */
-const deliverCompletion = async (
+/** Retries confirmed 5xx only. An opaque failure cannot prove that delivery was rejected. */
+const deliverCompletion = (
   fetchImpl: typeof fetch,
   callback: AgentCallback,
   body: string,
   stopRetrying: AbortSignal,
-): Promise<DeliveryOutcome> => {
-  let reason = '';
+): Effect.Effect<DeliveryOutcome> =>
+  Effect.gen(function* () {
+    let reason = '';
+    const cleanup: Cause.Cause<unknown>[] = [];
+    const late: LateDeliveryCleanup = {};
 
-  for (const delay of RETRY_DELAYS_MS) {
-    if (delay > 0) {
-      if (stopRetrying.aborted) break;
-      await sleep(delay);
-    }
+    for (const delay of RETRY_DELAYS_MS) {
+      if (delay > 0) {
+        if (stopRetrying.aborted) break;
+        yield* Effect.sleep(delay);
 
-    try {
-      const response = await fetchImpl(callback.url, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${callback.token}`,
-          'content-type': 'application/json',
-        },
-        body,
-        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
-      });
+        if (stopRetrying.aborted) break;
+      }
 
-      // The answer body is unused; failing to discard it must not turn a 2xx into a retry.
-      await response.body?.cancel().catch(() => undefined);
+      const attempt = yield* Effect.exit(
+        Effect.tryPromise({
+          try: (signal) =>
+            fetchImpl(callback.url, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${callback.token}`,
+                'content-type': 'application/json',
+              },
+              body,
+              signal,
+            }).then((response) => {
+              if (signal.aborted) {
+                late.cleanupConfirmed = false;
+                void (response.body?.cancel() ?? Promise.resolve()).then(
+                  () => {
+                    late.cleanupConfirmed = true;
+                  },
+                  (cause) => {
+                    cleanup.push(Cause.fail(cause));
+                  },
+                );
+              }
 
-      if (response.ok) return { delivered: true };
+              return response;
+            }),
+          catch: (cause) => cause,
+        }).pipe(Effect.timeout(30_000)),
+      );
+
+      if (Exit.isFailure(attempt)) {
+        cleanup.push(attempt.cause);
+
+        return {
+          delivered: false,
+          reason: 'Completion delivery unconfirmed.',
+          uncertain: true,
+          cleanup,
+          late,
+        };
+      }
+
+      const response = attempt.value;
+
+      const discarded = yield* Effect.exit(
+        Effect.tryPromise({
+          try: () => response.body?.cancel() ?? Promise.resolve(),
+          catch: (cause) => cause,
+        }).pipe(Effect.timeout(1_000)),
+      );
+
+      if (Exit.isFailure(discarded)) cleanup.push(discarded.cause);
+
+      if (response.ok) return { delivered: true, reason: '', uncertain: false, cleanup, late };
       reason = `receiver answered ${String(response.status)}`;
 
-      if (response.status < 500) return { delivered: false, reason };
-    } catch (error) {
-      reason = error instanceof Error ? error.message : String(error);
+      if (response.status < 500 || cleanup.length > 0)
+        return { delivered: false, reason, uncertain: false, cleanup, late };
     }
-  }
 
-  return { delivered: false, reason };
-};
+    return { delivered: false, reason, uncertain: false, cleanup, late };
+  });
 
-export { deliverCompletion };
+export { deliverCompletion, type DeliveryOutcome };

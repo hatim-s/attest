@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,7 +34,7 @@ describe('collectArtifacts', () => {
       'image.bin': Buffer.from([0xff, 0xfe, 0x00, 0x01]),
     });
 
-    expect(await collectArtifacts(root)).toEqual({
+    expect(await Effect.runPromise(collectArtifacts(root))).toEqual({
       artifacts: [
         {
           kind: 'inline',
@@ -66,7 +67,7 @@ describe('collectArtifacts', () => {
 
     await symlink(join(outside, 'secret.txt'), join(root, 'link.txt'));
 
-    const byCount = await collectArtifacts(root, { maxCount: 1 });
+    const byCount = await Effect.runPromise(collectArtifacts(root, { maxCount: 1 }));
 
     expect(byCount.artifacts.map((artifact) => artifact.path)).toEqual(['a.txt']);
     expect(byCount.skipped).toEqual([
@@ -75,7 +76,7 @@ describe('collectArtifacts', () => {
       { path: 'c.txt', reason: 'max_count' },
     ]);
 
-    const byBytes = await collectArtifacts(root, { maxBytes: 8 });
+    const byBytes = await Effect.runPromise(collectArtifacts(root, { maxBytes: 8 }));
 
     expect(byBytes.artifacts.map((artifact) => artifact.path)).toEqual(['a.txt', 'b.txt']);
     expect(byBytes.skipped).toContainEqual({ path: 'c.txt', reason: 'max_bytes' });
