@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect';
 import { valueFromExit } from '../../internal/effect-exit.js';
 import { stripStruct } from '@attest/contracts';
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
-import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -120,6 +120,28 @@ afterEach(async () => {
 });
 
 describe('SQLite store database', () => {
+  it('checkpoints on scope close before copying an immediate readonly snapshot', async () => {
+    for (let iteration = 0; iteration < 50; iteration++) {
+      const path = await temporaryDatabasePath();
+      await runEffect(withStoreScope((owner) => openStore(path, owner)));
+      const snapshot = `${path}.snapshot-${iteration}`;
+      expect((await stat(path)).size).toBeGreaterThan(4096);
+      await copyFile(path, snapshot);
+
+      const wal = await stat(`${path}-wal`).catch((cause: NodeJS.ErrnoException) => {
+        if (cause.code !== 'ENOENT') throw cause;
+      });
+
+      if (wal) {
+        expect(wal.size).toBe(0);
+        // Bun's SQLite requires the WAL sidecar when opening a copied WAL-mode file readonly.
+        await copyFile(`${path}-wal`, `${snapshot}-wal`);
+      }
+
+      await runEffect(withStoreScope((owner) => openReadonlyRunStore(snapshot, owner)));
+    }
+  });
+
   it('applies migrations idempotently across reopen', async () => {
     const path = await temporaryDatabasePath();
     const first = await openFixture(path);

@@ -1,3 +1,4 @@
+import { openBunSqliteHandle } from './bun-sqlite-handle.js';
 import type { SqliteHandle } from './sqlite-handle.js';
 
 interface NodeSqliteHandleOptions {
@@ -9,6 +10,8 @@ const openNodeSqliteHandle = async (
   path: string,
   options: NodeSqliteHandleOptions = {},
 ): Promise<SqliteHandle | undefined> => {
+  if (process.versions.bun !== undefined) return openBunSqliteHandle(path, options);
+
   let sqliteModule: typeof import('node:sqlite');
 
   try {

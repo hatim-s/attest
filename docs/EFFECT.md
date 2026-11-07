@@ -871,3 +871,10 @@ its scoped server and store are joined before application disposal. Registry and
 reach the shared serializer without a command-local runtime. Eval output remains pure rendering.
 The temporary bridge ledger is empty and retained for S10 removal. No wire or storage API changes
 are introduced by this integration.
+
+## S10 SQLite scope release
+
+Bun uses its native SQLite driver so each store handle owns its prepared statements.
+StoreScope release finalizes every owned statement before strict connection close, which
+completes the final WAL checkpoint before release returns. Node retains native
+DatabaseSync close and its statement finalization. No public API or stored format changes.
