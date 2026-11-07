@@ -1,3 +1,4 @@
+import { run as executeB1 } from '../../store/_tests_/b1-fixture.js';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ describe('project registry', () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'attest', 'projects.json');
 
-    expect(await readRegistry(registryPath)).toEqual({
+    expect(await executeB1(readRegistry(registryPath))).toEqual({
       schema: 'attest.projects.v1',
       projects: [],
     });
@@ -48,7 +49,7 @@ describe('project registry', () => {
       root,
       projectId: '01PROJECT',
     });
-    expect(await readRegistry(registryPath)).toEqual({
+    expect(await executeB1(readRegistry(registryPath))).toEqual({
       schema: 'attest.projects.v1',
       projects: [entry],
     });
@@ -81,7 +82,7 @@ describe('project registry', () => {
     expect(await registerProject({ registryPath, root: alias, name: 'Renamed' })).toEqual(
       registered[0],
     );
-    expect((await readRegistry(registryPath)).projects).toHaveLength(3);
+    expect((await executeB1(readRegistry(registryPath))).projects).toHaveLength(3);
   });
 
   it('removes an entry by key or by directory', async () => {
@@ -93,7 +94,7 @@ describe('project registry', () => {
     await unregisterProject({ registryPath, keyOrRoot: 'a', workingDirectory: home });
     await unregisterProject({ registryPath, keyOrRoot: './b', workingDirectory: home });
 
-    expect((await readRegistry(registryPath)).projects).toEqual([]);
+    expect((await executeB1(readRegistry(registryPath))).projects).toEqual([]);
     expect([first.key, second.key]).toEqual(['a', 'b']);
     await expect(
       unregisterProject({ registryPath, keyOrRoot: 'a', workingDirectory: home }),
@@ -130,9 +131,9 @@ describe('project registry', () => {
 
     await Promise.all(roots.map((root) => registerProject({ registryPath, root })));
 
-    expect((await readRegistry(registryPath)).projects.map(({ root }) => root).sort()).toEqual(
-      roots,
-    );
+    expect(
+      (await executeB1(readRegistry(registryPath))).projects.map(({ root }) => root).sort(),
+    ).toEqual(roots);
     await expect(stat(`${registryPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -160,12 +161,14 @@ describe('project registry', () => {
     ]) {
       // Private mode, so each case fails on its content and not on the file permissions.
       await writeFile(registryPath, content, { mode: 0o600 });
-      await expect(readRegistry(registryPath)).rejects.toMatchObject({ code: 'registry_invalid' });
+      await expect(executeB1(readRegistry(registryPath))).rejects.toMatchObject({
+        code: 'registry_invalid',
+      });
     }
 
     const linked = join(home, 'linked');
     await symlink(home, linked);
-    await expect(readRegistry(join(linked, 'projects.json'))).rejects.toMatchObject({
+    await expect(executeB1(readRegistry(join(linked, 'projects.json')))).rejects.toMatchObject({
       code: 'registry_invalid',
     });
     await expect(

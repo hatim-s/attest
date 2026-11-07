@@ -1,3 +1,5 @@
+import { readExitValue } from '../../server/error-response.js';
+import * as Effect from 'effect/Effect';
 import {
   createSingleProjectCatalog,
   diffRuns,
@@ -49,29 +51,36 @@ const cases: CaseRecord[] = ['one', 'two'].map((caseId) => ({
 }));
 
 const source: RunSource = {
-  listRuns: () => Promise.resolve({ items: runs }),
-  getRun: (runId) => {
-    const run = runs.find((run) => run.id === runId);
+  listRuns: () => Effect.succeed({ items: runs }),
+  getRun: (runId) =>
+    Effect.gen(function* () {
+      const run = runs.find((run) => run.id === runId);
 
-    if (run === undefined) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} missing.`);
+      if (run === undefined)
+        return yield* Effect.fail(new StoreError('RUN_NOT_FOUND', `Run ${runId} missing.`));
 
-    return Promise.resolve(run);
-  },
-  listCaseSummaries: () => Promise.resolve({ items: cases.map(summarizeCaseRecord) }),
-  getCase: (runId, suiteName, caseId) => {
-    const found = cases.find(
-      (record) =>
-        record.runId === runId && record.suiteName === suiteName && record.caseId === caseId,
-    );
+      return yield* Effect.succeed(run);
+    }),
+  listCaseSummaries: () => Effect.succeed({ items: cases.map(summarizeCaseRecord) }),
+  getCase: (runId, suiteName, caseId) =>
+    Effect.gen(function* () {
+      const found = cases.find(
+        (record) =>
+          record.runId === runId && record.suiteName === suiteName && record.caseId === caseId,
+      );
 
-    if (found === undefined) throw new StoreError('CASE_NOT_FOUND', 'Case missing.');
+      if (found === undefined)
+        return yield* Effect.fail(new StoreError('CASE_NOT_FOUND', 'Case missing.'));
 
-    return Promise.resolve(found);
-  },
-  getRunWithCases: async (runId) => ({
-    run: await source.getRun(runId),
-    cases: cases.filter((record) => record.runId === runId),
-  }),
+      return yield* Effect.succeed(found);
+    }),
+  getRunWithCases: (runId) =>
+    Effect.gen(function* () {
+      return {
+        run: yield* source.getRun(runId),
+        cases: cases.filter((record) => record.runId === runId),
+      };
+    }),
 };
 
 const project = { key: 'demo', name: 'Demo', root: '/work/demo', projectId: 'project-1' };
@@ -129,7 +138,11 @@ describe('ApiClient', () => {
       runs[0],
       { items: cases.map(summarizeCaseRecord) },
       cases[0],
-      await diffRuns(source, '01ARZ3NDEKTSV4RRFFQ69G5FAW', '01ARZ3NDEKTSV4RRFFQ69G5FAV'),
+      readExitValue(
+        await Effect.runPromiseExit(
+          diffRuns(source, '01ARZ3NDEKTSV4RRFFQ69G5FAW', '01ARZ3NDEKTSV4RRFFQ69G5FAV'),
+        ),
+      ),
     ];
 
     for (const [index, read] of reads(client).entries())

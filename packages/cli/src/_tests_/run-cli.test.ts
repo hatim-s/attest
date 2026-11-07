@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { readExitValue } from '../errors/read-exit-value.js';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -9,7 +11,7 @@ import {
   evalEventSchema,
   evalEventStreamSchema,
 } from '@attest/contracts';
-import { openStore } from '@attest/local/store';
+import { openStore, withStoreScope } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
 
 import { runCli } from '../run-cli.js';
@@ -232,24 +234,34 @@ describe('runCli', () => {
 
     await mkdir(join(directory, '.attest'));
     const storePath = join(directory, '.attest', 'runs.db');
-    const store = await openStore(storePath);
 
-    const first = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'first',
-      configJson: '{}',
-    });
+    const { first, second } = readExitValue(
+      await Effect.runPromiseExit(
+        withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const store = yield* openStore(storePath, owner);
 
-    await store.runs.finalizeRun(first.id, 'completed');
+            const first = yield* store.runs.createRun({
+              schemaId: 'attest.project',
+              configHash: 'first',
+              configJson: '{}',
+            });
 
-    const second = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'second',
-      configJson: '{}',
-    });
+            yield* store.runs.finalizeRun(first.id, 'completed');
 
-    await store.runs.finalizeRun(second.id, 'completed');
-    await store.close();
+            const second = yield* store.runs.createRun({
+              schemaId: 'attest.project',
+              configHash: 'second',
+              configJson: '{}',
+            });
+
+            yield* store.runs.finalizeRun(second.id, 'completed');
+
+            return { first, second };
+          }),
+        ),
+      ),
+    );
 
     const rootReport = await runCommand(directory, [
       '--output',

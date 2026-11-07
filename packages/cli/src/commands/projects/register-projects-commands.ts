@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { readExitValue } from '../../errors/read-exit-value.js';
 import {
   addProject,
   readRegistry,
@@ -35,7 +37,9 @@ const registerProjectsCommands = ({
     .description('List registered projects.')
     .addOption(commonOption(outputOption()))
     .action(async (options: CommonCliOptions) => {
-      const { projects: entries } = await readRegistry(registryPath);
+      const { projects: entries } = readExitValue(
+        await Effect.runPromiseExit(readRegistry(registryPath)),
+      );
 
       io.output(renderResult('projects.list', outputFormat(options), entries, renderProjectList));
     });

@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +11,7 @@ import { expect, it } from 'vitest';
 import { readBoundedRunDetails } from '../bounded-run-details.js';
 import { createSqliteDialect } from '../internal/kysely-sqlite-dialect.js';
 import { openSqliteHandle } from '../internal/open-sqlite-handle.js';
-import { openStore } from '../run-store.js';
+import { openTestStore as openStore, run as executeB1 } from './b1-fixture.js';
 import type { Database } from '../schema.js';
 
 it('counts omitted cases without hydrating their corrupt detail blobs', async () => {
@@ -18,47 +20,53 @@ it('counts omitted cases without hydrating their corrupt detail blobs', async ()
   const store = await openStore(path);
 
   const database = new Kysely<Database>({
-    dialect: createSqliteDialect(await openSqliteHandle(path)),
+    dialect: createSqliteDialect(
+      valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path))),
+    ),
   });
 
   try {
-    const run = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await executeB1(
+      store.runs.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     for (const caseId of ['first', 'second']) {
-      await store.runs.recordCase(
-        run.id,
-        {
-          caseId,
-          suiteName: 'report',
-          outcome: 'completed',
-          startedAt: '2026-10-17T00:00:00.000Z',
-          durationMs: 1,
-          request: { protocol: AGENT_PROTOCOL, run_id: run.id, case_id: caseId, input: 'input' },
-          response: { protocol: AGENT_PROTOCOL, output: 'output' },
-          warnings: [],
-          diagnostics: {},
-          attempts: [],
-          expectedMetrics: [],
-        },
-        [],
+      await executeB1(
+        store.runs.recordCase(
+          run.id,
+          {
+            caseId,
+            suiteName: 'report',
+            outcome: 'completed',
+            startedAt: '2026-10-17T00:00:00.000Z',
+            durationMs: 1,
+            request: { protocol: AGENT_PROTOCOL, run_id: run.id, case_id: caseId, input: 'input' },
+            response: { protocol: AGENT_PROTOCOL, output: 'output' },
+            warnings: [],
+            diagnostics: {},
+            attempts: [],
+            expectedMetrics: [],
+          },
+          [],
+        ),
       );
     }
 
-    const first = (await store.runs.listCaseSummaries(run.id, { limit: 1 })).items[0]!;
+    const first = (await executeB1(store.runs.listCaseSummaries(run.id, { limit: 1 }))).items[0]!;
     await database
       .updateTable('cases')
       .set({ request_json: 'not JSON' })
       .where('run_id', '=', run.id)
       .where('case_id', '!=', first.caseId)
       .execute();
-    const details = await readBoundedRunDetails(store.runs, { runId: run.id, limit: 1 });
+    const details = await executeB1(readBoundedRunDetails(store.runs, { runId: run.id, limit: 1 }));
     expect(details.totalCaseCount).toBe(2);
     expect(details.cases.map((record) => record.caseId)).toEqual([first.caseId]);
-    await expect(store.runs.getRunWithCases(run.id)).rejects.toMatchObject({
+    await expect(executeB1(store.runs.getRunWithCases(run.id))).rejects.toMatchObject({
       code: 'CORRUPT_DATA',
     });
   } finally {

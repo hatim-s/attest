@@ -59,18 +59,23 @@ const toSafeRunSummary = (run: RunRecord): RunListItem => {
 
 const listRuns = async (project: LoadedProject): Promise<RunListItem[]> => {
   return (
-    (await withReadonlyRunStore(project.root, async (store) => {
-      const items: RunListItem[] = [];
-      let cursor: string | undefined;
+    // EFFECT-BRIDGE(S8b)
+    (await Effect.runPromiseExit(
+      withReadonlyRunStore(project.root, (store) =>
+        Effect.gen(function* () {
+          const items: RunListItem[] = [];
+          let cursor: string | undefined;
 
-      do {
-        const page = await store.listRuns({ cursor });
-        items.push(...page.items.map(toSafeRunSummary));
-        cursor = page.nextCursor;
-      } while (cursor !== undefined);
+          do {
+            const page = yield* store.listRuns({ cursor });
+            items.push(...page.items.map(toSafeRunSummary));
+            cursor = page.nextCursor;
+          } while (cursor !== undefined);
 
-      return items;
-    })) ?? []
+          return items;
+        }),
+      ),
+    ).then(valueFromExit)) ?? []
   );
 };
 

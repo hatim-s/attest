@@ -1,15 +1,16 @@
-import { valueFromExit } from '../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
-import { createSingleProjectCatalog, type RunControl } from '@attest/core';
+import { createSingleProjectCatalog, type RunControl, type ProjectCatalog } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
 import { describeStoreProject } from '../project/describe-store-project.js';
-import { createRegistryCatalog, readRegistry, type ClosableCatalog } from '../registry/index.js';
+import { createRegistryCatalog, readRegistry } from '../registry/index.js';
 import { createRunLauncher, type CliCommand } from '../run-control/index.js';
-import { openStore } from '../store/index.js';
+import { openStore, type StoreScope } from '../store/index.js';
+import { startPromiseStoreOwner } from '../internal/promise-store-owner.js';
+import * as Exit from 'effect/Exit';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 
 /** What the dashboard serves: one project's store, or every project in the registry. */
@@ -24,7 +25,7 @@ type RunViewCommandOptions = {
 };
 
 /** The served catalog, and the run control for it when dashboard runs land in what it serves. */
-type ViewCatalog = { catalog: ClosableCatalog; control: RunControl | undefined };
+type ViewCatalog = { catalog: ProjectCatalog; control: RunControl | undefined };
 
 /**
  * Opens the catalog for one view scope. A store scope creates the store when it is missing, as
@@ -32,41 +33,36 @@ type ViewCatalog = { catalog: ClosableCatalog; control: RunControl | undefined }
  * reads the registry once here so an unreadable file fails in the terminal before the server
  * starts, not later as a generic API error in the browser.
  */
-const openViewCatalog = async (
+const openViewCatalog = Effect.fn('openViewCatalog')(function* (
   scope: ViewScope,
   workingDirectory: string,
   command: CliCommand,
-): Promise<ViewCatalog> => {
+  owner: StoreScope,
+) {
   if (scope.kind === 'registry') {
-    await readRegistry(scope.registryPath);
-    const catalog = createRegistryCatalog({ registryPath: scope.registryPath });
+    yield* readRegistry(scope.registryPath);
+    const catalog = createRegistryCatalog({ registryPath: scope.registryPath }, owner);
 
-    // Registered stores are always `<root>/.attest/runs.db`, where the CLI records runs.
     return { catalog, control: createRunLauncher({ catalog, command }) };
   }
 
   const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
+  const project = yield* describeStoreProject(storePath);
+  yield* Effect.tryPromise({
+    try: () => mkdir(dirname(storePath), { recursive: true }),
+    catch: (cause) => new Error('Could not create view store directory.', { cause }),
+  });
+  const store = yield* openStore(storePath, owner);
+  const catalog = createSingleProjectCatalog(project, store.runs);
 
-  // EFFECT-BRIDGE(S9a)
-  const project = await Effect.runPromiseExit(describeStoreProject(storePath)).then((exit) =>
-    valueFromExit(exit),
-  );
-
-  await mkdir(dirname(storePath), { recursive: true });
-  const store = await openStore(storePath);
-
-  const catalog = {
-    ...createSingleProjectCatalog(project, store.runs),
-    close: () => store.close(),
-  };
-
-  // The CLI records a run in `<root>/.attest/runs.db`; from any other store, a started run
-  // would land where this dashboard does not look, so the dashboard only reads.
   const ownStore =
     project.root !== undefined && storePath === join(project.root, '.attest', 'runs.db');
 
-  return { catalog, control: ownStore ? createRunLauncher({ catalog, command }) : undefined };
-};
+  return {
+    catalog,
+    control: ownStore ? createRunLauncher({ catalog, command }) : undefined,
+  } satisfies ViewCatalog;
+});
 
 /**
  * The CLI serving the dashboard, so runs it starts use the same version and runtime. `argv[1]`
@@ -92,22 +88,38 @@ const resolveCliCommand = async (): Promise<CliCommand> => {
 
 /** Starts the loopback dashboard and owns abort-driven shutdown. */
 const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServerHandle> => {
-  const { catalog, control } = await openViewCatalog(
-    options.scope,
-    options.workingDirectory,
-    await resolveCliCommand(),
+  const command = await resolveCliCommand();
+
+  const lifetime = await startPromiseStoreOwner((owner) =>
+    openViewCatalog(options.scope, options.workingDirectory, command, owner),
   );
 
-  const server = await startViewServer({
-    indexHtml: dashboardHtml,
-    port: options.port,
-    catalog,
-    control,
-    close: catalog.close,
-  });
+  const { catalog, control } = lifetime.value;
+  let server: ViewServerHandle;
+  let terminal: Exit.Exit<void, Error> = Exit.void;
+
+  try {
+    server = await startViewServer({
+      indexHtml: dashboardHtml,
+      port: options.port,
+      catalog,
+      control,
+      close: () => lifetime.finish(terminal),
+    });
+  } catch (error: unknown) {
+    // startViewServer already attached any release failure to the startup error.
+    await lifetime
+      .finish(error instanceof Error ? Exit.fail(error) : Exit.die(error))
+      .catch(() => undefined);
+    throw error;
+  }
+
+  // Observe rejection while onReady is pending; the command still awaits the same closed promise.
+  void server.closed.catch(() => {});
 
   const closeOnAbort = (): void => {
-    void server.close();
+    // closed carries shutdown failures to the awaiting command.
+    void server.close().catch(() => {});
   };
 
   options.signal?.addEventListener('abort', closeOnAbort, { once: true });
@@ -123,7 +135,20 @@ const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServe
 
     return server;
   } catch (error: unknown) {
-    await server.close();
+    terminal = error instanceof Error ? Exit.fail(error) : Exit.die(error);
+
+    try {
+      await server.close();
+    } catch (cleanup) {
+      if (cleanup !== error) {
+        const primary =
+          error instanceof Error ? error : new Error('View command failed.', { cause: error });
+
+        Object.defineProperty(primary, 'cleanupFailure', { value: cleanup, configurable: true });
+        throw primary;
+      }
+    }
+
     throw error;
   } finally {
     options.signal?.removeEventListener('abort', closeOnAbort);

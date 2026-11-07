@@ -21,9 +21,14 @@ type ShowCommandOptions = {
 };
 
 const showRun = async (project: LoadedProject, id: string): Promise<JsonValue> => {
-  const run = await withRunNotFound(
-    () => withReadonlyRunStore(project.root, async (store) => store.getRun(id)),
-    () => missingResource('run', id),
+  const run = valueFromExit(
+    // EFFECT-BRIDGE(S8b)
+    await Effect.runPromiseExit(
+      withRunNotFound(
+        () => withReadonlyRunStore(project.root, (store) => store.getRun(id)),
+        () => missingResource('run', id),
+      ),
+    ),
   );
 
   if (run === undefined) throw missingResource('run', id);

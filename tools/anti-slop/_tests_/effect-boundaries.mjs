@@ -276,5 +276,5 @@ tester.run('Mixed bridge owners retain per-execution enforcement', effectBoundar
 const mixedRegistry = await eslint.calculateConfigForFile('packages/local/src/registry/project-registry.ts');
 assert.deepEqual(
   mixedRegistry.rules['anti-slop/effect-boundaries'][1].bridges.map(({ removalSlice }) => removalSlice),
-  ['S2', 'S8c'],
+  ['S8c'],
 );

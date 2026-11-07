@@ -66,11 +66,17 @@ import type { ResolvedEvalCaseInput } from './eval-resolver.js';
  */
 const createJudgeCache = (cacheStore: CacheStore, secrets: readonly string[]): JudgeCache => ({
   get: async (key) => {
-    const entry = await cacheStore.get('judge', key);
+    // EFFECT-BRIDGE(S6)
+    const entry = valueFromExit(await Effect.runPromiseExit(cacheStore.get('judge', key)));
 
     return entry === undefined ? undefined : parseWithSchemaSync(judgeOutcomeSchema, entry);
   },
-  set: (key, entry) => cacheStore.put('judge', key, redactProbeValue(entry, secrets)),
+  set: async (key, entry) => {
+    return valueFromExit(
+      // EFFECT-BRIDGE(S6)
+      await Effect.runPromiseExit(cacheStore.put('judge', key, redactProbeValue(entry, secrets))),
+    );
+  },
 });
 
 type ExecMetricDefinition = Extract<MetricResource['definition'], { kind: 'exec' }>;

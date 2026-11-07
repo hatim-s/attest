@@ -1,6 +1,7 @@
+import * as Effect from 'effect/Effect';
 import { resolve } from 'node:path';
 
-import { diffRuns, type RunDiff } from '@attest/core';
+import { diffRuns } from '@attest/core';
 
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
@@ -14,11 +15,13 @@ type CompareLocalRunsOptions = {
 };
 
 /** Compares a consistent store snapshot without creating or migrating the source database. */
-const compareLocalRuns = async (options: CompareLocalRunsOptions): Promise<RunDiff> => {
+const compareLocalRuns = Effect.fn('compareLocalRuns')(function* (
+  options: CompareLocalRunsOptions,
+) {
   const configuredStorePath = options.storePath ?? '.attest/runs.db';
   const storePath = resolve(options.workingDirectory, configuredStorePath);
 
-  const diff = await withRunNotFound(
+  const diff = yield* withRunNotFound(
     () =>
       withReadonlyRunStoreFile(storePath, (store) =>
         diffRuns(store, options.baseRunId, options.candidateRunId),
@@ -27,12 +30,14 @@ const compareLocalRuns = async (options: CompareLocalRunsOptions): Promise<RunDi
   );
 
   if (diff === undefined) {
-    throw new LocalError('resource_not_found', 'The run store does not exist.', {
-      path: storePath,
-    });
+    return yield* Effect.fail(
+      new LocalError('resource_not_found', 'The run store does not exist.', {
+        path: storePath,
+      }),
+    );
   }
 
   return diff;
-};
+});
 
 export { compareLocalRuns, type CompareLocalRunsOptions };

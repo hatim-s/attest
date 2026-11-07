@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import * as Schema from 'effect/Schema';
 
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -29,7 +30,7 @@ const sandboxInvoke = vi.fn<typeof invokeVercelSandboxAgent>();
 
 const directories: string[] = [];
 
-const cache: CacheStore = { get: () => Promise.resolve(undefined), put: () => Promise.resolve() };
+const cache: CacheStore = { get: () => Effect.succeed(undefined), put: () => Effect.void };
 
 /** Uses a copy of the canonical contracts run fixture while setting only the lifecycle configuration under test. */
 const createRun = async (execution: EvalRun['effective_command']['resolved']['execution']) => {

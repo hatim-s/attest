@@ -51,6 +51,71 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/api/src/server/create-api-app.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Hono request read execution roots; host retains catalog lifetime',
+  },
+  {
+    file: 'packages/api/src/client/_tests_/api-client.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'API HTTP comparison fixture test root',
+  },
+  {
+    file: 'packages/api/src/server/_tests_/create-api-app.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'API comparison fixture test root',
+  },
+  {
+    file: 'packages/cli/src/commands/register-root-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Commander report, trace convert and diff action roots',
+  },
+  {
+    file: 'packages/cli/src/commands/projects/register-projects-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Commander projects list action root',
+  },
+  {
+    file: 'packages/cli/src/_tests_/run-cli.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'CLI scoped persisted report and diff fixture root',
+  },
+  {
+    file: 'packages/local/src/store/_tests_/fixtures/crash-writer.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'intentional crash process root',
+  },
+  {
+    file: 'packages/local/src/store/_tests_/store-fixture.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'scoped test store owner',
+  },
+  {
+    file: 'packages/local/src/store/_tests_/store-lifetime.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'store lifetime invariants',
+  },
+  {
+    file: 'packages/core/src/diff/_tests_/diff-runs.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'diff coordinator test root',
+  },
+  ...['bounded-run-details', 'run-store', 'cache'].map((name) => ({
+    file: `packages/local/src/store/_tests_/${name}.test.ts`,
+    operations: ['Effect.runPromiseExit'],
+    owner: 'store driver fixture root',
+  })),
+  {
+    file: 'packages/local/src/store/_tests_/migration-lifetime.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native migration lifetime invariants',
+  },
+  {
+    file: 'packages/local/src/store/_tests_/database.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'database migration fixture root',
+  },
+  {
     file: 'packages/local/src/internal/_tests_/open-anchored.test.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'anchored descriptor cleanup and interruption invariants',
@@ -180,6 +245,30 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
+    file: 'packages/local/src/internal/promise-store-owner.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'temporary owner handshake for later Promise application lifetimes',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9a',
+        owner: 'view server and catalog lifetime',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/run-control/create-run-launcher.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise RunControl native catalog read',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9a',
+        owner: 'RunControl catalog consumer',
+      },
+    ],
+  },
+  {
     file: 'packages/local/src/commands/agent/adapter/resolve-native-agent.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'unmigrated Promise parent of Phase A project operations',
@@ -223,18 +312,6 @@ const effectMigrationBridges = [
       {
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S8c',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/run-store/readonly-run-store.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S2',
         owner: 'declared migration owner',
       },
     ],
@@ -289,18 +366,6 @@ const effectMigrationBridges = [
   },
   {
     file: 'packages/local/src/commands/eval/eval-lifecycle.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S7b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/eval/eval-project-path.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'unmigrated Promise parent of Phase A project operations',
     bridges: [
@@ -384,30 +449,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/report/run-report-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S2',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/view/run-view-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S9a',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/cloud/credentials.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'temporary Promise parent of native S1c file operations',
@@ -484,11 +525,6 @@ const effectMigrationBridges = [
     operations: ['Effect.runPromiseExit'],
     owner: 'temporary Promise parent of native S1c file operations',
     bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S2',
-        owner: 'registry catalog read',
-      },
       {
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S8c',

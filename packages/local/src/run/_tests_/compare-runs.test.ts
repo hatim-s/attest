@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { expect, it } from 'vitest';
 
-import { openStore } from '../../store/index.js';
+import { openTestStore as openStore, run as executeB1 } from '../../store/_tests_/b1-fixture.js';
 import { compareLocalRuns } from '../compare-runs.js';
 
 it('compares an external store by absolute and parent-relative paths without modifying it', async () => {
@@ -18,39 +18,47 @@ it('compares an external store by absolute and parent-relative paths without mod
 
     const store = await openStore(storePath);
 
-    const base = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'base-config',
-      configJson: '{}',
-    });
+    const base = await executeB1(
+      store.runs.createRun({
+        schemaId: 'attest.project',
+        configHash: 'base-config',
+        configJson: '{}',
+      }),
+    );
 
-    await store.runs.finalizeRun(base.id, 'completed');
+    await executeB1(store.runs.finalizeRun(base.id, 'completed'));
 
-    const candidate = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'candidate-config',
-      configJson: '{}',
-    });
+    const candidate = await executeB1(
+      store.runs.createRun({
+        schemaId: 'attest.project',
+        configHash: 'candidate-config',
+        configJson: '{}',
+      }),
+    );
 
-    await store.runs.finalizeRun(candidate.id, 'completed');
+    await executeB1(store.runs.finalizeRun(candidate.id, 'completed'));
     await store.close();
 
     const bytesBefore = await readFile(storePath);
     const filesBefore = await readdir(storeDirectory);
 
-    const absoluteDiff = await compareLocalRuns({
-      baseRunId: base.id,
-      candidateRunId: candidate.id,
-      storePath,
-      workingDirectory,
-    });
+    const absoluteDiff = await executeB1(
+      compareLocalRuns({
+        baseRunId: base.id,
+        candidateRunId: candidate.id,
+        storePath,
+        workingDirectory,
+      }),
+    );
 
-    const relativeDiff = await compareLocalRuns({
-      baseRunId: base.id,
-      candidateRunId: candidate.id,
-      storePath: '../external/runs.db',
-      workingDirectory,
-    });
+    const relativeDiff = await executeB1(
+      compareLocalRuns({
+        baseRunId: base.id,
+        candidateRunId: candidate.id,
+        storePath: '../external/runs.db',
+        workingDirectory,
+      }),
+    );
 
     expect(absoluteDiff.summary).toMatchObject({
       baseRunId: base.id,
@@ -77,12 +85,14 @@ it('does not create a missing absolute store outside the working directory', asy
     await Promise.all([mkdir(workingDirectory), mkdir(storeDirectory)]);
 
     await expect(
-      compareLocalRuns({
-        baseRunId: 'missing-base',
-        candidateRunId: 'missing-candidate',
-        storePath,
-        workingDirectory,
-      }),
+      executeB1(
+        compareLocalRuns({
+          baseRunId: 'missing-base',
+          candidateRunId: 'missing-candidate',
+          storePath,
+          workingDirectory,
+        }),
+      ),
     ).rejects.toMatchObject({ code: 'resource_not_found' });
     expect(await readdir(storeDirectory)).toEqual([]);
   } finally {

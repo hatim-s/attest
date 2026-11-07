@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../internal/effect-exit.js';
 import {
   parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
@@ -34,7 +36,10 @@ const toProjectUnloadable = (error: LocalError): StoreError => {
  */
 const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl => {
   const projectRoot = async (projectKey: string): Promise<string> => {
-    const project = (await catalog.listProjects()).find(({ key }) => key === projectKey);
+    // EFFECT-BRIDGE(S9a)
+    const project = valueFromExit(await Effect.runPromiseExit(catalog.listProjects())).find(
+      ({ key }) => key === projectKey,
+    );
 
     if (project === undefined) {
       throw new StoreError('PROJECT_NOT_FOUND', `Project ${projectKey} is not served here.`);

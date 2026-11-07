@@ -1,5 +1,7 @@
 import { parseWithSchema } from '@attest/contracts';
 import { StoreError, type StoreErrorCode } from '@attest/core';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
 import * as Schema from 'effect/Schema';
 
 import type { ApiErrorCode, ApiErrorEnvelope } from '../contract/errors.js';
@@ -80,4 +82,26 @@ const toErrorEnvelope = (error: Error): ApiErrorEnvelope => {
   return { error: { code, message: error.message, details: error.details } };
 };
 
-export { parseInput, parseJsonBody, toErrorEnvelope };
+/**
+ * Preserves typed source failures at the HTTP root. Defects and interruption keep
+ * their full internal Cause and receive the safe internal-error projection.
+ */
+const readExitValue = <A>(exit: Exit.Exit<A, StoreError>): A => {
+  if (Exit.isSuccess(exit)) return exit.value;
+
+  if (!Cause.hasDies(exit.cause) && !Cause.hasInterrupts(exit.cause)) {
+    for (const reason of exit.cause.reasons) {
+      if (Cause.isFailReason(reason)) {
+        Object.defineProperty(reason.error, 'effectCause', {
+          value: exit.cause,
+          configurable: true,
+        });
+        throw reason.error;
+      }
+    }
+  }
+
+  throw new Error(INTERNAL_MESSAGE, { cause: exit.cause });
+};
+
+export { parseInput, parseJsonBody, toErrorEnvelope, readExitValue };

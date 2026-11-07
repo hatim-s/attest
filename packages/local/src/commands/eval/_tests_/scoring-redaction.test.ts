@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -19,7 +20,7 @@ import { afterEach, expect, onTestFinished, test, vi } from 'vitest';
 import * as Schema from 'effect/Schema';
 
 import { REDACTED } from '../../../internal/redaction.js';
-import { openStore } from '../../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../../store/_tests_/b1-fixture.js';
 import { createEvalCaseRunner } from '../eval-agent-runner.js';
 import { createEvalMetricEvaluator } from '../eval-metric-runner.js';
 import { createEvalPersistenceAdapter } from '../eval-persistence.js';
@@ -28,8 +29,8 @@ import type { ResolvedEvalCaseInput } from '../eval-resolver.js';
 const directories: string[] = [];
 
 const emptyCache: CacheStore = {
-  get: () => Promise.resolve(undefined),
-  put: () => Promise.resolve(),
+  get: () => Effect.succeed(undefined),
+  put: () => Effect.void,
 };
 
 /** Writes `{ token }` as the agent output once stdin closes. */
@@ -215,7 +216,7 @@ const runAndRecord = async (
     },
   });
 
-  return { result, stored: (await store.runs.getRunWithCases(run.run_id)).cases };
+  return { result, stored: (await executeB2(store.runs.getRunWithCases(run.run_id))).cases };
 };
 
 afterEach(async () => {
@@ -279,7 +280,7 @@ test('a field-redacted output value never reaches stored metric text or the judg
     expect(judge?.rationale).toContain(REDACTED);
 
     const { key } = parseWithSchemaSync(stripStruct({ key: Schema.String }), judge?.judgeIo);
-    const cached = await store.cache.get('judge', key);
+    const cached = await executeB2(store.cache.get('judge', key));
     expect(cached).toBeDefined();
 
     expect(JSON.stringify({ stored, metrics: result.metrics, cached })).not.toContain(hidden);

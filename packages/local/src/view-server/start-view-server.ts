@@ -52,7 +52,16 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
       candidate.once('error', reject);
     });
   } catch (error: unknown) {
-    await closeCatalog();
+    try {
+      await closeCatalog();
+    } catch (cleanup) {
+      const primary =
+        error instanceof Error ? error : new Error('View startup failed.', { cause: error });
+
+      Object.defineProperty(primary, 'cleanupFailure', { value: cleanup, configurable: true });
+      throw primary;
+    }
+
     throw error;
   }
 

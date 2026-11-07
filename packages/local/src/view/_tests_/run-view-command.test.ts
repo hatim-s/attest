@@ -2,9 +2,11 @@ import { parseWithSchemaSync } from '@attest/contracts';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer, type AddressInfo } from 'node:net';
+import { Kysely } from 'kysely';
 
 import { projectListSchema } from '@attest/api/contract';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runViewCommand } from '../run-view-command.js';
 
@@ -96,5 +98,60 @@ describe('runViewCommand', () => {
       }),
     ).rejects.toMatchObject({ code: 'registry_invalid' });
     expect(started).toBe(false);
+  });
+  it('closes the listener and preserves an onReady failure', async () => {
+    const directory = await temporaryDirectory('attest-view-onready-');
+    const primary = new Error('onReady failed');
+    let origin = '';
+    await expect(
+      runViewCommand({
+        scope: { kind: 'store' },
+        workingDirectory: directory,
+        onReady: (server) => {
+          origin = server.origin;
+          throw primary;
+        },
+      }),
+    ).rejects.toBe(primary);
+    await expect(fetch(origin)).rejects.toThrow();
+  });
+
+  it('preserves a listen failure and its store release diagnostic', async () => {
+    const directory = await temporaryDirectory('attest-view-listen-');
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    // SAFETY: A completed TCP listen on a loopback host returns AddressInfo, never a pipe path.
+    const address = blocker.address() as AddressInfo;
+    const acknowledgement = new Error('store close acknowledgement lost');
+
+    // Close the real database, then simulate the driver losing its release acknowledgement.
+    const release = vi.spyOn(Kysely.prototype, 'destroy').mockImplementationOnce(async function (
+      this: Kysely<unknown>,
+    ) {
+      release.mockRestore();
+      await this.destroy();
+      throw acknowledgement;
+    });
+
+    try {
+      await expect(
+        runViewCommand({
+          scope: { kind: 'store' },
+          workingDirectory: directory,
+          port: address.port,
+        }),
+      ).rejects.toMatchObject({
+        code: 'EADDRINUSE',
+        cleanupFailure: {
+          code: 'WRITE_FAILED',
+          message: 'Store work completed but release failed.',
+        },
+      });
+    } finally {
+      release.mockRestore();
+      await new Promise<void>((resolve, reject) =>
+        blocker.close((error) => (error === undefined ? resolve() : reject(error))),
+      );
+    }
   });
 });

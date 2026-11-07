@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { readExitValue } from '../errors/read-exit-value.js';
 import { diffToJson } from '@attest/core';
 import {
   compareLocalRuns,
@@ -116,13 +118,17 @@ const registerRootCommands = ({
     .option('-o, --output <path>', 'HTML output path')
     .option('--force', 'replace an existing report')
     .action(async (runId: string, options: ReportCommandOptions) => {
-      const result = await runReportCommand({
-        force: options.force,
-        outputPath: options.output,
-        runId,
-        storePath: options.store,
-        workingDirectory,
-      });
+      const result = readExitValue(
+        await Effect.runPromiseExit(
+          runReportCommand({
+            force: options.force,
+            outputPath: options.output,
+            runId,
+            storePath: options.store,
+            workingDirectory,
+          }),
+        ),
+      );
 
       io.output(`Wrote ${result.caseCount}-case report to ${result.outputPath}`);
 
@@ -143,13 +149,17 @@ const registerRootCommands = ({
     .option('-o, --output <path>', 'Attest trace output path')
     .option('--force', 'replace an existing output file')
     .action(async (inputPath: string, options: TraceConvertCommandOptions) => {
-      const result = await runTraceConvertCommand({
-        force: options.force,
-        inputPath,
-        outputPath: options.output,
-        traceId: options.traceId,
-        workingDirectory,
-      });
+      const result = readExitValue(
+        await Effect.runPromiseExit(
+          runTraceConvertCommand({
+            force: options.force,
+            inputPath,
+            outputPath: options.output,
+            traceId: options.traceId,
+            workingDirectory,
+          }),
+        ),
+      );
 
       io.output(
         result.outputPath === undefined
@@ -170,12 +180,16 @@ const registerRootCommands = ({
         .default('human'),
     )
     .action(async (baseRunId: string, candidateRunId: string, options: DiffCommandOptions) => {
-      const diff = await compareLocalRuns({
-        baseRunId,
-        candidateRunId,
-        storePath: options.store,
-        workingDirectory,
-      });
+      const diff = readExitValue(
+        await Effect.runPromiseExit(
+          compareLocalRuns({
+            baseRunId,
+            candidateRunId,
+            storePath: options.store,
+            workingDirectory,
+          }),
+        ),
+      );
 
       io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
     });

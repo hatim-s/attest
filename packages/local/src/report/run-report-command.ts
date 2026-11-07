@@ -1,4 +1,3 @@
-import { valueFromExit } from '../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { randomUUID } from 'node:crypto';
 import { link, open, rename, unlink } from 'node:fs/promises';
@@ -8,6 +7,7 @@ import type { ReportSnapshot } from '@attest/api/contract';
 import { summarizeCaseRecord } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
+import { withReadCleanup } from '../commands/run-store/cleanup.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
@@ -35,19 +35,16 @@ type RunReportCommandResult = {
 };
 
 /** Materializes one bounded, self-contained run report without overwriting by default. */
-const runReportCommand = async (
+const runReportCommand = Effect.fn('runReportCommand')(function* (
   options: RunReportCommandOptions,
-): Promise<RunReportCommandResult> => {
+) {
   const configuredStorePath = options.storePath ?? '.attest/runs.db';
 
-  // EFFECT-BRIDGE(S2)
-  const storePath = await Effect.runPromiseExit(
-    prepareEvalProjectFile(options.workingDirectory, configuredStorePath, {
-      allowAbsolute: true,
-      errorCode: 'project_read_failed',
-      message: 'The report run store is not a safe project file.',
-    }),
-  ).then((exit) => valueFromExit(exit));
+  const storePath = yield* prepareEvalProjectFile(options.workingDirectory, configuredStorePath, {
+    allowAbsolute: true,
+    errorCode: 'project_read_failed',
+    message: 'The report run store is not a safe project file.',
+  });
 
   const runNotFound = (cause?: unknown): LocalError =>
     new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
@@ -55,7 +52,7 @@ const runReportCommand = async (
       cause,
     });
 
-  const runWithCases = await withRunNotFound(
+  const runWithCases = yield* withRunNotFound(
     () =>
       withReadonlyRunStoreFile(storePath, (store) =>
         readBoundedRunDetails(store, { runId: options.runId, limit: MAX_REPORT_CASES }),
@@ -63,16 +60,13 @@ const runReportCommand = async (
     runNotFound,
   );
 
-  if (runWithCases === undefined) throw runNotFound();
+  if (runWithCases === undefined) return yield* Effect.fail(runNotFound());
 
   const cases = runWithCases.cases;
   const truncated = runWithCases.totalCaseCount > cases.length;
 
   // Reports are shared beyond this machine, so the local root path stays out of them.
-  // EFFECT-BRIDGE(S2)
-  const { key, name, projectId } = await Effect.runPromiseExit(
-    describeStoreProject(storePath),
-  ).then((exit) => valueFromExit(exit));
+  const { key, name, projectId } = yield* describeStoreProject(storePath);
 
   const snapshot: ReportSnapshot = {
     generatedAt: new Date().toISOString(),
@@ -82,54 +76,60 @@ const runReportCommand = async (
     truncated: truncated,
   };
 
-  // EFFECT-BRIDGE(S2)
-  const outputPath = await Effect.runPromiseExit(
-    prepareEvalProjectFile(
-      options.workingDirectory,
-      options.outputPath ?? `attest-report-${options.runId}.html`,
-      {
-        allowAbsolute: true,
-        createDirectories: true,
-        errorCode: 'output_write_failed',
-        message: 'The report output path is not a safe project file.',
-      },
-    ),
-  ).then((exit) => valueFromExit(exit));
+  const outputPath = yield* prepareEvalProjectFile(
+    options.workingDirectory,
+    options.outputPath ?? `attest-report-${options.runId}.html`,
+    {
+      allowAbsolute: true,
+      createDirectories: true,
+      errorCode: 'output_write_failed',
+      message: 'The report output path is not a safe project file.',
+    },
+  );
 
   const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
 
-  try {
-    handle = await open(temporaryPath, 'wx', 0o600);
-    await handle.writeFile(
-      createDashboardHtml(dashboardHtml, { kind: 'snapshot', snapshot }),
-      'utf8',
-    );
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
+  const outputError = (cause: unknown) =>
+    errnoCode(cause) === 'EEXIST'
+      ? new LocalError(
+          'output_exists',
+          `Report already exists at ${outputPath}; pass --force to replace it.`,
+          { cause },
+        )
+      : new LocalError('output_write_failed', `Could not write report to ${outputPath}.`, {
+          cause,
+        });
 
-    if (options.force === true) await rename(temporaryPath, outputPath);
-    else {
-      await link(temporaryPath, outputPath);
-      await unlink(temporaryPath);
-    }
-  } catch (error: unknown) {
-    await handle?.close().catch(() => undefined);
-    await unlink(temporaryPath).catch(() => undefined);
+  const call = <A>(operation: () => Promise<A>) =>
+    Effect.tryPromise({ try: operation, catch: outputError });
 
-    if (errnoCode(error) === 'EEXIST') {
-      throw new LocalError(
-        'output_exists',
-        `Report already exists at ${outputPath}; pass --force to replace it.`,
-        { cause: error },
+  yield* withReadCleanup(
+    Effect.gen(function* () {
+      const opened = yield* call(() => open(temporaryPath, 'wx', 0o600));
+      handle = opened;
+      yield* call(() =>
+        opened.writeFile(
+          createDashboardHtml(dashboardHtml, { kind: 'snapshot', snapshot }),
+          'utf8',
+        ),
       );
-    }
+      yield* call(() => opened.sync());
+      yield* call(() => opened.close());
+      handle = undefined;
 
-    throw new LocalError('output_write_failed', `Could not write report to ${outputPath}.`, {
-      cause: error,
-    });
-  }
+      if (options.force === true) yield* call(() => rename(temporaryPath, outputPath));
+      else yield* call(() => link(temporaryPath, outputPath));
+    }),
+    () => [
+      ...(handle === undefined ? [] : [call(() => handle!.close())]),
+      call(() => unlink(temporaryPath)).pipe(
+        Effect.catch((error) =>
+          errnoCode(error.cause) === 'ENOENT' ? Effect.void : Effect.fail(error),
+        ),
+      ),
+    ],
+  );
 
   return {
     caseCount: cases.length,
@@ -137,6 +137,6 @@ const runReportCommand = async (
     totalCaseCount: runWithCases.totalCaseCount,
     truncated: truncated,
   };
-};
+});
 
 export { runReportCommand, type RunReportCommandOptions, type RunReportCommandResult };

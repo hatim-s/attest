@@ -1,6 +1,6 @@
 import { valueFromExit } from '../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
-import { createBundle, StoreError, type RunStore } from '@attest/core';
+import { createBundle, type RunStore } from '@attest/core';
 
 import { withReadonlyRunStore } from '../commands/run-store/readonly-run-store.js';
 import { LocalError } from '../errors/local-error.js';
@@ -9,19 +9,21 @@ import { readCloudLink, resolveCloudProject, type CloudProjectOptions } from './
 import { projectTokenIdentitySchema, uploadedRunResponseSchema } from './protocol.js';
 
 /** Uses the store's stable newest-first paging, skipping unfinished runs across pages. */
-const newestFinishedRun = async (store: RunStore): Promise<string> => {
+const newestFinishedRun = Effect.fn('newestFinishedRun')(function* (store: RunStore) {
   let cursor: string | undefined;
 
   do {
-    const page = await store.listRuns({ cursor });
+    const page = yield* store.listRuns({ cursor });
     const run = page.items.find((item) => item.status !== 'running');
 
     if (run !== undefined) return run.id;
     cursor = page.nextCursor;
   } while (cursor !== undefined);
 
-  throw new LocalError('resource_not_found', 'This project has no finished runs to upload.');
-};
+  return yield* Effect.fail(
+    new LocalError('resource_not_found', 'This project has no finished runs to upload.'),
+  );
+});
 
 /** Resolves CI token identity without making session commands accept an unlinked project. */
 const resolveCloudUploadProject = async (options: CloudProjectOptions) => {
@@ -60,22 +62,30 @@ const uploadCloudRun = async (
 ) => {
   const { root, projectId } = options;
 
-  const snapshot = await withReadonlyRunStore(root, async (store) => {
-    const runId = options.runId ?? (await newestFinishedRun(store));
+  const snapshot = valueFromExit(
+    // EFFECT-BRIDGE(S8c)
+    await Effect.runPromiseExit(
+      withReadonlyRunStore(root, (store) =>
+        Effect.gen(function* () {
+          const runId = options.runId ?? (yield* newestFinishedRun(store));
 
-    try {
-      const aggregate = await store.getRunWithCases(runId);
-      const bundle = `${createBundle(aggregate.run, aggregate.cases).lines.join('\n')}\n`;
+          const aggregate = yield* store
+            .getRunWithCases(runId)
+            .pipe(
+              Effect.mapError((error) =>
+                error.code === 'RUN_NOT_FOUND'
+                  ? new LocalError('resource_not_found', `Run ${runId} was not found.`)
+                  : error,
+              ),
+            );
 
-      return { runId, bundle };
-    } catch (error) {
-      if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
-        throw new LocalError('resource_not_found', `Run ${runId} was not found.`);
-      }
+          const bundle = `${createBundle(aggregate.run, aggregate.cases).lines.join('\n')}\n`;
 
-      throw error;
-    }
-  });
+          return { runId, bundle };
+        }),
+      ),
+    ),
+  );
 
   if (snapshot === undefined)
     throw new LocalError('resource_not_found', 'This project has no local run store.');

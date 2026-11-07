@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   createSingleProjectCatalog,
   StoreError,
@@ -71,30 +72,34 @@ const point = {
 };
 
 const source: RunSource = {
-  listRuns: (query) => Promise.resolve({ items: query?.cursor === undefined ? [run] : [] }),
-  getRun: (runId) => {
-    if (runId !== run.id) throw new StoreError('RUN_NOT_FOUND', 'Run missing.');
+  listRuns: (query) => Effect.succeed({ items: query?.cursor === undefined ? [run] : [] }),
+  getRun: (runId) =>
+    Effect.gen(function* () {
+      if (runId !== run.id)
+        return yield* Effect.fail(new StoreError('RUN_NOT_FOUND', 'Run missing.'));
 
-    return Promise.resolve(run);
-  },
-  listCaseSummaries: async (runId, query) => {
-    await source.getRun(runId);
+      return yield* Effect.succeed(run);
+    }),
+  listCaseSummaries: (runId, query) =>
+    Effect.gen(function* () {
+      yield* source.getRun(runId);
 
-    const index =
-      query?.cursor === undefined
-        ? 0
-        : cases.findIndex(({ record }) => record.rowId === query.cursor) + 1;
+      const index =
+        query?.cursor === undefined
+          ? 0
+          : cases.findIndex(({ record }) => record.rowId === query.cursor) + 1;
 
-    const page = cases.slice(index, index + 1);
+      const page = cases.slice(index, index + 1);
 
-    return index + 1 < cases.length
-      ? { items: page.map(({ summary }) => summary), nextCursor: page.at(-1)?.record.rowId }
-      : { items: page.map(({ summary }) => summary) };
-  },
-  getCase: () => {
-    throw new StoreError('CASE_NOT_FOUND', 'No case reads in this fixture.');
-  },
-  getRunWithCases: () => Promise.resolve({ run, cases: records }),
+      return index + 1 < cases.length
+        ? { items: page.map(({ summary }) => summary), nextCursor: page.at(-1)?.record.rowId }
+        : { items: page.map(({ summary }) => summary) };
+    }),
+  getCase: () =>
+    Effect.gen(function* () {
+      return yield* Effect.fail(new StoreError('CASE_NOT_FOUND', 'No case reads in this fixture.'));
+    }),
+  getRunWithCases: () => Effect.succeed({ run, cases: records }),
 };
 
 afterEach(() => vi.unstubAllGlobals());

@@ -69,25 +69,22 @@ const invalidRegistry = (registryPath: string, cause: unknown): LocalError =>
  * registry; a symlinked ancestor, a symlinked or group-accessible file, or malformed content is
  * `registry_invalid`.
  */
-const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
-  let text: string;
+const readRegistry = Effect.fn('readRegistry')(function* (registryPath: string) {
+  const text = yield* readPrivateFile(registryPath).pipe(
+    Effect.catch((cause) =>
+      errnoCode(cause) === 'ENOENT'
+        ? Effect.succeed(undefined)
+        : Effect.fail(invalidRegistry(registryPath, cause)),
+    ),
+  );
 
-  try {
-    // EFFECT-BRIDGE(S2)
-    text = await Effect.runPromiseExit(readPrivateFile(registryPath)).then((exit) =>
-      valueFromExit(exit),
-    );
-  } catch (cause: unknown) {
-    if (errnoCode(cause) === 'ENOENT') return EMPTY_REGISTRY;
-    throw invalidRegistry(registryPath, cause);
-  }
+  if (text === undefined) return EMPTY_REGISTRY;
 
-  try {
-    return parseWithSchemaSync(registrySchema, JSON.parse(text));
-  } catch (cause: unknown) {
-    throw invalidRegistry(registryPath, cause);
-  }
-};
+  return yield* Effect.try({
+    try: () => parseWithSchemaSync(registrySchema, JSON.parse(text)),
+    catch: (cause) => invalidRegistry(registryPath, cause),
+  });
+});
 
 /** Replaces the registry atomically with a private temporary file and a rename. */
 const writeRegistry = async (registryPath: string, registry: ProjectRegistry): Promise<void> => {
@@ -127,7 +124,11 @@ const registerProject = async (options: RegisterProjectOptions): Promise<Registr
   const root = await resolveProjectRoot(options.root);
 
   return withRegistryLock(options.registryPath, async () => {
-    const registry = await readRegistry(options.registryPath);
+    // EFFECT-BRIDGE(S8c)
+    const registry = await Effect.runPromiseExit(readRegistry(options.registryPath)).then(
+      valueFromExit,
+    );
+
     const existing = registry.projects.find((entry) => entry.root === root);
 
     if (existing !== undefined) return existing;
@@ -162,7 +163,10 @@ const unregisterProject = async (options: UnregisterProjectOptions): Promise<Reg
   const root = await realpath(directory).catch(() => directory);
 
   return withRegistryLock(options.registryPath, async () => {
-    const registry = await readRegistry(options.registryPath);
+    // EFFECT-BRIDGE(S8c)
+    const registry = await Effect.runPromiseExit(readRegistry(options.registryPath)).then(
+      valueFromExit,
+    );
 
     const entry =
       registry.projects.find(({ key }) => key === options.keyOrRoot) ??

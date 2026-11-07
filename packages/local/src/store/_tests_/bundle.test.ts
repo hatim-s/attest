@@ -15,15 +15,18 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { exportRunBundle, readRunBundle } from '../bundle-io.js';
-import { openStore } from '../run-store.js';
+import { openTestStore as openStore, run as executeB1 } from './b1-fixture.js';
 
 const fixtureRecordSchema = Schema.Record(Schema.String, Schema.Json);
 
-const stores: RunStore[] = [];
+const stores: { close: () => Promise<void> }[] = [];
 
 const directories: string[] = [];
 
-const openTemporaryStore = async (): Promise<{ directory: string; store: RunStore }> => {
+const openTemporaryStore = async (): Promise<{
+  directory: string;
+  store: RunStore & { close: () => Promise<void> };
+}> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-bundle-'));
   const store = (await openStore(join(directory, 'runs.db'))).runs;
   directories.push(directory);
@@ -34,37 +37,41 @@ const openTemporaryStore = async (): Promise<{ directory: string; store: RunStor
 
 /** Creates one completed run whose exported case exercises the structural bundle guard. */
 const createStoredRun = async (store: RunStore) => {
-  const run = await store.createRun({
-    schemaId: 'attest.project',
-    configHash: 'hash',
-    configJson: '{}',
-  });
-
-  await store.recordCase(
-    run.id,
-    {
-      caseId: 'case-1',
-      suiteName: 'suite',
-      outcome: 'completed',
-      startedAt: '2026-08-06T00:00:00.000Z',
-      durationMs: 12,
-      request: { protocol: AGENT_PROTOCOL, run_id: run.id, case_id: 'case-1', input: {} },
-      response: { output: 'ok' },
-      warnings: [],
-      diagnostics: {},
-      attempts: [],
-      expectedMetrics: ['quality'],
-    },
-    [{ metricName: 'quality', kind: 'assertion', status: 'evaluated', score: 1, pass: true }],
+  const run = await executeB1(
+    store.createRun({
+      schemaId: 'attest.project',
+      configHash: 'hash',
+      configJson: '{}',
+    }),
   );
 
-  return store.finalizeRun(run.id, 'completed');
+  await executeB1(
+    store.recordCase(
+      run.id,
+      {
+        caseId: 'case-1',
+        suiteName: 'suite',
+        outcome: 'completed',
+        startedAt: '2026-08-06T00:00:00.000Z',
+        durationMs: 12,
+        request: { protocol: AGENT_PROTOCOL, run_id: run.id, case_id: 'case-1', input: {} },
+        response: { output: 'ok' },
+        warnings: [],
+        diagnostics: {},
+        attempts: [],
+        expectedMetrics: ['quality'],
+      },
+      [{ metricName: 'quality', kind: 'assertion', status: 'evaluated', score: 1, pass: true }],
+    ),
+  );
+
+  return executeB1(store.finalizeRun(run.id, 'completed'));
 };
 
 const collect = async (source: Readable | string) => {
   const records = [];
 
-  for await (const record of readRunBundle(source)) records.push(record);
+  for (const record of await executeB1(readRunBundle(source))) records.push(record);
 
   return records;
 };
@@ -93,7 +100,7 @@ const mutateAndRehashBundle = async (
 };
 
 afterEach(async () => {
-  await Promise.all(stores.splice(0).map(async (store) => store.close()));
+  await Promise.all(stores.splice(0).map((store) => store.close()));
   await Promise.all(
     directories.splice(0).map(async (directory) => rm(directory, { recursive: true })),
   );
@@ -105,7 +112,7 @@ describe('run bundles', () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'run.ndjson');
-    const manifest = await exportRunBundle(store, run.id, destination);
+    const manifest = await executeB1(exportRunBundle(store, run.id, destination));
     await expect(collect(destination)).resolves.toMatchObject([
       { type: 'bundle_header', schema: BUNDLE_SCHEMA_ID, run: { id: run.id } },
       { type: 'case', case: { caseId: 'case-1' } },
@@ -126,7 +133,7 @@ describe('run bundles', () => {
     });
 
     const result = await Promise.race([
-      exportRunBundle(store, run.id, destination).catch((cause: unknown) => cause),
+      executeB1(exportRunBundle(store, run.id, destination)).catch((cause: unknown) => cause),
       delay(100).then(() => 'export did not settle'),
     ]);
 
@@ -137,13 +144,13 @@ describe('run bundles', () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'tampered.ndjson');
-    await exportRunBundle(store, run.id, destination);
+    await executeB1(exportRunBundle(store, run.id, destination));
     const contents = await readFile(destination, 'utf8');
     await writeFile(destination, contents.replace('"output":"ok"', '"output":"no"'), 'utf8');
     let yielded = 0;
 
     const failure = await (async () => {
-      for await (const record of readRunBundle(destination)) {
+      for (const record of await executeB1(readRunBundle(destination))) {
         yielded += 1;
         void record;
       }
@@ -171,7 +178,7 @@ describe('run bundles', () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'unknown.ndjson');
-    await exportRunBundle(store, run.id, destination);
+    await executeB1(exportRunBundle(store, run.id, destination));
     const lines = (await readFile(destination, 'utf8')).trimEnd().split('\n');
     const unknown = canonicalStringify({ type: 'future_optional', value: { retained: true } });
     const contentLines = [lines[0] ?? '', unknown, lines[1] ?? ''];
@@ -194,7 +201,7 @@ describe('run bundles', () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'mismatched-count.ndjson');
-    await exportRunBundle(store, run.id, destination);
+    await executeB1(exportRunBundle(store, run.id, destination));
     const lines = (await readFile(destination, 'utf8')).trimEnd().split('\n');
     const contentLines = lines.slice(0, -1);
     const hasher = createContentHasher();
@@ -216,7 +223,7 @@ describe('run bundles', () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'unsupported-schema.ndjson');
-    await exportRunBundle(store, run.id, destination);
+    await executeB1(exportRunBundle(store, run.id, destination));
 
     const source = await mutateAndRehashBundle(destination, (header) => {
       header.schema = 'attest.bundle/future';
@@ -286,7 +293,7 @@ describe('run bundles', () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'structurally-invalid.ndjson');
-    await exportRunBundle(store, run.id, destination);
+    await executeB1(exportRunBundle(store, run.id, destination));
     const source = await mutateAndRehashBundle(destination, mutate);
     const collected = collect(source);
     await expect(collected).rejects.toMatchObject({ code: 'CORRUPT_DATA' });

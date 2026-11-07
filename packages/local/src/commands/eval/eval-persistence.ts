@@ -47,13 +47,23 @@ const createEvalPersistenceAdapter = (
       createdRun = { ...createdRun, gitBranch: run.git.branch };
     }
 
-    await store.runs.createRun(createdRun, { id: run.run_id, createdAt: run.created_at });
+    valueFromExit(
+      // EFFECT-BRIDGE(S7b)
+      await Effect.runPromiseExit(
+        store.runs.createRun(createdRun, { id: run.run_id, createdAt: run.created_at }),
+      ),
+    );
   },
   recordCase: async (runId, record) => {
     if (record.kind === 'executed') {
-      await store.runs.recordCase(runId, toStoredCaseExecution(record.execution), [
-        ...record.metrics,
-      ]);
+      valueFromExit(
+        // EFFECT-BRIDGE(S7b)
+        await Effect.runPromiseExit(
+          store.runs.recordCase(runId, toStoredCaseExecution(record.execution), [
+            ...record.metrics,
+          ]),
+        ),
+      );
 
       return;
     }
@@ -86,17 +96,23 @@ const createEvalPersistenceAdapter = (
       warnings: [],
     };
 
-    await store.runs.recordCase(runId, skippedExecution, []);
+    // EFFECT-BRIDGE(S7b)
+    valueFromExit(await Effect.runPromiseExit(store.runs.recordCase(runId, skippedExecution, [])));
   },
   finalizeRun: async (runId, status) => {
-    await store.runs.finalizeRun(runId, status);
+    // EFFECT-BRIDGE(S7b)
+    valueFromExit(await Effect.runPromiseExit(store.runs.finalizeRun(runId, status)));
   },
 });
 
 /** Uses the existing run-store diff engine after the candidate run has been fully recorded. */
 const createEvalBaselineAdapter = (store: AttestStore): EvalBaselineAdapter<RunDiff> => ({
-  diffRuns: ({ baselineRunId, candidateRunId }) =>
-    diffRuns(store.runs, baselineRunId, candidateRunId),
+  diffRuns: async ({ baselineRunId, candidateRunId }) => {
+    return valueFromExit(
+      // EFFECT-BRIDGE(S7b)
+      await Effect.runPromiseExit(diffRuns(store.runs, baselineRunId, candidateRunId)),
+    );
+  },
 });
 
 /** Verifies the engine-provided JUnit integrity metadata before publishing any bytes. */

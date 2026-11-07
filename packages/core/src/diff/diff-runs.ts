@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   parseWithSchemaSync,
   EVAL_RUN_SCHEMA_ID,
@@ -8,8 +9,8 @@ import {
 import { canonicalStringify } from '../store/internal/canonical-json.js';
 import { StoreError } from '../store/store-error.js';
 import type { RunRecord, RunSource } from '../store/types.js';
-import { classifyRuns } from './classify.js';
 import type { RunDiff } from './types.js';
+import { classifyRuns } from './classify.js';
 
 /** Selection scope of an eval run, used to decide whether unmatched cases are real changes. */
 interface EvalScope {
@@ -53,18 +54,31 @@ const hasSameTests = (base: EvalScope, candidate: EvalScope): boolean =>
  * Loads two runs and delegates their cases to the pure classifier. Runs over a partial or
  * different test selection compare only shared cases, so skipped cases never read as removals.
  */
-const diffRuns = async (
+const diffRuns = Effect.fn('diffRuns')(function* (
   source: Pick<RunSource, 'getRunWithCases'>,
   baseRunId: string,
   candidateRunId: string,
-): Promise<RunDiff> => {
-  const [base, candidate] = await Promise.all([
-    source.getRunWithCases(baseRunId),
-    source.getRunWithCases(candidateRunId),
-  ]);
+) {
+  const [base, candidate] = yield* Effect.all(
+    [source.getRunWithCases(baseRunId), source.getRunWithCases(candidateRunId)],
+    { concurrency: 2 },
+  );
 
-  const baseScope = evalScope(base.run);
-  const candidateScope = evalScope(candidate.run);
+  const baseScope = yield* Effect.try({
+    try: () => evalScope(base.run),
+    catch: (cause) =>
+      cause instanceof StoreError
+        ? cause
+        : new StoreError('CORRUPT_DATA', 'Invalid eval configuration.', { cause }),
+  });
+
+  const candidateScope = yield* Effect.try({
+    try: () => evalScope(candidate.run),
+    catch: (cause) =>
+      cause instanceof StoreError
+        ? cause
+        : new StoreError('CORRUPT_DATA', 'Invalid eval configuration.', { cause }),
+  });
 
   const differentTests =
     baseScope !== undefined &&
@@ -78,7 +92,7 @@ const diffRuns = async (
     candidateConfigHash: candidate.run.configHash,
     sharedOnly: baseScope?.partial === true || candidateScope?.partial === true || differentTests,
   });
-};
+});
 
 /** Serializes a diff with recursively stable object-key ordering for byte-stable CLI output. */
 const diffToJson = (diff: RunDiff): string => canonicalStringify(diff);

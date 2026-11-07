@@ -5,8 +5,11 @@ import * as Exit from 'effect/Exit';
 class EffectBoundaryFailure extends Error {
   readonly _tag = 'EffectBoundaryFailure';
 
-  constructor(readonly effectCause: Cause.Cause<unknown>) {
+  readonly effectCause: Cause.Cause<unknown>;
+
+  constructor(effectCause: Cause.Cause<unknown>) {
     super('The Effect operation did not complete normally.', { cause: effectCause });
+    this.effectCause = effectCause;
   }
 }
 

@@ -66,18 +66,9 @@ const groupBy = <T>(rows: readonly T[], key: (row: T) => string): Map<string, T[
   return grouped;
 };
 
-/**
- * Computes each run's exclusive totals from its case and metric rows. Reads call this instead of
- * trusting summary_json, because runs finalized before the shared verdict rule stored totals that
- * disagree with their own case list. Persisted rows stay untouched.
- */
-const summarizeRuns = async (
-  database: Kysely<Database>,
-  runIds: readonly string[],
-): Promise<(runId: string) => RunSummary> => {
-  if (runIds.length === 0) return () => summarizeVerdicts([]);
-
-  const cases = await database
+/** Builds the same summary queries for native reads and the foreign finalize transaction. */
+const runSummaryQueries = (database: Kysely<Database>, runIds: readonly string[]) => {
+  const cases = database
     .selectFrom('cases')
     .select([
       'id',
@@ -87,10 +78,9 @@ const summarizeRuns = async (
       lifecycleFailedColumn,
       agentErroredColumn,
     ])
-    .where('run_id', 'in', runIds)
-    .execute();
+    .where('run_id', 'in', runIds);
 
-  const metrics = await database
+  const metrics = database
     .selectFrom('metric_results')
     .innerJoin('cases', 'cases.id', 'metric_results.case_row_id')
     .select([
@@ -99,9 +89,16 @@ const summarizeRuns = async (
       'metric_results.status',
       'metric_results.pass',
     ])
-    .where('cases.run_id', 'in', runIds)
-    .execute();
+    .where('cases.run_id', 'in', runIds);
 
+  return { cases, metrics };
+};
+
+/** Recomputes exclusive totals from rows without trusting legacy stored summary_json. */
+const summarizeRunRows = (
+  cases: readonly (SummaryCase & { run_id: string })[],
+  metrics: readonly SummaryMetric[],
+): ((runId: string) => RunSummary) => {
   const metricsByCase = groupBy(metrics, (metric) => metric.case_row_id);
   const casesByRun = groupBy(cases, (caseRow) => caseRow.run_id);
 
@@ -115,4 +112,10 @@ const summarizeRuns = async (
     );
 };
 
-export { agentErroredColumn, lifecycleFailedColumn, rowVerdict, summarizeRuns };
+export {
+  agentErroredColumn,
+  lifecycleFailedColumn,
+  rowVerdict,
+  runSummaryQueries,
+  summarizeRunRows,
+};

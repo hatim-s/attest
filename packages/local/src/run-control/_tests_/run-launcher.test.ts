@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,7 +34,7 @@ import * as Schema from 'effect/Schema';
 
 import { writeFixtureProject } from '../../_tests_/support/project-transaction.js';
 import { runTestMutationCommand } from '../../commands/test/test-mutation-command.js';
-import { openStore } from '../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
 import { createRunLauncher } from '../create-run-launcher.js';
 import { toEvalRunDocument } from '../eval-run-document.js';
 import { spawnEvalRun } from '../spawn-eval-run.js';
@@ -53,8 +54,8 @@ const temporaryRoot = async (): Promise<string> => {
 };
 
 const catalogOf = (projects: ProjectRecord[]): ProjectCatalog => ({
-  listProjects: () => Promise.resolve(projects),
-  openProject: () => Promise.reject(new Error('The launcher must not open run sources.')),
+  listProjects: () => Effect.succeed(projects),
+  openProject: () => Effect.die(new Error('The launcher must not open run sources.')),
 });
 
 const launcherIn = (root: string, command = fakeCli) =>
@@ -397,10 +398,10 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     await mkdir(join(root, '.attest'));
     const store = await openStore(join(root, '.attest', 'runs.db'));
     const metadata = { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' };
-    const completed = await store.runs.createRun(metadata);
-    const cancelled = await store.runs.createRun(metadata);
-    await store.runs.finalizeRun(completed.id, 'completed');
-    await store.runs.finalizeRun(cancelled.id, 'cancelled');
+    const completed = await executeB2(store.runs.createRun(metadata));
+    const cancelled = await executeB2(store.runs.createRun(metadata));
+    await executeB2(store.runs.finalizeRun(completed.id, 'completed'));
+    await executeB2(store.runs.finalizeRun(cancelled.id, 'cancelled'));
     await store.close();
     const launcher = launcherIn(root);
 

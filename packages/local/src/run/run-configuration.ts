@@ -1,3 +1,6 @@
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import { StoreCleanup } from '../store/internal/store-effect.js';
 import { valueFromExit } from '../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { execFile } from 'node:child_process';
@@ -13,11 +16,12 @@ import {
   type EvalRun,
   type EvalRunRequest,
 } from '@attest/contracts';
-import type { RunRecord } from '@attest/core';
+import { StoreError, type RunRecord } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
-import { runCleanupSteps } from '../commands/run-store/cleanup.js';
+import * as Exit from 'effect/Exit';
+import { startPromiseStoreOwner } from '../internal/promise-store-owner.js';
 import { LocalError } from '../errors/index.js';
 import { createRunIdentity } from '../store/run-store.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
@@ -111,8 +115,13 @@ const readStoredRun = async (storePath: string, runId: string): Promise<RunRecor
       cause,
     });
 
-  const run = await withReadonlyRunStoreFile(storePath, (store) =>
-    withRunNotFound(() => store.getRun(runId), runNotFound),
+  const run = valueFromExit(
+    // EFFECT-BRIDGE(S7b)
+    await Effect.runPromiseExit(
+      withReadonlyRunStoreFile(storePath, (store) =>
+        withRunNotFound(() => store.getRun(runId), runNotFound),
+      ),
+    ),
   );
 
   if (run === undefined) throw runNotFound();
@@ -163,13 +172,18 @@ const runConfiguration = async (
   const baselineRunId = resolved.effectiveCommand.resolved.baseline_run_id;
 
   if (baselineRunId !== undefined) await readStoredRun(storePath, baselineRunId);
-  const store = await openEvalProjectStore(project.root);
+
+  const lifetime = await startPromiseStoreOwner((owner) =>
+    openEvalProjectStore(project.root, owner),
+  );
+
+  const store = lifetime.value;
   let registry: Awaited<ReturnType<typeof registerEvalRun>>;
 
   try {
     registry = await registerEvalRun(project.root, run.run_id);
   } catch (error: unknown) {
-    await store.close();
+    await lifetime.finish(error instanceof Error ? Exit.fail(error) : Exit.die(error));
     throw error;
   }
 
@@ -187,12 +201,14 @@ const runConfiguration = async (
     })),
   };
 
-  const runner = createEvalCaseRunner(project.root, store.cache, run);
   const metricSandbox = run.effective_command.resolved.execution?.metric_sandbox;
   void (async () => {
     let canReleaseCancellationOwnership = false;
+    let terminal: Exit.Exit<void, Error> = Exit.void;
 
     try {
+      const runner = createEvalCaseRunner(project.root, store.cache, run);
+
       const result = await executeResolvedEvalPlan(
         plan,
         runner,
@@ -214,19 +230,52 @@ const runConfiguration = async (
 
       canReleaseCancellationOwnership = result.can_release_cancellation_ownership;
     } catch (error: unknown) {
-      queue.fail(error);
+      terminal = error instanceof Error ? Exit.fail(error) : Exit.die(error);
     } finally {
       try {
-        await runCleanupSteps([
-          async () => {
-            // Preserve cancellation ownership when durable finalization remains uncertain.
-            if (canReleaseCancellationOwnership) await unregisterEvalRun(registry);
-            else detachEvalRun(registry);
-          },
-          async () => store.close(),
-        ]);
+        try {
+          // Registry reconciliation precedes database closure even when it fails.
+          if (canReleaseCancellationOwnership) await unregisterEvalRun(registry);
+          else detachEvalRun(registry);
+        } catch (error: unknown) {
+          if (Exit.isSuccess(terminal))
+            terminal = error instanceof Error ? Exit.fail(error) : Exit.die(error);
+          else {
+            // Keep both failures in the native Cause before the store's finalizers run.
+            const cleanup = Cause.fail(
+              new StoreError('WRITE_FAILED', 'Cancellation registry release failed.', {
+                cause: error,
+              }),
+            );
+
+            const previous = Context.getOrUndefined(
+              Cause.annotations(terminal.cause),
+              StoreCleanup,
+            );
+
+            terminal = Exit.failCause(
+              Cause.annotate(
+                terminal.cause,
+                Context.make(
+                  StoreCleanup,
+                  previous === undefined ? cleanup : Cause.combine(previous, cleanup),
+                ),
+                { overwrite: true },
+              ),
+            );
+          }
+        }
+
+        await lifetime.finish(terminal);
       } catch (cause: unknown) {
-        queue.fail(cause);
+        queue.fail(
+          cause instanceof StoreError
+            ? new LocalError('run_failed', 'The eval store boundary changed during opening.', {
+                path: '.attest/runs.db',
+                cause,
+              })
+            : cause,
+        );
       }
 
       queue.close();

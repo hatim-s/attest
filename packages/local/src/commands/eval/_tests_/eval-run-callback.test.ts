@@ -27,7 +27,7 @@ import * as Schema from 'effect/Schema';
 import { loadProject } from '../../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../../project/transaction/transactional-writer.js';
 import { runConfiguration } from '../../../run/run-configuration.js';
-import { openStore } from '../../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../../store/_tests_/b1-fixture.js';
 import { runAgentImportCommand } from '../../agent/import.js';
 import { assertSafeNativeAgentResource } from '../../agent/authoring/resource-validation.js';
 import { runAgentTestCommand } from '../../agent/test.js';
@@ -250,7 +250,7 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
   const store = await openStore(join(root, '.attest', 'runs.db'));
 
   try {
-    const { cases } = await store.runs.getRunWithCases(started.data.run_id);
+    const { cases } = await executeB2(store.runs.getRunWithCases(started.data.run_id));
 
     expect(cases).toHaveLength(1);
     expect(cases[0]).toMatchObject({

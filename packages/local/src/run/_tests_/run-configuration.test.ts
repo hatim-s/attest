@@ -1,3 +1,4 @@
+import { createClient } from '@libsql/client';
 import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import {
@@ -39,7 +40,7 @@ import { runProjectInitCommand } from '../../commands/project/project-init-comma
 import { REDACTED } from '../../internal/redaction.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../project/transaction/transactional-writer.js';
-import { openStore } from '../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
 import { cancelConfiguration, runConfiguration } from '../run-configuration.js';
 
 type EvalProjectOptions = {
@@ -232,7 +233,7 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const diff = await diffRuns(store.runs, all.runId, smoke.runId);
+      const diff = await executeB2(diffRuns(store.runs, all.runId, smoke.runId));
       expect(diff.summary.coverage).toEqual({
         sharedCases: 1,
         baseOnlyCases: 1,
@@ -299,7 +300,7 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const stored = await store.runs.getRunWithCases(selected.runId);
+      const stored = await executeB2(store.runs.getRunWithCases(selected.runId));
 
       const snapshot = parseWithSchemaSync(
         evalRunSchema,
@@ -313,7 +314,7 @@ describe('runConfiguration', () => {
       expect(
         stored.cases.every(({ caseId }) => Number(caseId.replace('sample-', '')) % 2 === 0),
       ).toBe(true);
-      const diff = await diffRuns(store.runs, baseline.runId, selected.runId);
+      const diff = await executeB2(diffRuns(store.runs, baseline.runId, selected.runId));
       expect(diff.summary.coverage).toEqual({
         sharedCases: 25,
         baseOnlyCases: 76,
@@ -363,14 +364,16 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      expect((await store.runs.getRun(hooked.runId)).summary).toMatchObject({
+      expect((await executeB2(store.runs.getRun(hooked.runId))).summary).toMatchObject({
         passedCases: 0,
         errorCases: 1,
       });
-      expect((await store.runs.listCaseSummaries(hooked.runId)).items).toMatchObject([
+      expect((await executeB2(store.runs.listCaseSummaries(hooked.runId))).items).toMatchObject([
         { caseId: 'capital', outcome: 'completed', verdict: 'error' },
       ]);
-      expect((await diffRuns(store.runs, baseline.runId, hooked.runId)).transitions).toMatchObject([
+      expect(
+        (await executeB2(diffRuns(store.runs, baseline.runId, hooked.runId))).transitions,
+      ).toMatchObject([
         { caseId: 'capital', baseVerdict: 'pass', candidateVerdict: 'error', kind: 'regressed' },
       ]);
     } finally {
@@ -409,7 +412,7 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const firstRun = await store.runs.getRun(first.runId);
+      const firstRun = await executeB2(store.runs.getRun(first.runId));
       const persistedEval = parseWithSchemaSync(evalRunSchema, JSON.parse(firstRun.configJson));
       expect(firstRun).toMatchObject({
         status: 'completed',
@@ -422,8 +425,8 @@ describe('runConfiguration', () => {
         created_at: firstRun.createdAt,
         effective_command: { request: { command: 'eval.run', test_ids: ['smoke'] } },
       });
-      expect((await store.runs.getRun(second.runId)).status).toBe('completed');
-      expect((await store.runs.getRunWithCases(firstRun.id)).cases).toMatchObject([
+      expect((await executeB2(store.runs.getRun(second.runId))).status).toBe('completed');
+      expect((await executeB2(store.runs.getRunWithCases(firstRun.id))).cases).toMatchObject([
         {
           suiteName: 'smoke',
           caseId: 'capital',
@@ -558,8 +561,14 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const passedEvidence = JSON.stringify((await store.runs.getRunWithCases(passed.runId)).cases);
-      const failedEvidence = JSON.stringify((await store.runs.getRunWithCases(failed.runId)).cases);
+      const passedEvidence = JSON.stringify(
+        (await executeB2(store.runs.getRunWithCases(passed.runId))).cases,
+      );
+
+      const failedEvidence = JSON.stringify(
+        (await executeB2(store.runs.getRunWithCases(failed.runId))).cases,
+      );
+
       expect(passedEvidence).toContain('retained');
 
       for (const evidence of [passedEvidence, failedEvidence]) {
@@ -622,5 +631,34 @@ describe('runConfiguration', () => {
     });
     expect(completed?.final).toMatchObject({ exit_code: 0, result: { ok: true } });
     expect(await readdir(join(project, '.attest', 'eval-runs'))).toEqual([]);
+  }, 15_000);
+  it('retains cancellation ownership after failed durable finalization while closing its store', async () => {
+    const root = await createEvalProject();
+    const databasePath = join(root, '.attest', 'runs.db');
+    const setup = await openStore(databasePath);
+    await setup.close();
+    const driver = createClient({ url: `file:${databasePath}` });
+
+    try {
+      await driver.execute(
+        "CREATE TRIGGER reject_finalization BEFORE UPDATE OF status ON runs BEGIN SELECT RAISE(ABORT, 'finalization fixture'); END",
+      );
+    } finally {
+      driver.close();
+    }
+
+    const outcome = await runEval(root, { test_ids: ['smoke'] });
+    expect(outcome.final.result.ok).toBe(false);
+    expect(await readdir(join(root, '.attest', 'eval-runs'))).toContain(`${outcome.runId}.json`);
+    expect((await readdir(root)).filter((name) => name.endsWith('.opening'))).toEqual([]);
+    const store = await openStore(databasePath);
+
+    try {
+      await expect(executeB2(store.runs.getRun(outcome.runId))).resolves.toMatchObject({
+        status: 'running',
+      });
+    } finally {
+      await store.close();
+    }
   }, 15_000);
 });

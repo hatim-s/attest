@@ -8,9 +8,9 @@ import { AgentInvocationError } from '@attest/executor';
 import { toStoredCaseExecution, type CaseExecution } from '@attest/runtime';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openStore } from '../run-store.js';
+import { openTestStore as openStore, run as executeB2 } from './b1-fixture.js';
 
-const stores: RunStore[] = [];
+const stores: Awaited<ReturnType<typeof openStore>>['runs'][] = [];
 
 const directories: string[] = [];
 
@@ -53,11 +53,13 @@ describe('toStoredCaseExecution', () => {
   it('persists completed and timeout runner projections without losing durable evidence', async () => {
     const store = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await executeB2(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     const completed: CaseExecution = {
       caseId: 'completed-case',
@@ -137,9 +139,11 @@ describe('toStoredCaseExecution', () => {
     };
 
     const projections = [toStoredCaseExecution(completed), toStoredCaseExecution(timeout)];
-    await Promise.all(projections.map((projection) => store.recordCase(run.id, projection, [])));
+    await Promise.all(
+      projections.map((projection) => executeB2(store.recordCase(run.id, projection, []))),
+    );
 
-    const stored = (await store.getRunWithCases(run.id)).cases;
+    const stored = (await executeB2(store.getRunWithCases(run.id))).cases;
     expect(stored.map(toStoredProjection)).toEqual(projections);
   });
 });

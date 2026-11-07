@@ -1,3 +1,6 @@
+import { run as runEffect, openFixture } from './store-fixture.js';
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -9,24 +12,24 @@ import type { AttestStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openSqliteHandle } from '../internal/open-sqlite-handle.js';
-import { openStore } from '../run-store.js';
 
-const stores: AttestStore[] = [];
+const stores: { close(): Promise<void> }[] = [];
 
 const directories: string[] = [];
 
 const openTemporaryStore = async (): Promise<{ path: string; store: AttestStore }> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-cache-'));
   const path = join(directory, 'runs.db');
-  const store = await openStore(path);
-  stores.push(store);
+  const fixture = await openFixture(path);
+  const store = fixture.store;
+  stores.push(fixture);
   directories.push(directory);
 
   return { path, store };
 };
 
 const readLastUsedAt = async (path: string, requestHash: string): Promise<string> => {
-  const handle = await openSqliteHandle(path);
+  const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
 
   const [row] = parseWithSchemaSync(
     Schema.Array(stripStruct({ last_used_at: Schema.String })),
@@ -50,18 +53,18 @@ afterEach(async () => {
 describe('CacheStore', () => {
   it('round-trips kind-isolated canonical payloads and returns undefined for misses', async () => {
     const { store } = await openTemporaryStore();
-    expect(await store.cache.get('judge', 'missing')).toBeUndefined();
-    await store.cache.put('agent', 'shared', { answer: 'agent' });
-    await store.cache.put('judge', 'shared', { score: 0.8 });
-    expect(await store.cache.get('agent', 'shared')).toEqual({ answer: 'agent' });
-    expect(await store.cache.get('judge', 'shared')).toEqual({ score: 0.8 });
+    expect(await runEffect(store.cache.get('judge', 'missing'))).toBeUndefined();
+    await runEffect(store.cache.put('agent', 'shared', { answer: 'agent' }));
+    await runEffect(store.cache.put('judge', 'shared', { score: 0.8 }));
+    expect(await runEffect(store.cache.get('agent', 'shared'))).toEqual({ answer: 'agent' });
+    expect(await runEffect(store.cache.get('judge', 'shared'))).toEqual({ score: 0.8 });
   });
 
   it('bumps last_used_at monotonically on a cache hit', async () => {
     const { path, store } = await openTemporaryStore();
-    await store.cache.put('judge', 'request-hash', { score: 1 });
+    await runEffect(store.cache.put('judge', 'request-hash', { score: 1 }));
     const before = await readLastUsedAt(path, 'request-hash');
-    await store.cache.get('judge', 'request-hash');
+    await runEffect(store.cache.get('judge', 'request-hash'));
     expect(Date.parse(await readLastUsedAt(path, 'request-hash'))).toBeGreaterThan(
       Date.parse(before),
     );

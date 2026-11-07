@@ -1,3 +1,4 @@
+import { readExitValue } from '../../../errors/read-exit-value.js';
 import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import { access, writeFile } from 'node:fs/promises';
@@ -13,7 +14,7 @@ import {
   type JsonValue,
 } from '@attest/contracts';
 import { loadProject } from '@attest/local/project';
-import { openStore } from '@attest/local/store';
+import { openStore, withStoreScope } from '@attest/local/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -574,16 +575,22 @@ describe('agent commands', () => {
 
     const runId = probe.recorded_run_id;
 
-    const runs = await openStore(store);
+    const run = readExitValue(
+      await Effect.runPromiseExit(
+        withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const runs = yield* openStore(store, owner);
 
-    try {
-      await expect(runs.runs.getRun(runId)).resolves.toMatchObject({
-        status: 'completed',
-        labels: { agent_id: 'probe', kind: 'agent-probe' },
-      });
-    } finally {
-      await runs.close();
-    }
+            return yield* runs.runs.getRun(runId);
+          }),
+        ),
+      ),
+    );
+
+    expect(run).toMatchObject({
+      status: 'completed',
+      labels: { agent_id: 'probe', kind: 'agent-probe' },
+    });
   });
 
   it('reports the exact duration option in a structured failure', async () => {

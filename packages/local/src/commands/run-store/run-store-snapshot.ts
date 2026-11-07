@@ -1,10 +1,17 @@
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import * as Context from 'effect/Context';
+import * as Option from 'effect/Option';
+import { StoreCleanup } from '../../store/internal/store-effect.js';
+import * as Effect from 'effect/Effect';
+import { StoreError } from '@attest/core';
 import { constants, type BigIntStats } from 'node:fs';
 import { lstat, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { errnoCode } from '../../internal/errno-code.js';
-import { rethrowAfterCleanup } from './cleanup.js';
+import { withReadCleanup, runCleanupSteps } from './cleanup.js';
 
 const COPY_BUFFER_BYTES = 64 * 1024;
 
@@ -15,6 +22,7 @@ type FileVersion = BigIntStats;
 type RunStoreSnapshot = {
   directory: string;
   path: string;
+  release: Effect.Effect<void, StoreError>;
 };
 
 class SnapshotChangedError extends Error {
@@ -33,170 +41,213 @@ const sameVersion = (left: FileVersion, right: FileVersion): boolean =>
   left.mtimeNs === right.mtimeNs &&
   left.ctimeNs === right.ctimeNs;
 
+/** Wraps individual filesystem calls without changing snapshot-version diagnostics. */
+const fileCall = <A>(call: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: call,
+    catch: (cause) =>
+      cause instanceof SnapshotChangedError
+        ? cause
+        : new StoreError('READ_FAILED', 'Could not capture the run store snapshot.', { cause }),
+  });
+
 /** Copies an exact descriptor version without reopening its source pathname. */
-const copyFileHandle = async (
+const copyFileHandle = Effect.fn('copyFileHandle')(function* (
   source: FileHandle,
   destination: string,
   expectedSizeValue: bigint,
-): Promise<void> => {
-  if (expectedSizeValue > BigInt(Number.MAX_SAFE_INTEGER)) throw new SnapshotChangedError();
+) {
+  if (expectedSizeValue > BigInt(Number.MAX_SAFE_INTEGER))
+    return yield* Effect.fail(new SnapshotChangedError());
   const expectedSize = Number(expectedSizeValue);
-  const target = await open(destination, 'wx', 0o600);
-  const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
-  let offset = 0;
+  const target = yield* fileCall(() => open(destination, 'wx', 0o600));
 
-  try {
-    while (offset < expectedSize) {
-      const length = Math.min(buffer.length, expectedSize - offset);
-      const { bytesRead } = await source.read(buffer, 0, length, offset);
+  return yield* withReadCleanup(
+    Effect.gen(function* () {
+      const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
+      let offset = 0;
 
-      if (bytesRead === 0) throw new SnapshotChangedError();
-      let written = 0;
+      while (offset < expectedSize) {
+        const length = Math.min(buffer.length, expectedSize - offset);
+        const { bytesRead } = yield* fileCall(() => source.read(buffer, 0, length, offset));
 
-      while (written < bytesRead) {
-        const result = await target.write(buffer, written, bytesRead - written, offset + written);
+        if (bytesRead === 0) return yield* Effect.fail(new SnapshotChangedError());
+        let written = 0;
 
-        if (result.bytesWritten === 0) throw new SnapshotChangedError();
-        written += result.bytesWritten;
+        while (written < bytesRead) {
+          const result = yield* fileCall(() =>
+            target.write(buffer, written, bytesRead - written, offset + written),
+          );
+
+          if (result.bytesWritten === 0) return yield* Effect.fail(new SnapshotChangedError());
+          written += result.bytesWritten;
+        }
+
+        offset += bytesRead;
       }
+    }),
+    () => [fileCall(() => target.close())],
+  );
+});
 
-      offset += bytesRead;
-    }
-  } catch (error: unknown) {
-    return rethrowAfterCleanup(error, [async () => target.close()]);
-  }
+/** Missing WAL is distinct from inaccessible or unsafe WAL. */
+const statOptional = (path: string) =>
+  Effect.tryPromise({
+    try: () => lstat(path, { bigint: true }),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      errnoCode(cause) === 'ENOENT'
+        ? Effect.succeed(undefined)
+        : Effect.fail(
+            new StoreError('READ_FAILED', 'Could not inspect snapshot source.', { cause }),
+          ),
+    ),
+  );
 
-  await target.close();
-};
+/** Opens and fences the WAL before transferring its descriptor to the snapshot attempt. */
+const openWal = Effect.fn('openWal')(function* (path: string) {
+  const metadata = yield* statOptional(path);
 
-/** Opens an optional WAL and binds its descriptor to both pre- and post-open identities. */
-const openWal = async (
+  if (metadata === undefined) return undefined;
+
+  if (!metadata.isFile() || metadata.isSymbolicLink())
+    return yield* Effect.fail(new SnapshotChangedError());
+
+  const handle = yield* Effect.tryPromise({
+    try: () => open(path, constants.O_RDONLY | constants.O_NOFOLLOW),
+    catch: (cause) =>
+      errnoCode(cause) === 'ENOENT'
+        ? new SnapshotChangedError()
+        : new StoreError('READ_FAILED', 'Could not open WAL descriptor.', { cause }),
+  });
+
+  let transferred = false;
+
+  return yield* withReadCleanup(
+    Effect.gen(function* () {
+      const version = yield* fileCall(() => handle.stat({ bigint: true }));
+      const current = yield* statOptional(path);
+
+      if (
+        current === undefined ||
+        !sameIdentity(metadata, version) ||
+        !sameIdentity(version, current)
+      )
+        return yield* Effect.fail(new SnapshotChangedError());
+      transferred = true;
+
+      return { handle, version };
+    }),
+    () => (transferred ? [] : [fileCall(() => handle.close())]),
+  );
+});
+
+const pathMatchesVersion = Effect.fn('pathMatchesVersion')(function* (
   path: string,
-): Promise<{ handle: FileHandle; version: FileVersion } | undefined> => {
-  let metadata: FileVersion;
+  version: FileVersion,
+) {
+  const current = yield* statOptional(path);
 
-  try {
-    metadata = await lstat(path, { bigint: true });
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') return undefined;
-    throw error;
-  }
+  return current !== undefined && !current.isSymbolicLink() && sameIdentity(current, version);
+});
 
-  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new SnapshotChangedError();
-
-  let handle: FileHandle | undefined;
-
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const version = await handle.stat({ bigint: true });
-    const current = await lstat(path, { bigint: true });
-
-    if (!sameIdentity(metadata, version) || !sameIdentity(version, current)) {
-      throw new SnapshotChangedError();
-    }
-
-    return { handle, version };
-  } catch (error: unknown) {
-    const openedHandle = handle;
-    const failure = errnoCode(error) === 'ENOENT' ? new SnapshotChangedError() : error;
-
-    return rethrowAfterCleanup(
-      failure,
-      openedHandle === undefined ? [] : [async () => openedHandle.close()],
-    );
-  }
-};
-
-const pathMatchesVersion = async (path: string, version: FileVersion): Promise<boolean> => {
-  try {
-    const current = await lstat(path, { bigint: true });
-
-    return !current.isSymbolicLink() && current.dev === version.dev && current.ino === version.ino;
-  } catch {
-    return false;
-  }
-};
-
-/** Captures one stable main/WAL pair into a disposable directory using only anchored descriptors. */
-const captureAttempt = async (
+/** Captures a stable main/WAL pair. Failed cleanup forbids version-change retries. */
+const captureAttempt = Effect.fn('captureAttempt')(function* (
   sourcePath: string,
   source: FileHandle,
-): Promise<RunStoreSnapshot> => {
-  const directory = await mkdtemp(join(tmpdir(), 'attest-run-store-snapshot-'));
-  const snapshot = { directory, path: join(directory, 'runs.db') };
+) {
+  const directory = yield* fileCall(() => mkdtemp(join(tmpdir(), 'attest-run-store-snapshot-')));
+
+  const snapshot: RunStoreSnapshot = {
+    directory,
+    path: join(directory, 'runs.db'),
+    release: Effect.void,
+  };
+
   const walPath = `${sourcePath}-wal`;
-  let wal: Awaited<ReturnType<typeof openWal>> = undefined;
-  const removeSnapshot = async (): Promise<void> => removeRunStoreSnapshot(snapshot);
+  let wal: Effect.Success<ReturnType<typeof openWal>>;
+  let transferred = false;
 
-  try {
-    const sourceBefore = await source.stat({ bigint: true });
+  return yield* withReadCleanup(
+    Effect.gen(function* () {
+      const sourceBefore = yield* fileCall(() => source.stat({ bigint: true }));
 
-    if (!(await pathMatchesVersion(sourcePath, sourceBefore))) throw new SnapshotChangedError();
-    wal = await openWal(walPath);
-    await copyFileHandle(source, snapshot.path, sourceBefore.size);
+      if (!(yield* pathMatchesVersion(sourcePath, sourceBefore)))
+        return yield* Effect.fail(new SnapshotChangedError());
+      wal = yield* openWal(walPath);
+      yield* copyFileHandle(source, snapshot.path, sourceBefore.size);
 
-    if (wal !== undefined) {
-      await copyFileHandle(wal.handle, `${snapshot.path}-wal`, wal.version.size);
-    }
+      if (wal !== undefined)
+        yield* copyFileHandle(wal.handle, `${snapshot.path}-wal`, wal.version.size);
+      const sourceAfter = yield* fileCall(() => source.stat({ bigint: true }));
 
-    const sourceAfter = await source.stat({ bigint: true });
+      if (
+        !sameVersion(sourceBefore, sourceAfter) ||
+        !(yield* pathMatchesVersion(sourcePath, sourceAfter))
+      )
+        return yield* Effect.fail(new SnapshotChangedError());
 
-    if (!sameVersion(sourceBefore, sourceAfter)) throw new SnapshotChangedError();
+      if (wal === undefined) {
+        if ((yield* statOptional(walPath)) !== undefined)
+          return yield* Effect.fail(new SnapshotChangedError());
+      } else {
+        const currentWal = wal;
+        const walAfter = yield* fileCall(() => currentWal.handle.stat({ bigint: true }));
 
-    if (!(await pathMatchesVersion(sourcePath, sourceAfter))) throw new SnapshotChangedError();
-
-    if (wal === undefined) {
-      try {
-        await lstat(walPath);
-        throw new SnapshotChangedError();
-      } catch (error: unknown) {
-        if (errnoCode(error) !== 'ENOENT') throw error;
+        if (!sameVersion(wal.version, walAfter) || !(yield* pathMatchesVersion(walPath, walAfter)))
+          return yield* Effect.fail(new SnapshotChangedError());
+        const openedWal = wal;
+        snapshot.release = fileCall(() => openedWal.handle.close()).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof StoreError
+              ? cause
+              : new StoreError('READ_FAILED', 'Could not close WAL descriptor.', { cause }),
+          ),
+        );
       }
-    } else {
-      const walAfter = await wal.handle.stat({ bigint: true });
 
-      if (!sameVersion(wal.version, walAfter) || !(await pathMatchesVersion(walPath, walAfter))) {
-        throw new SnapshotChangedError();
-      }
-    }
-  } catch (error: unknown) {
-    const openedWal = wal;
-    const closeWal = openedWal === undefined ? [] : [async () => openedWal.handle.close()];
+      transferred = true;
 
-    return rethrowAfterCleanup(error, [...closeWal, removeSnapshot]);
-  }
+      return snapshot;
+    }),
+    () => [
+      ...(wal === undefined || transferred ? [] : [fileCall(() => wal!.handle.close())]),
+      ...(transferred ? [] : [removeRunStoreSnapshot(snapshot)]),
+    ],
+  );
+});
 
-  // A failed descriptor close invalidates the handoff, so remove the copied data too.
-  try {
-    await wal?.handle.close();
-  } catch (error: unknown) {
-    return rethrowAfterCleanup(error, [removeSnapshot]);
-  }
-
-  return snapshot;
-};
-
-/** Retries bounded concurrent checkpoint changes while never querying a source pathname. */
-const captureRunStoreSnapshot = async (
+/** Retries only clean version changes, retaining annotated cleanup uncertainty as a failure. */
+const captureRunStoreSnapshot = Effect.fn('captureRunStoreSnapshot')(function* (
   sourcePath: string,
   source: FileHandle,
-): Promise<RunStoreSnapshot> => {
-  for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
-    try {
-      return await captureAttempt(sourcePath, source);
-    } catch (error: unknown) {
-      if (!(error instanceof SnapshotChangedError) || attempt === MAX_SNAPSHOT_ATTEMPTS - 1) {
-        throw error;
-      }
-    }
+) {
+  for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt++) {
+    const result = yield* Effect.exit(captureAttempt(sourcePath, source));
+
+    if (Exit.isSuccess(result)) return result.value;
+
+    const cleanChange =
+      !Cause.hasDies(result.cause) &&
+      !Cause.hasInterrupts(result.cause) &&
+      Option.isNone(Context.getOption(Cause.annotations(result.cause), StoreCleanup)) &&
+      result.cause.reasons.every(
+        (reason) => Cause.isFailReason(reason) && reason.error instanceof SnapshotChangedError,
+      );
+
+    if (!cleanChange || attempt === MAX_SNAPSHOT_ATTEMPTS - 1)
+      return yield* Effect.failCause(result.cause);
   }
 
-  throw new SnapshotChangedError();
-};
+  return yield* Effect.fail(new SnapshotChangedError());
+});
 
-/** Removes every copied database and temporary SQLite sidecar after inspection. */
-const removeRunStoreSnapshot = async (snapshot: RunStoreSnapshot): Promise<void> => {
-  await rm(snapshot.directory, { force: true, recursive: true });
-};
+/** Removes copied data only after the database owner's reads and close have settled. */
+const removeRunStoreSnapshot = (snapshot: RunStoreSnapshot) =>
+  runCleanupSteps([
+    fileCall(() => rm(snapshot.directory, { force: true, recursive: true })),
+    snapshot.release,
+  ]);
 
 export { captureRunStoreSnapshot, removeRunStoreSnapshot, type RunStoreSnapshot };

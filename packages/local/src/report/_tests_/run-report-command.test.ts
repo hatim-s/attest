@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openStore } from '../../store/index.js';
+import { openTestStore as openStore, run as executeB1 } from '../../store/_tests_/b1-fixture.js';
 
 import { runReportCommand } from '../run-report-command.js';
 
@@ -17,35 +17,39 @@ const createRunFixture = async (directory: string): Promise<string> => {
   const store = await openStore(join(directory, '.attest', 'runs.db'));
 
   try {
-    const run = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'sha256:test',
-      configJson: '{}',
-    });
-
-    await store.runs.recordCase(
-      run.id,
-      {
-        attempts: [],
-        caseId: 'inline-script',
-        diagnostics: {},
-        durationMs: 4,
-        expectedMetrics: ['safe'],
-        outcome: 'completed',
-        request: {
-          protocol: AGENT_PROTOCOL,
-          run_id: run.id,
-          case_id: 'inline-script',
-          input: '</script><script>bad()</script>',
-        },
-        response: { protocol: AGENT_PROTOCOL, output: 'safe' },
-        startedAt: '2026-08-07T00:00:00.000Z',
-        suiteName: 'report',
-        warnings: [],
-      },
-      [{ kind: 'assertion', metricName: 'safe', pass: true, score: 1, status: 'evaluated' }],
+    const run = await executeB1(
+      store.runs.createRun({
+        schemaId: 'attest.project',
+        configHash: 'sha256:test',
+        configJson: '{}',
+      }),
     );
-    await store.runs.finalizeRun(run.id, 'completed');
+
+    await executeB1(
+      store.runs.recordCase(
+        run.id,
+        {
+          attempts: [],
+          caseId: 'inline-script',
+          diagnostics: {},
+          durationMs: 4,
+          expectedMetrics: ['safe'],
+          outcome: 'completed',
+          request: {
+            protocol: AGENT_PROTOCOL,
+            run_id: run.id,
+            case_id: 'inline-script',
+            input: '</script><script>bad()</script>',
+          },
+          response: { protocol: AGENT_PROTOCOL, output: 'safe' },
+          startedAt: '2026-08-07T00:00:00.000Z',
+          suiteName: 'report',
+          warnings: [],
+        },
+        [{ kind: 'assertion', metricName: 'safe', pass: true, score: 1, status: 'evaluated' }],
+      ),
+    );
+    await executeB1(store.runs.finalizeRun(run.id, 'completed'));
 
     return run.id;
   } finally {
@@ -66,11 +70,13 @@ describe('runReportCommand', () => {
     const runId = await createRunFixture(directory);
     const outputPath = 'reports/run.html';
 
-    const result = await runReportCommand({
-      outputPath,
-      runId,
-      workingDirectory: directory,
-    });
+    const result = await executeB1(
+      runReportCommand({
+        outputPath,
+        runId,
+        workingDirectory: directory,
+      }),
+    );
 
     const html = await readFile(result.outputPath, 'utf8');
 
@@ -80,10 +86,10 @@ describe('runReportCommand', () => {
     expect(html).toContain('"score":1');
     expect(html).toContain('\\u003c/script>');
     await expect(
-      runReportCommand({ outputPath, runId, workingDirectory: directory }),
+      executeB1(runReportCommand({ outputPath, runId, workingDirectory: directory })),
     ).rejects.toMatchObject({ code: 'output_exists' });
     await expect(
-      runReportCommand({ force: true, outputPath, runId, workingDirectory: directory }),
+      executeB1(runReportCommand({ force: true, outputPath, runId, workingDirectory: directory })),
     ).resolves.toMatchObject({ caseCount: 1 });
   });
 
@@ -95,14 +101,18 @@ describe('runReportCommand', () => {
     await symlink(outside, join(directory, 'reports'));
 
     await expect(
-      runReportCommand({ outputPath: 'reports/run.html', runId, workingDirectory: directory }),
+      executeB1(
+        runReportCommand({ outputPath: 'reports/run.html', runId, workingDirectory: directory }),
+      ),
     ).rejects.toMatchObject({ code: 'output_write_failed', path: 'reports/run.html' });
     await expect(
-      runReportCommand({
-        outputPath: 'reports/../escaped.html',
-        runId,
-        workingDirectory: directory,
-      }),
+      executeB1(
+        runReportCommand({
+          outputPath: 'reports/../escaped.html',
+          runId,
+          workingDirectory: directory,
+        }),
+      ),
     ).rejects.toMatchObject({ code: 'output_write_failed' });
     expect(await readdir(outside)).toEqual([]);
     await expect(access(join(directory, 'escaped.html'))).rejects.toMatchObject({ code: 'ENOENT' });

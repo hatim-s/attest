@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openStore } from '../../../store/index.js';
+import { openTestStore as openStore, run as executeB1 } from '../../../store/_tests_/b1-fixture.js';
 import { withReadonlyRunStore } from '../readonly-run-store.js';
 
 const temporaryDirectories: string[] = [];
@@ -31,7 +31,9 @@ const snapshotDirectory = async (directory: string): Promise<Record<string, Buff
 const createStoreBytes = async (): Promise<Buffer> => {
   const path = join(await temporaryDirectory(), 'runs.db');
   const store = await openStore(path);
-  await store.runs.createRun({ schemaId: 'attest.project', configHash: 'hash', configJson: '{}' });
+  await executeB1(
+    store.runs.createRun({ schemaId: 'attest.project', configHash: 'hash', configJson: '{}' }),
+  );
   await store.close();
 
   return readFile(path);
@@ -51,17 +53,19 @@ describe('withReadonlyRunStore', () => {
     const writer = await openStore(join(storeDirectory, 'runs.db'));
 
     try {
-      const run = await writer.runs.createRun({
-        schemaId: 'attest.project',
-        configHash: 'live-wal',
-        configJson: '{}',
-      });
+      const run = await executeB1(
+        writer.runs.createRun({
+          schemaId: 'attest.project',
+          configHash: 'live-wal',
+          configJson: '{}',
+        }),
+      );
 
       expect(await readdir(storeDirectory)).toContain('runs.db-wal');
       const before = await snapshotDirectory(storeDirectory);
 
       await expect(
-        withReadonlyRunStore(root, async (store) => store.getRun(run.id)),
+        executeB1(withReadonlyRunStore(root, (store) => store.getRun(run.id))),
       ).resolves.toMatchObject({ id: run.id, configHash: 'live-wal' });
       expect(await snapshotDirectory(storeDirectory)).toEqual(before);
     } finally {
@@ -83,7 +87,7 @@ describe('withReadonlyRunStore', () => {
 
     for (const root of [fileLink, directoryLink]) {
       await expect(
-        withReadonlyRunStore(root, async (store) => store.listRuns()),
+        executeB1(withReadonlyRunStore(root, (store) => store.listRuns())),
       ).rejects.toMatchObject({ code: 'project_read_failed' });
     }
 

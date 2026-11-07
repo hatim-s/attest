@@ -225,3 +225,50 @@ API contract/requests.ts uses effect/Effect for defaults and effect/SchemaGetter
 for HTTP number coercion. ESLint allows these modules only in those exact files;
 execution APIs still require a declared root. Other data-only files retain the
 Schema, SchemaIssue, SchemaAST and JsonSchema allowlist.
+
+### Concrete store lifetime owner
+
+`@attest/local/store` exports `withStoreScope(use)`, `openStore(path, owner)` and
+`openReadonlyRunStore(path, owner)`, plus the opaque `StoreScope` type. The owner is
+created only by `withStoreScope`. Constructors capture that exact owner, require no
+ambient Scope and return `Effect<AttestStore, StoreError>` or
+`Effect<RunStore, StoreError>`. Store and catalog methods have `R = never`.
+RunControl remains Promise-based until S9a. There is no public store `close()`.
+
+A short CLI operation encloses all store work:
+
+```ts
+const program = withStoreScope((owner) =>
+  Effect.gen(function* () {
+    const store = yield* openStore(path, owner);
+    return yield* store.runs.listRuns();
+  }),
+);
+```
+
+A server catalog captures the owner inside this callback and keeps the callback
+running until server shutdown has stopped admission and joined readers and runs.
+An eval owner awaits actual engine completion and persistence before returning,
+even if a foreign action has already received an event queue. Returning a listener,
+catalog or queue from the callback closes its stores. Escaped methods then fail.
+The foreign execution root runs the complete program once and checks its Exit.
+
+Within one owner, repeated successful opens of the same resolved path share one
+run/cache handle. Mixing readonly and writable opens for that path fails explicitly.
+Different owners acquire separately. Failed acquisition closes immediately and is
+not cached. Readonly opens never create or migrate the database and never fall back
+to a creating driver.
+
+The owner masks accepted store operations, including reads, and waits for their
+foreign Promises before closing. Consequently an uncooperative read or write can
+delay shutdown until it settles. New operations and acquisitions fail once shutdown
+begins. Owners must stop admitting application work and join their run/request fibers;
+the store owner joins accepted database work, not arbitrary application fibers.
+
+Finalizers capture every close outcome in an owner-local receipt. After success,
+failed release returns StoreError WRITE_FAILED with the successful primary Exit and
+all cleanup Causes in its internal cause. After typed failure, defect or interruption,
+the original Cause remains primary and the StoreCleanup annotation retains cleanup
+Causes. Never serialize these internal diagnostics into public responses. A close
+failure does not authorize retrying a successful mutation. The complete S2 still
+requires caller integration, full gates and independent reviews before commit.

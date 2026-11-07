@@ -1,3 +1,4 @@
+import { readExitValue } from '../errors/read-exit-value.js';
 import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -12,7 +13,7 @@ import {
 } from '@attest/contracts';
 import { DEFAULT_PAGE_LIMIT } from '@attest/core/records';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
-import { openStore } from '@attest/local/store';
+import { openStore, withStoreScope } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -328,22 +329,26 @@ describe('project commands', () => {
   it('lists runs beyond the first page', async () => {
     const root = await createFixtureProject();
     await mkdir(join(root, '.attest'));
-    const store = await openStore(join(root, '.attest', 'runs.db'));
     const ids: string[] = [];
+    readExitValue(
+      await Effect.runPromiseExit(
+        withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const store = yield* openStore(join(root, '.attest', 'runs.db'), owner);
 
-    try {
-      for (let index = 0; index <= DEFAULT_PAGE_LIMIT; index += 1) {
-        const run = await store.runs.createRun({
-          schemaId: 'attest.project',
-          configHash: 'hash',
-          configJson: '{}',
-        });
+            for (let index = 0; index <= DEFAULT_PAGE_LIMIT; index += 1) {
+              const run = yield* store.runs.createRun({
+                schemaId: 'attest.project',
+                configHash: 'hash',
+                configJson: '{}',
+              });
 
-        ids.push(run.id);
-      }
-    } finally {
-      await store.close();
-    }
+              ids.push(run.id);
+            }
+          }),
+        ),
+      ),
+    );
 
     const listed = await runJson(root, ['list', 'runs']);
     expect(listed.exitCode).toBe(0);
@@ -360,15 +365,22 @@ describe('project commands', () => {
 
     const storePath = join(root, '.attest', 'runs.db');
     await mkdir(join(root, '.attest'));
-    const store = await openStore(storePath);
 
-    const run = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'safe-hash',
-      configJson: '{"secret":"must-not-render"}',
-    });
+    const run = readExitValue(
+      await Effect.runPromiseExit(
+        withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const store = yield* openStore(storePath, owner);
 
-    await store.close();
+            return yield* store.runs.createRun({
+              schemaId: 'attest.project',
+              configHash: 'safe-hash',
+              configJson: '{"secret":"must-not-render"}',
+            });
+          }),
+        ),
+      ),
+    );
 
     const show = await runJson(root, ['show', 'run', run.id]);
     expect(show.exitCode).toBe(0);

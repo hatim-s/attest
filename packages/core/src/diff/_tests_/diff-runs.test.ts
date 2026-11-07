@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
@@ -20,10 +21,10 @@ const storeWith = (runs: RunRecord[]): Pick<RunSource, 'getRunWithCases'> => ({
     const run = runs.find((candidate) => candidate.id === runId);
 
     if (run === undefined) {
-      return Promise.reject(new StoreError('RUN_NOT_FOUND', `Run ${runId} not found.`));
+      return Effect.fail(new StoreError('RUN_NOT_FOUND', `Run ${runId} not found.`));
     }
 
-    return Promise.resolve({ run, cases: [] });
+    return Effect.succeed({ run, cases: [] });
   },
 });
 
@@ -47,10 +48,21 @@ describe('diffRuns', () => {
       const other = runRecord(otherId, 'attest.other-run', '{}');
       const store = storeWith([corrupt, other]);
 
-      await expect(diffRuns(store, 'base', 'candidate')).rejects.toMatchObject({
+      await expect(run(diffRuns(store, 'base', 'candidate'))).rejects.toMatchObject({
         code: 'CORRUPT_DATA',
         message: `Run ${position} has an unreadable eval configuration.`,
       });
     },
   );
 });
+
+const run = async <A, E extends Error>(effect: Effect.Effect<A, E>) =>
+  Effect.runPromiseExit(effect).then((exit) => {
+    if (exit._tag === 'Success') return exit.value;
+
+    for (const reason of exit.cause.reasons) {
+      if (reason._tag === 'Fail') throw reason.error;
+    }
+
+    throw new Error('Unexpected runtime failure.', { cause: exit.cause });
+  });

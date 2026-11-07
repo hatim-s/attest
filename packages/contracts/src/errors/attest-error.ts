@@ -1,9 +1,10 @@
 /**
- * Base class for every error attest raises across packages.
+ * Base class for Attest errors that have not migrated to native tagged errors.
  *
  * Carries a stable machine-readable `code` so CLI rendering, telemetry, and
  * tests can branch on identity without parsing messages. Each package defines
- * one subclass that narrows `code` to its own union, e.g. `StoreError extends AttestError`.
+ * subclasses that narrow `code` to their own unions. Native tagged errors retain their
+ * own identity and stable code, such as StoreError.
  */
 abstract class AttestError extends Error {
   readonly code: string;

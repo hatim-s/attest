@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -10,7 +11,7 @@ import { parseWithSchemaSync, AGENT_PROTOCOL } from '@attest/contracts';
 import { createSingleProjectCatalog, type RunControl, type RunStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openStore } from '../../store/run-store.js';
+import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
 
 import { startViewServer } from '../start-view-server.js';
 import type { ViewServerHandle } from '../types.js';
@@ -20,43 +21,47 @@ const directories: string[] = [];
 const servers: ViewServerHandle[] = [];
 
 const createRun = async (store: RunStore, pass: boolean): Promise<string> => {
-  const run = await store.createRun({
-    schemaId: 'attest.project',
-    configHash: 'same-config',
-    configJson: '{}',
-  });
-
-  await store.recordCase(
-    run.id,
-    {
-      caseId: 'capital',
-      suiteName: 'smoke',
-      outcome: 'completed',
-      startedAt: '2026-08-07T00:00:00.000Z',
-      durationMs: 10,
-      request: {
-        protocol: AGENT_PROTOCOL,
-        run_id: run.id,
-        case_id: 'capital',
-        input: { question: 'Capital of France?' },
-      },
-      response: { protocol: AGENT_PROTOCOL, output: { answer: pass ? 'Paris' : 'Lyon' } },
-      warnings: [],
-      diagnostics: {},
-      attempts: [],
-      expectedMetrics: ['answer'],
-    },
-    [
-      {
-        metricName: 'answer',
-        kind: 'assertion',
-        status: 'evaluated',
-        score: pass ? 1 : 0,
-        pass,
-      },
-    ],
+  const run = await executeB2(
+    store.createRun({
+      schemaId: 'attest.project',
+      configHash: 'same-config',
+      configJson: '{}',
+    }),
   );
-  await store.finalizeRun(run.id, 'completed');
+
+  await executeB2(
+    store.recordCase(
+      run.id,
+      {
+        caseId: 'capital',
+        suiteName: 'smoke',
+        outcome: 'completed',
+        startedAt: '2026-08-07T00:00:00.000Z',
+        durationMs: 10,
+        request: {
+          protocol: AGENT_PROTOCOL,
+          run_id: run.id,
+          case_id: 'capital',
+          input: { question: 'Capital of France?' },
+        },
+        response: { protocol: AGENT_PROTOCOL, output: { answer: pass ? 'Paris' : 'Lyon' } },
+        warnings: [],
+        diagnostics: {},
+        attempts: [],
+        expectedMetrics: ['answer'],
+      },
+      [
+        {
+          metricName: 'answer',
+          kind: 'assertion',
+          status: 'evaluated',
+          score: pass ? 1 : 0,
+          pass,
+        },
+      ],
+    ),
+  );
+  await executeB2(store.finalizeRun(run.id, 'completed'));
 
   return run.id;
 };
@@ -229,5 +234,68 @@ describe('view server', () => {
     await expect(fetch(server.url).then((response) => response.text())).resolves.toContain(
       '"capabilities":{"control":true}',
     );
+  });
+  it('joins an admitted read before invoking catalog release', async () => {
+    let admit = () => {};
+
+    let release = () => {};
+
+    const entered = new Promise<void>((resolve) => {
+      admit = resolve;
+    });
+
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let closed = false;
+
+    const server = await startViewServer({
+      indexHtml: dashboardHtml,
+      catalog: {
+        listProjects: () =>
+          Effect.promise(async () => {
+            admit();
+            await gate;
+
+            return [];
+          }),
+        openProject: () => Effect.die(new Error('No project requested.')),
+      },
+      close: () => {
+        closed = true;
+
+        return Promise.resolve();
+      },
+    });
+
+    const request = fetch(`${server.origin}/api/projects`).then((response) => response.json());
+    await entered;
+    const closing = server.close();
+    expect(closed).toBe(false);
+    release();
+    await expect(request).resolves.toEqual({ items: [] });
+    await closing;
+    await server.closed;
+    expect(closed).toBe(true);
+  });
+  it('preserves startup failure and retains a failed close callback', async () => {
+    const fixture = await createStoreFixture();
+    const occupied = await startFixtureServer(fixture.storePath);
+    const store = await openStore(fixture.storePath);
+    const cleanup = new Error('catalog cleanup failed');
+
+    try {
+      await expect(
+        startViewServer({
+          indexHtml: dashboardHtml,
+          catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
+          port: Number(new URL(occupied.origin).port),
+          close: () => Promise.reject(cleanup),
+        }),
+      ).rejects.toMatchObject({ code: 'EADDRINUSE', cleanupFailure: cleanup });
+    } finally {
+      await store.close();
+    }
   });
 });

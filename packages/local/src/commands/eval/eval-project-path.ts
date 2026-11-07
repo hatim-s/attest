@@ -1,14 +1,20 @@
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../../internal/effect-exit.js';
 import { randomUUID } from 'node:crypto';
 import { lstat, readlink, rename, symlink, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
-import type { AttestStore } from '@attest/core';
+import { StoreError } from '@attest/core';
 
 import { LocalError, type LocalErrorCode } from '../../errors/index.js';
-import { openStore } from '../../store/index.js';
+import { errnoCode } from '../../internal/errno-code.js';
+import { openStore, type StoreScope } from '../../store/index.js';
+import { runCleanupSteps } from '../run-store/cleanup.js';
 import { resolveContainedPath } from '../../project/project-path.js';
+
+type CapturedAliases = {
+  reverse?: Awaited<ReturnType<typeof lstat>>;
+  forward?: Awaited<ReturnType<typeof lstat>>;
+};
 
 type PrepareEvalProjectFileOptions = {
   allowAbsolute?: boolean;
@@ -48,112 +54,140 @@ const sameDirectoryIdentity = (
   left.dev === right.dev &&
   left.ino === right.ino;
 
-/** Removes only the temporary symlink owned by this store capture. */
-const removeStorePlaceholder = async (path: string, target: string): Promise<void> => {
-  const metadata = await lstat(path);
+/** Keeps raw filesystem details inside the eval store's typed failure. */
+const boundaryFailure = (cause: unknown): StoreError =>
+  new StoreError('WRITE_FAILED', 'Eval store boundary operation failed.', { cause });
 
-  if (!metadata.isSymbolicLink() || (await readlink(path)) !== target) {
-    throw new LocalError('run_failed', 'The eval store boundary changed during opening.', {
-      path: '.attest/runs.db',
-    });
+/** Wraps one foreign filesystem call at the captured store boundary. */
+const boundaryCall = <A>(operation: () => Promise<A>) =>
+  Effect.tryPromise({ try: operation, catch: boundaryFailure });
+
+/** Removes only the temporary symlink owned by this store capture. */
+const removeStorePlaceholder = Effect.fn('removeStorePlaceholder')(function* (
+  path: string,
+  target: string,
+) {
+  const metadata = yield* boundaryCall(() => lstat(path));
+
+  if (!metadata.isSymbolicLink() || (yield* boundaryCall(() => readlink(path))) !== target) {
+    return yield* Effect.fail(
+      boundaryFailure(
+        new LocalError('run_failed', 'The eval store boundary changed during opening.', {
+          path: '.attest/runs.db',
+        }),
+      ),
+    );
   }
 
-  await unlink(path);
-};
+  yield* boundaryCall(() => unlink(path));
+});
 
-/** Preserves native failures while ensuring cleanup failures remain throwable errors. */
-const asError = (cause: unknown): Error =>
-  cause instanceof Error ? cause : new Error('Eval store boundary cleanup failed.', { cause });
-
-/** Retains SQLite's captured pathname until close, then removes only the owned reverse alias. */
-const retainCapturedStoreAlias = (
-  store: AttestStore,
-  capturedDirectory: string,
-  target: string,
-): AttestStore => {
-  let closed = false;
-
-  return {
-    runs: store.runs,
-    cache: store.cache,
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      let failure: unknown;
-      await store.close().catch((cause: unknown) => {
-        failure = cause;
-      });
-      await removeStorePlaceholder(capturedDirectory, target).catch((cause: unknown) => {
-        failure ??= cause;
-      });
-
-      if (failure !== undefined) throw asError(failure);
-    },
-  };
-};
-
-/** Atomically captures the validated .attest directory through SQLite open and migration. */
-const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> => {
-  // EFFECT-BRIDGE(S7b)
-  const storePath = await Effect.runPromiseExit(
-    prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
-      createDirectories: true,
-      errorCode: 'run_failed',
-      message: 'The eval run store is not a safe project file.',
-    }),
-  ).then((exit) => valueFromExit(exit));
+/** Captures the directory until the explicit owner has closed SQLite and its WAL handles. */
+const openEvalProjectStore = Effect.fn('openEvalProjectStore')(function* (
+  projectRoot: string,
+  owner: StoreScope,
+) {
+  const storePath = yield* prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
+    createDirectories: true,
+    errorCode: 'run_failed',
+    message: 'The eval run store is not a safe project file.',
+  });
 
   const directory = dirname(storePath);
-  const resolvedRoot = dirname(directory);
   const captureTarget = `.attest-${randomUUID()}.opening`;
-  const capturedDirectory = join(resolvedRoot, captureTarget);
-  const identity = await lstat(directory);
-  let moved = false;
-  let placeholder = false;
-  let store: AttestStore | undefined;
-  let failure: unknown;
+  const capturedDirectory = join(dirname(directory), captureTarget);
 
-  try {
-    // Atomic rename converts the validated directory identity into the path SQLite actually opens.
-    await rename(directory, capturedDirectory);
-    moved = true;
+  return yield* owner.run(
+    Effect.gen(function* () {
+      const identity = yield* boundaryCall(() => lstat(directory));
+      let moved = false;
+      let placeholder = false;
+      let reverseCreated = false;
+      const aliases: CapturedAliases = {};
+      // Registered before the DB, so LIFO release closes SQLite before pathname restoration/removal.
+      yield* owner.register(
+        Effect.suspend(() =>
+          runCleanupSteps([
+            Effect.gen(function* () {
+              if (!placeholder) return;
+              const current = yield* boundaryCall(() => lstat(directory));
 
-    if (!sameDirectoryIdentity(identity, await lstat(capturedDirectory))) {
-      throw new LocalError('run_failed', 'The eval store boundary changed before opening.', {
-        path: '.attest/runs.db',
-      });
-    }
+              if (
+                aliases.forward === undefined ||
+                current.dev !== aliases.forward.dev ||
+                current.ino !== aliases.forward.ino
+              )
+                return yield* Effect.fail(
+                  boundaryFailure(new Error('Eval placeholder identity is unconfirmed.')),
+                );
+              yield* removeStorePlaceholder(directory, captureTarget);
+            }),
+            Effect.gen(function* () {
+              if (!moved) return;
+              const captured = yield* boundaryCall(() => lstat(capturedDirectory));
 
-    await symlink(captureTarget, directory);
-    placeholder = true;
-    store = await openStore(join(capturedDirectory, basename(storePath)));
-    await removeStorePlaceholder(directory, captureTarget);
-    placeholder = false;
-    await rename(capturedDirectory, directory);
-    moved = false;
-    // SQLite may create or checkpoint WAL files after open, so retain its unguessable pathname.
-    await symlink(basename(directory), capturedDirectory);
+              if (!sameDirectoryIdentity(identity, captured))
+                return yield* Effect.fail(
+                  boundaryFailure(new Error('Captured directory changed.')),
+                );
+              const destination = yield* Effect.result(boundaryCall(() => lstat(directory)));
 
-    return retainCapturedStoreAlias(store, capturedDirectory, basename(directory));
-  } catch (error: unknown) {
-    failure = error;
-  }
+              if (destination._tag === 'Failure') {
+                if (errnoCode(destination.failure.cause) === 'ENOENT') {
+                  yield* boundaryCall(() => rename(capturedDirectory, directory));
 
-  await store?.close().catch(() => undefined);
+                  return;
+                }
 
-  if (placeholder) {
-    await removeStorePlaceholder(directory, captureTarget).catch((cause: unknown) => {
-      failure = cause;
-    });
-  }
+                return yield* Effect.fail(destination.failure);
+              }
 
-  if (moved) {
-    await rename(capturedDirectory, directory).catch((cause: unknown) => {
-      failure = cause;
-    });
-  }
+              return yield* Effect.fail(
+                boundaryFailure(new Error('Refusing to replace an existing eval directory.')),
+              );
+            }),
+            Effect.gen(function* () {
+              if (!reverseCreated) return;
 
-  throw asError(failure);
-};
+              if (aliases.reverse === undefined)
+                return yield* Effect.fail(
+                  boundaryFailure(new Error('Captured alias identity is unconfirmed.')),
+                );
+              const current = yield* boundaryCall(() => lstat(capturedDirectory));
+
+              if (current.dev !== aliases.reverse.dev || current.ino !== aliases.reverse.ino)
+                return yield* Effect.fail(boundaryFailure(new Error('Captured alias changed.')));
+              yield* removeStorePlaceholder(capturedDirectory, basename(directory));
+            }),
+          ]),
+        ),
+      );
+      yield* boundaryCall(() => rename(directory, capturedDirectory));
+      moved = true;
+
+      if (!sameDirectoryIdentity(identity, yield* boundaryCall(() => lstat(capturedDirectory)))) {
+        return yield* Effect.fail(
+          new LocalError('run_failed', 'The eval store boundary changed before opening.', {
+            path: '.attest/runs.db',
+          }),
+        );
+      }
+
+      yield* boundaryCall(() => symlink(captureTarget, directory));
+      placeholder = true;
+      aliases.forward = yield* boundaryCall(() => lstat(directory));
+      const store = yield* openStore(join(capturedDirectory, basename(storePath)), owner);
+      yield* removeStorePlaceholder(directory, captureTarget);
+      placeholder = false;
+      yield* boundaryCall(() => rename(capturedDirectory, directory));
+      moved = false;
+      yield* boundaryCall(() => symlink(basename(directory), capturedDirectory));
+      reverseCreated = true;
+      aliases.reverse = yield* boundaryCall(() => lstat(capturedDirectory));
+
+      return store;
+    }),
+  );
+});
 
 export { openEvalProjectStore, prepareEvalProjectFile };

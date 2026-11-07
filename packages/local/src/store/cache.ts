@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { parseWithSchemaSync } from '@attest/contracts';
 import type { Kysely } from 'kysely';
 import type { JsonValue } from '@attest/contracts';
@@ -5,7 +6,8 @@ import * as Schema from 'effect/Schema';
 
 import { canonicalStringify, StoreError, type CacheKind, type CacheStore } from '@attest/core';
 
-import { executeStoreOperation } from './internal/store-operation.js';
+import type { StoreScope } from './internal/store-scope.js';
+import { storeCall } from './internal/store-effect.js';
 import type { Database } from './schema.js';
 
 const nextUseTimestamp = (previousTimestamp: string): string => {
@@ -23,62 +25,73 @@ class SqliteCacheStore implements CacheStore {
   }
 
   /** Reads and touches one cache identity; a miss deliberately resolves to `undefined`. */
-  async get(kind: CacheKind, requestHash: string): Promise<JsonValue | undefined> {
-    return executeStoreOperation('READ_FAILED', 'Could not read the response cache.', async () =>
-      this.#database.transaction().execute(async (transaction) => {
-        const row = await transaction
-          .selectFrom('response_cache')
-          .select(['payload_json', 'last_used_at'])
-          .where('cache_key', '=', requestHash)
-          .where('kind', '=', kind)
-          .executeTakeFirst();
+  get = Effect.fn('SqliteCacheStore.get')(
+    function* (this: SqliteCacheStore, kind: CacheKind, requestHash: string) {
+      return yield* storeCall('READ_FAILED', 'Could not read the response cache.', () =>
+        this.#database.transaction().execute(async (transaction) => {
+          const row = await transaction
+            .selectFrom('response_cache')
+            .select(['payload_json', 'last_used_at'])
+            .where('cache_key', '=', requestHash)
+            .where('kind', '=', kind)
+            .executeTakeFirst();
 
-        if (!row) return undefined;
+          if (!row) return undefined;
 
-        await transaction
-          .updateTable('response_cache')
-          .set({ last_used_at: nextUseTimestamp(row.last_used_at) })
-          .where('cache_key', '=', requestHash)
-          .where('kind', '=', kind)
-          .execute();
+          await transaction
+            .updateTable('response_cache')
+            .set({ last_used_at: nextUseTimestamp(row.last_used_at) })
+            .where('cache_key', '=', requestHash)
+            .where('kind', '=', kind)
+            .execute();
 
-        try {
-          return parseWithSchemaSync(Schema.Json, JSON.parse(row.payload_json));
-        } catch (error) {
-          throw new StoreError('CORRUPT_DATA', 'Cached response JSON could not be rehydrated.', {
-            cause: error,
-          });
-        }
-      }),
-    );
-  }
+          try {
+            return parseWithSchemaSync(Schema.Json, JSON.parse(row.payload_json));
+          } catch (error) {
+            throw new StoreError('CORRUPT_DATA', 'Cached response JSON could not be rehydrated.', {
+              cause: error,
+            });
+          }
+        }),
+      );
+    }.bind(this),
+  );
 
   /** Upserts one immutable request identity while retaining its original creation timestamp. */
-  async put(kind: CacheKind, requestHash: string, payload: JsonValue): Promise<void> {
-    await executeStoreOperation('WRITE_FAILED', 'Could not write the response cache.', async () => {
+  put = Effect.fn('SqliteCacheStore.put')(
+    function* (this: SqliteCacheStore, kind: CacheKind, requestHash: string, payload: JsonValue) {
       const timestamp = new Date().toISOString();
       const payloadJson = canonicalStringify(payload);
-      await this.#database
-        .insertInto('response_cache')
-        .values({
-          cache_key: requestHash,
-          kind,
-          payload_json: payloadJson,
-          created_at: timestamp,
-          last_used_at: timestamp,
-        })
-        .onConflict((conflict) =>
-          conflict.columns(['kind', 'cache_key']).doUpdateSet({
+      yield* storeCall('WRITE_FAILED', 'Store operation failed.', () =>
+        this.#database
+          .insertInto('response_cache')
+          .values({
+            cache_key: requestHash,
+            kind,
             payload_json: payloadJson,
+            created_at: timestamp,
             last_used_at: timestamp,
-          }),
-        )
-        .execute();
-    });
-  }
+          })
+          .onConflict((conflict) =>
+            conflict.columns(['kind', 'cache_key']).doUpdateSet({
+              payload_json: payloadJson,
+              last_used_at: timestamp,
+            }),
+          )
+          .execute(),
+      );
+    }.bind(this),
+  );
 }
 
 /** Constructs a cache over the database explicitly owned by an AttestStore context. */
-const createCacheStore = (database: Kysely<Database>): CacheStore => new SqliteCacheStore(database);
+const createCacheStore = (database: Kysely<Database>, owner: StoreScope): CacheStore => {
+  const cache = new SqliteCacheStore(database);
+
+  return {
+    get: (...args) => owner.run(cache.get(...args)),
+    put: (...args) => owner.run(cache.put(...args)),
+  };
+};
 
 export { createCacheStore };

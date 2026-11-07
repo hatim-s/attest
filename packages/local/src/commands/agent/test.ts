@@ -9,6 +9,7 @@ import type { StoredCaseExecution } from '@attest/core';
 import { LocalError } from '../../errors/index.js';
 import { parseJsonText, readSourceText } from '../../internal/source-text.js';
 import { openStore } from '../../store/index.js';
+import { startPromiseStoreOwner } from '../../internal/promise-store-owner.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import type { AgentTestResult, CommandResult } from '../shared/command-result.js';
 import type { ReadInput } from './authoring/types.js';
@@ -65,24 +66,39 @@ const startProbeRecording = async (
   projectHash: string,
 ): Promise<ProbeRecording> => {
   await mkdir(join(root, '.attest'), { recursive: true });
-  const store = await openStore(join(root, '.attest', 'runs.db'));
 
-  const run = await store.runs.createRun({
-    schemaId: 'attest.agent-test',
-    configHash: projectHash,
-    configJson: JSON.stringify({ agent_id: agentId, project_hash: projectHash }),
-    labels: { agent_id: agentId, kind: 'agent-probe' },
-  });
+  const lifetime = await startPromiseStoreOwner((owner) =>
+    Effect.gen(function* () {
+      const store = yield* openStore(join(root, '.attest', 'runs.db'), owner);
+
+      const run = yield* store.runs.createRun({
+        schemaId: 'attest.agent-test',
+        configHash: projectHash,
+        configJson: JSON.stringify({ agent_id: agentId, project_hash: projectHash }),
+        labels: { agent_id: agentId, kind: 'agent-probe' },
+      });
+
+      return { store, run };
+    }),
+  );
+
+  const { store, run } = lifetime.value;
 
   return {
     finish: async (status) => {
-      try {
-        await store.runs.finalizeRun(run.id, status);
-      } finally {
-        await store.close();
-      }
+      // EFFECT-BRIDGE(S8b)
+      const exit = await Effect.runPromiseExit(
+        Effect.asVoid(store.runs.finalizeRun(run.id, status)),
+      );
+
+      await lifetime.finish(exit);
     },
-    record: (execution) => store.runs.recordCase(run.id, execution, []),
+    record: async (execution) => {
+      return valueFromExit(
+        // EFFECT-BRIDGE(S8b)
+        await Effect.runPromiseExit(store.runs.recordCase(run.id, execution, [])),
+      );
+    },
     runId: run.id,
   };
 };

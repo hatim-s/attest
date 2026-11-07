@@ -1,12 +1,20 @@
-import { lstat, mkdir, mkdtemp, readdir, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readlink, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openStore } from '../../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../../store/_tests_/b1-fixture.js';
 
-import { openEvalProjectStore } from '../eval-project-path.js';
+import { openEvalProjectStore as acquireEvalStore } from '../eval-project-path.js';
+import { startPromiseStoreOwner } from '../../../internal/promise-store-owner.js';
+
+/** Keeps the native eval store inside its explicit owner for the fixture's whole use. */
+const openEvalProjectStore = async (root: string) => {
+  const lifetime = await startPromiseStoreOwner((owner) => acquireEvalStore(root, owner));
+
+  return { ...lifetime.value, close: () => lifetime.finish() };
+};
 
 const directories: string[] = [];
 
@@ -44,15 +52,19 @@ describe('openEvalProjectStore', () => {
     let runId: string;
 
     try {
-      const run = await store.runs.createRun({
-        configHash: 'sha256:boundary',
-        configJson: '{}',
-        schemaId: 'attest.eval-run',
-      });
+      const run = await executeB2(
+        store.runs.createRun({
+          configHash: 'sha256:boundary',
+          configJson: '{}',
+          schemaId: 'attest.eval-run',
+        }),
+      );
 
       runId = run.id;
-      await store.runs.finalizeRun(run.id, 'completed');
-      await expect(store.runs.getRun(run.id)).resolves.toMatchObject({ status: 'completed' });
+      await executeB2(store.runs.finalizeRun(run.id, 'completed'));
+      await expect(executeB2(store.runs.getRun(run.id))).resolves.toMatchObject({
+        status: 'completed',
+      });
     } finally {
       await store.close();
     }
@@ -64,9 +76,25 @@ describe('openEvalProjectStore', () => {
     const reopened = await openStore(join(projectRoot, '.attest', 'runs.db'));
 
     try {
-      await expect(reopened.runs.getRun(runId)).resolves.toMatchObject({ status: 'completed' });
+      await expect(executeB2(reopened.runs.getRun(runId))).resolves.toMatchObject({
+        status: 'completed',
+      });
     } finally {
       await reopened.close();
     }
+  });
+  it('retains a replacement reverse alias even when its target matches the owned alias', async () => {
+    const root = await createTemporaryDirectory('attest-alias-replacement-');
+    const store = await openEvalProjectStore(root);
+    const alias = (await readdir(root)).find((name) => name.endsWith('.opening'));
+
+    if (alias === undefined) throw new Error('Expected captured store alias.');
+    const path = join(root, alias);
+    // Rename keeps the original inode alive so the replacement cannot reuse it.
+    const original = `${path}.original`;
+    await rename(path, original);
+    await symlink('.attest', path);
+    await expect(store.close()).rejects.toMatchObject({ code: 'WRITE_FAILED' });
+    expect(await readlink(path)).toBe('.attest');
   });
 });
