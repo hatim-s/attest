@@ -1,10 +1,11 @@
+import * as Effect from 'effect/Effect';
 import { METRIC_PROTOCOL, type MetricRequest } from '@attest/contracts';
 import type { CaseEnvironment } from '@attest/executor';
 import { describe, expect, it } from 'vitest';
 
 import { createEnvironmentMetricTransport } from '../environment-transport.js';
 
-type ExecResult = Awaited<ReturnType<CaseEnvironment['exec']>>;
+type ExecResult = Effect.Success<ReturnType<CaseEnvironment['exec']>>;
 
 /**
  * Records every write and script, answers `pwd` with a fixed workspace and returns the canned
@@ -19,17 +20,21 @@ const fakeEnvironment = (command: (script: string) => Promise<ExecResult>) => {
       scripts.push({ script, env: options?.env });
 
       return script.endsWith('pwd')
-        ? Promise.resolve({ stdout: '/vercel/sandbox/workspace\n', stderr: '', exitCode: 0 })
-        : command(script);
+        ? Effect.succeed({ stdout: '/vercel/sandbox/workspace\n', stderr: '', exitCode: 0 })
+        : Effect.tryPromise({
+            try: () => command(script),
+            catch: (cause) =>
+              cause instanceof Error ? cause : new Error('fake command failed', { cause }),
+          });
     },
-    readFile: () => Promise.reject(new Error('not used')),
+    readFile: () => Effect.fail(new Error('not used')),
     writeFile: (path, contents) => {
       writes.set(path, contents);
 
-      return Promise.resolve();
+      return Effect.void;
     },
-    beginFinalization: () => Promise.resolve(),
-    dispose: () => Promise.resolve(),
+    beginFinalization: () => Effect.void,
+    dispose: () => Effect.void,
   };
 
   return { environment, writes, scripts };

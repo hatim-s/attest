@@ -1,3 +1,4 @@
+import { run } from '../../_tests_/support/run-effect.js';
 import { describe, expect, it } from 'vitest';
 
 import { justBashIsolation } from '../just-bash.js';
@@ -5,65 +6,71 @@ import { caseContext } from './support/case-context.js';
 
 describe('just-bash case isolation', () => {
   it('uses workspace-relative paths for seeds and file operations', async () => {
-    const environment = await justBashIsolation({
-      files: { './inputs/../input.txt': 'seed' },
-    })(caseContext());
+    const environment = await run(
+      justBashIsolation({
+        files: { './inputs/../input.txt': 'seed' },
+      })(caseContext()),
+    );
 
     try {
-      await expect(environment.readFile('input.txt')).resolves.toBe('seed');
-      await environment.writeFile('results/../result.txt', 'done');
-      await expect(environment.readFile('./result.txt')).resolves.toBe('done');
-      await expect(environment.readFile('/workspace/input.txt')).rejects.toThrow(/relative path/u);
-      await expect(environment.writeFile('../outside.txt', 'no')).rejects.toThrow(/workspace/u);
+      await expect(run(environment.readFile('input.txt'))).resolves.toBe('seed');
+      await run(environment.writeFile('results/../result.txt', 'done'));
+      await expect(run(environment.readFile('./result.txt'))).resolves.toBe('done');
+      await expect(run(environment.readFile('/workspace/input.txt'))).rejects.toThrow(
+        /relative path/u,
+      );
+      await expect(run(environment.writeFile('../outside.txt', 'no'))).rejects.toThrow(
+        /workspace/u,
+      );
     } finally {
-      await environment.dispose();
+      await run(environment.dispose());
     }
 
     await expect(
-      justBashIsolation({ files: { '../outside.txt': 'no' } })(caseContext()),
+      run(justBashIsolation({ files: { '../outside.txt': 'no' } })(caseContext())),
     ).rejects.toThrow(/workspace/u);
   });
 
   it('serializes commands inside one environment', async () => {
-    const environment = await justBashIsolation()(caseContext());
+    const environment = await run(justBashIsolation()(caseContext()));
 
     try {
-      const first = environment.exec('sleep 0.02; echo first >> order.txt');
-      const second = environment.exec('echo second >> order.txt');
+      const first = run(environment.exec('sleep 0.02; echo first >> order.txt'));
+      const second = run(environment.exec('echo second >> order.txt'));
       await Promise.all([first, second]);
 
-      await expect(environment.readFile('order.txt')).resolves.toBe('first\nsecond\n');
+      await expect(run(environment.readFile('order.txt'))).resolves.toBe('first\nsecond\n');
     } finally {
-      await environment.dispose();
+      await run(environment.dispose());
     }
   });
 
   it('drains run work and permits bounded final reads after run cancellation', async () => {
     const controller = new AbortController();
 
-    const environment = await justBashIsolation({ files: { 'partial.txt': 'partial' } })(
-      caseContext(controller.signal),
+    const environment = await run(
+      justBashIsolation({ files: { 'partial.txt': 'partial' } })(caseContext(controller.signal)),
     );
 
-    const pending = environment.exec('sleep 10; echo late > late.txt');
+    const pending = run(environment.exec('sleep 10; echo late > late.txt'));
     controller.abort(new Error('run cancelled'));
 
-    await environment.beginFinalization();
+    await run(environment.beginFinalization());
     await expect(pending).rejects.toThrow();
-    await expect(environment.readFile('partial.txt')).resolves.toBe('partial');
-    await environment.writeFile('final.txt', 'recovered');
-    await expect(environment.readFile('final.txt')).resolves.toBe('recovered');
+    await expect(run(environment.readFile('partial.txt'))).resolves.toBe('partial');
+    await run(environment.writeFile('final.txt', 'recovered'));
+    await expect(run(environment.readFile('final.txt'))).resolves.toBe('recovered');
 
-    await environment.dispose();
-    expect(() => environment.readFile('partial.txt')).toThrow(/disposed/u);
+    await run(environment.dispose());
+    await expect(run(environment.readFile('partial.txt'))).rejects.toThrow(/disposed/u);
   });
 
   it('expires the separate finalization lifetime', async () => {
-    const environment = await justBashIsolation({ finalizationTimeoutMs: 5 })(caseContext());
-    await environment.beginFinalization();
+    const environment = await run(justBashIsolation({ finalizationTimeoutMs: 5 })(caseContext()));
+    await run(environment.beginFinalization());
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(() => environment.readFile('missing.txt')).toThrow();
-    await environment.dispose();
+    await expect(run(environment.readFile('missing.txt'))).rejects.toThrow();
+    await run(environment.dispose());
   });
 });

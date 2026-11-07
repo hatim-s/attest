@@ -83,15 +83,21 @@ test('isolates virtual case files and rejects use after disposal', async () => {
     signal: new AbortController().signal,
   };
 
-  const [first, second] = await Promise.all([factory(context), factory(context)]);
+  const [first, second] = await Promise.all([
+    Effect.runPromise(factory(context)),
+    Effect.runPromise(factory(context)),
+  ]);
 
   try {
-    assert.equal((await first.exec('echo changed > input.txt; cat input.txt')).stdout, 'changed\n');
-    assert.equal(await second.readFile('input.txt'), 'seed');
-    assert.notEqual((await first.exec('node -e "process.exit(0)"')).exitCode, 0);
+    assert.equal(
+      (await Effect.runPromise(first.exec('echo changed > input.txt; cat input.txt'))).stdout,
+      'changed\n',
+    );
+    assert.equal(await Effect.runPromise(second.readFile('input.txt')), 'seed');
+    assert.notEqual((await Effect.runPromise(first.exec('node -e "process.exit(0)"'))).exitCode, 0);
   } finally {
-    await Promise.all([first.dispose(), second.dispose()]);
+    await Promise.all([Effect.runPromise(first.dispose()), Effect.runPromise(second.dispose())]);
   }
 
-  assert.throws(() => first.exec('echo late'), /disposed/);
+  await assert.rejects(Effect.runPromise(first.exec('echo late')), /disposed/);
 });

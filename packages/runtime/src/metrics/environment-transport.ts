@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { posix } from 'node:path';
 
 import type { CaseEnvironment } from '@attest/executor';
@@ -41,10 +43,11 @@ const createEnvironmentMetricTransport = (environment: CaseEnvironment): Command
       }
 
       // One command both prepares the directories and reports the absolute workspace root.
-      const prepared = await environment.exec(
-        `mkdir -p ${[...directories].map(quote).join(' ')} && pwd`,
-        { signal },
-      );
+
+      // EFFECT-BRIDGE(S6): removed with the owning Promise caller.
+      const prepared = await Effect.runPromiseExit(
+        environment.exec(`mkdir -p ${[...directories].map(quote).join(' ')} && pwd`, { signal }),
+      ).then(valueFromExit);
 
       if (prepared.exitCode !== 0) {
         return {
@@ -64,23 +67,37 @@ const createEnvironmentMetricTransport = (environment: CaseEnvironment): Command
         const destination = posix.join(ARTIFACT_DIR, artifact.path);
 
         if (artifact.encoding === 'utf8') {
-          await environment.writeFile(destination, artifact.content);
+          // EFFECT-BRIDGE(S6): removed with the owning Promise caller.
+          await Effect.runPromiseExit(environment.writeFile(destination, artifact.content)).then(
+            valueFromExit,
+          );
           continue;
         }
 
         const staged = posix.join(STAGING_DIR, String(index));
-        await environment.writeFile(staged, artifact.content);
+
+        // EFFECT-BRIDGE(S6): removed with the owning Promise caller.
+        await Effect.runPromiseExit(environment.writeFile(staged, artifact.content)).then(
+          valueFromExit,
+        );
         decodes.push(`base64 -d < ${quote(staged)} > ${quote(destination)}`);
       }
 
-      await environment.writeFile(
-        REQUEST_PATH,
-        JSON.stringify({ ...request, artifact_dir: posix.join(root, ARTIFACT_DIR) }),
-      );
+      // EFFECT-BRIDGE(S6): removed with the owning Promise caller.
+      await Effect.runPromiseExit(
+        environment.writeFile(
+          REQUEST_PATH,
+          JSON.stringify({ ...request, artifact_dir: posix.join(root, ARTIFACT_DIR) }),
+        ),
+      ).then(valueFromExit);
 
       const command = `${definition.command.map(quote).join(' ')} < ${quote(REQUEST_PATH)}`;
       const script = ['set -e', ...decodes, command].join('\n');
-      const result = await environment.exec(script, { signal, env });
+
+      // EFFECT-BRIDGE(S6): removed with the owning Promise caller.
+      const result = await Effect.runPromiseExit(environment.exec(script, { signal, env })).then(
+        valueFromExit,
+      );
 
       if (result.exitCode !== 0) {
         return {

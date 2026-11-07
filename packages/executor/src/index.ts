@@ -69,3 +69,5 @@ export { justBashIsolation } from './isolation/just-bash.js';
 export { type CaseEnvironment, type CaseEnvironmentFactory } from './isolation/types.js';
 
 export { vercelSandboxIsolation } from './isolation/vercel.js';
+
+export { EnvironmentCleanupError } from './isolation/operation.js';

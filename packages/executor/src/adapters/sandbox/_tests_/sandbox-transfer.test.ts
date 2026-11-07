@@ -1,3 +1,4 @@
+import { run } from '../../../_tests_/support/run-effect.js';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,16 +52,18 @@ describe('sandbox file transfers', () => {
 
     for (const destination of ['../outside', '/tmp/outside']) {
       await expect(
-        publishTerminalArtifacts(
-          createSandbox('artifact'),
-          [{ source: 'report.json', destination }],
-          {
-            projectRoot: projectRoot,
-            artifactRoot: join(projectRoot, 'artifacts'),
-            responseBytes: 32,
-            commandTimeoutMs: 1_000,
-            signal: new AbortController().signal,
-          },
+        run(
+          publishTerminalArtifacts(
+            createSandbox('artifact'),
+            [{ source: 'report.json', destination }],
+            {
+              projectRoot: projectRoot,
+              artifactRoot: join(projectRoot, 'artifacts'),
+              responseBytes: 32,
+              commandTimeoutMs: 1_000,
+              signal: new AbortController().signal,
+            },
+          ),
         ),
         destination,
       ).rejects.toThrow(TypeError);
@@ -74,22 +77,26 @@ describe('sandbox file transfers', () => {
     await writeFile(join(projectRoot, 'inputs', 'b.txt'), 'def');
 
     await expect(
-      loadExplicitUploads(
-        projectRoot,
-        [{ source: 'inputs/a.txt', destination: 'payload/a.txt', mode: 0o600 }],
-        3,
+      run(
+        loadExplicitUploads(
+          projectRoot,
+          [{ source: 'inputs/a.txt', destination: 'payload/a.txt', mode: 0o600 }],
+          3,
+        ),
       ),
     ).resolves.toEqual([
       { path: `${SANDBOX_WORKSPACE}/payload/a.txt`, content: Buffer.from('abc'), mode: 0o600 },
     ]);
     await expect(
-      loadExplicitUploads(
-        projectRoot,
-        [
-          { source: 'inputs/a.txt', destination: 'a.txt' },
-          { source: 'inputs/b.txt', destination: 'b.txt' },
-        ],
-        5,
+      run(
+        loadExplicitUploads(
+          projectRoot,
+          [
+            { source: 'inputs/a.txt', destination: 'a.txt' },
+            { source: 'inputs/b.txt', destination: 'b.txt' },
+          ],
+          5,
+        ),
       ),
     ).rejects.toMatchObject({ code: 'output_cap_exceeded' });
 
@@ -98,7 +105,7 @@ describe('sandbox file transfers', () => {
 
     for (const source of ['linked-inputs/a.txt', 'linked-file']) {
       await expect(
-        loadExplicitUploads(projectRoot, [{ source, destination: 'payload.txt' }], 16),
+        run(loadExplicitUploads(projectRoot, [{ source, destination: 'payload.txt' }], 16)),
       ).rejects.toThrow(/symbolic link/u);
     }
   });
@@ -108,16 +115,18 @@ describe('sandbox file transfers', () => {
     const artifactRoot = join(projectRoot, 'artifacts');
     const sandbox = createSandbox('artifact');
 
-    await publishTerminalArtifacts(
-      sandbox,
-      [{ source: 'results/report.json', destination: 'case/report.json' }],
-      {
-        projectRoot: projectRoot,
-        artifactRoot: artifactRoot,
-        responseBytes: 32,
-        commandTimeoutMs: 1_000,
-        signal: new AbortController().signal,
-      },
+    await run(
+      publishTerminalArtifacts(
+        sandbox,
+        [{ source: 'results/report.json', destination: 'case/report.json' }],
+        {
+          projectRoot: projectRoot,
+          artifactRoot: artifactRoot,
+          responseBytes: 32,
+          commandTimeoutMs: 1_000,
+          signal: new AbortController().signal,
+        },
+      ),
     );
 
     await expect(readFile(join(artifactRoot, 'case/report.json'), 'utf8')).resolves.toBe(
@@ -135,30 +144,34 @@ describe('sandbox file transfers', () => {
     const remoteParent = `${SANDBOX_WORKSPACE}/results`;
 
     await expect(
-      publishTerminalArtifacts(
-        createSandbox('artifact', new Set([remoteParent])),
-        [{ source: 'results/report.json', destination: 'report.json' }],
-        {
-          projectRoot: projectRoot,
-          artifactRoot: artifactRoot,
-          responseBytes: 32,
-          commandTimeoutMs: 1_000,
-          signal: new AbortController().signal,
-        },
+      run(
+        publishTerminalArtifacts(
+          createSandbox('artifact', new Set([remoteParent])),
+          [{ source: 'results/report.json', destination: 'report.json' }],
+          {
+            projectRoot: projectRoot,
+            artifactRoot: artifactRoot,
+            responseBytes: 32,
+            commandTimeoutMs: 1_000,
+            signal: new AbortController().signal,
+          },
+        ),
       ),
     ).rejects.toThrow(/symbolic link/u);
 
     await expect(
-      publishTerminalArtifacts(
-        createSandbox('too large'),
-        [{ source: 'report.json', destination: 'report.json' }],
-        {
-          projectRoot: projectRoot,
-          artifactRoot: artifactRoot,
-          responseBytes: 3,
-          commandTimeoutMs: 1_000,
-          signal: new AbortController().signal,
-        },
+      run(
+        publishTerminalArtifacts(
+          createSandbox('too large'),
+          [{ source: 'report.json', destination: 'report.json' }],
+          {
+            projectRoot: projectRoot,
+            artifactRoot: artifactRoot,
+            responseBytes: 3,
+            commandTimeoutMs: 1_000,
+            signal: new AbortController().signal,
+          },
+        ),
       ),
     ).rejects.toMatchObject({ code: 'output_cap_exceeded' });
 
@@ -166,16 +179,18 @@ describe('sandbox file transfers', () => {
     await mkdir(artifactRoot);
     await symlink(outside, join(artifactRoot, 'linked'));
     await expect(
-      publishTerminalArtifacts(
-        createSandbox('artifact'),
-        [{ source: 'report.json', destination: 'linked/report.json' }],
-        {
-          projectRoot: projectRoot,
-          artifactRoot: artifactRoot,
-          responseBytes: 32,
-          commandTimeoutMs: 1_000,
-          signal: new AbortController().signal,
-        },
+      run(
+        publishTerminalArtifacts(
+          createSandbox('artifact'),
+          [{ source: 'report.json', destination: 'linked/report.json' }],
+          {
+            projectRoot: projectRoot,
+            artifactRoot: artifactRoot,
+            responseBytes: 32,
+            commandTimeoutMs: 1_000,
+            signal: new AbortController().signal,
+          },
+        ),
       ),
     ).rejects.toThrow(/symbolic link/u);
   });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import * as Effect from 'effect/Effect';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { justBashIsolation } from '@attest/executor';
@@ -28,7 +29,7 @@ test('runs isolated agent, hook, evaluation, and persistence stages on the host 
   const plan = await createPlan();
 
   const invoke = async ({ resolvedCase, environment }) => {
-    assert.equal(await environment.readFile('input'), resolvedCase.case_id);
+    assert.equal(await Effect.runPromise(environment.readFile('input')), resolvedCase.case_id);
     stages.get(resolvedCase.case_id).push('agent');
 
     return {
@@ -53,7 +54,7 @@ test('runs isolated agent, hook, evaluation, and persistence stages on the host 
   };
 
   const evaluate = async ({ resolvedCase, environment }) => {
-    assert.equal(await environment.readFile('ready'), 'yes\n');
+    assert.equal(await Effect.runPromise(environment.readFile('ready')), 'yes\n');
     stages.get(resolvedCase.case_id).push('evaluate');
 
     return [];
@@ -88,10 +89,13 @@ test('runs isolated agent, hook, evaluation, and persistence stages on the host 
         {
           before_case: async ({ resolvedCase, environment }) => {
             stages.set(resolvedCase.case_id, ['before']);
-            await environment.writeFile('input', resolvedCase.case_id);
+            await Effect.runPromise(environment.writeFile('input', resolvedCase.case_id));
           },
           after_agent: async ({ resolvedCase, environment }) => {
-            assert.equal((await environment.exec('echo yes > ready')).exitCode, 0);
+            assert.equal(
+              (await Effect.runPromise(environment.exec('echo yes > ready'))).exitCode,
+              0,
+            );
             stages.get(resolvedCase.case_id).push('after_agent');
           },
           after_evaluation: ({ resolvedCase }) => {

@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type {
   AgentRequest,
   AgentResponse,
@@ -203,7 +204,7 @@ type EvalTerminalFailureFactory = (
 /** Builds one case's environment; resolving `undefined` runs that case without one. */
 type EvalCaseIsolation = (
   context: Parameters<CaseEnvironmentFactory>[0],
-) => Promise<CaseEnvironment | undefined>;
+) => Effect.Effect<CaseEnvironment | undefined, Error>;
 
 /** Injects deterministic time and optional event delivery without changing stored results. */
 type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {

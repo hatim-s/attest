@@ -1,19 +1,24 @@
+import type * as Effect from 'effect/Effect';
+
 /** Case-owned shell and workspace-relative filesystem. */
 type CaseEnvironment = {
   exec(
     script: string,
     options?: { signal?: AbortSignal; env?: Record<string, string> },
-  ): Promise<{
-    stdout: string;
-    stderr: string;
-    exitCode: number;
-  }>;
-  readFile(path: string): Promise<string>;
-  writeFile(path: string, contents: string): Promise<void>;
+  ): Effect.Effect<
+    {
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    },
+    Error
+  >;
+  readFile(path: string): Effect.Effect<string, Error>;
+  writeFile(path: string, contents: string): Effect.Effect<void, Error>;
   /** Cancels and drains run work before admitting bounded final-hook operations. */
-  beginFinalization(): Promise<void>;
+  beginFinalization(): Effect.Effect<void, Error>;
   /** Aborts and drains all admitted work before releasing the environment. */
-  dispose(): Promise<void>;
+  dispose(): Effect.Effect<void, Error>;
 };
 
 type CaseEnvironmentContext = {
@@ -25,6 +30,8 @@ type CaseEnvironmentContext = {
   signal: AbortSignal;
 };
 
-type CaseEnvironmentFactory = (context: CaseEnvironmentContext) => Promise<CaseEnvironment>;
+type CaseEnvironmentFactory = (
+  context: CaseEnvironmentContext,
+) => Effect.Effect<CaseEnvironment, Error>;
 
 export { type CaseEnvironment, type CaseEnvironmentContext, type CaseEnvironmentFactory };

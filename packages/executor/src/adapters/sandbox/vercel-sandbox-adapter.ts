@@ -1,3 +1,9 @@
+import {
+  foreign,
+  withRelease,
+  ownOperation,
+  EnvironmentCleanupError,
+} from '../../isolation/operation.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
@@ -48,6 +54,7 @@ const invokeSandboxAttempt = Effect.fn('invokeSandboxAttempt')(function* (
   invocation: VercelSandboxInvocation,
   request: AgentRequest,
   signal: AbortSignal | undefined,
+  ownerSignal?: AbortSignal,
 ): Effect.fn.Return<InvocationAttempt, SandboxAttemptCleanupError> {
   return yield* Effect.uninterruptible(
     Effect.gen(function* () {
@@ -71,7 +78,29 @@ const invokeSandboxAttempt = Effect.fn('invokeSandboxAttempt')(function* (
                     Effect.sync(() => signal?.removeEventListener('abort', cancel)),
                   );
 
-                  if (Exit.isFailure(released)) cleanupCause = released.cause;
+                  if (Exit.isFailure(released))
+                    cleanupCause = cleanupCause
+                      ? Cause.combine(cleanupCause, released.cause)
+                      : released.cause;
+                }),
+            );
+            const cancelOwner = (): void => controller.abort(ownerSignal?.reason);
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                ownerSignal?.addEventListener('abort', cancelOwner, { once: true });
+
+                if (ownerSignal?.aborted) cancelOwner();
+              }),
+              () =>
+                Effect.gen(function* () {
+                  const release = yield* Effect.exit(
+                    Effect.sync(() => ownerSignal?.removeEventListener('abort', cancelOwner)),
+                  );
+
+                  if (Exit.isFailure(release))
+                    cleanupCause = cleanupCause
+                      ? Cause.combine(cleanupCause, release.cause)
+                      : release.cause;
                 }),
             );
             // The server deadline is primary. After one extra second, request SDK abort acknowledgement.
@@ -293,13 +322,13 @@ const setupError = (
 };
 
 /** Exports terminal artifacts; a failure is recorded beside the result instead of replacing it. */
-const exportArtifacts = async (
+const exportArtifacts = Effect.fn('exportArtifacts')(function* (
   sdk: VercelSandboxSdk,
   artifacts: NonNullable<VercelSandbox['artifacts']>,
   artifactRoot: string,
   invocation: VercelSandboxInvocation,
   options: VercelSandboxCaseOptions,
-): Promise<AgentInvocationError | undefined> => {
+) {
   const artifactTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs);
 
   const artifactSignal =
@@ -307,155 +336,228 @@ const exportArtifacts = async (
       ? artifactTimeout
       : AbortSignal.any([options.signal, artifactTimeout]);
 
-  try {
-    await publishTerminalArtifacts(sdk, artifacts, {
-      projectRoot: options.projectRoot,
-      artifactRoot,
-      responseBytes: invocation.responseBytes,
-      commandTimeoutMs: invocation.attemptTimeoutMs,
-      signal: artifactSignal,
-    });
+  return yield* publishTerminalArtifacts(sdk, artifacts, {
+    projectRoot: options.projectRoot,
+    artifactRoot,
+    responseBytes: invocation.responseBytes,
+    commandTimeoutMs: invocation.attemptTimeoutMs,
+    signal: artifactSignal,
+  }).pipe(
+    Effect.as(undefined),
+    Effect.catchCause((cause) =>
+      Effect.gen(function* () {
+        if (Cause.hasDies(cause) || Cause.hasInterrupts(cause))
+          return yield* Effect.failCause(cause);
+        const error = yield* Effect.flip(Effect.failCause(cause));
 
-    return undefined;
-  } catch (error: unknown) {
-    if (error instanceof AgentInvocationError) return error;
+        const projected =
+          error instanceof AgentInvocationError
+            ? error
+            : new AgentInvocationError('network', 'Sandbox artifact export failed', {
+                cause: error,
+              });
 
-    return new AgentInvocationError('network', 'Sandbox artifact export failed', { cause: error });
-  }
-};
+        // Artifact cleanup is attached to the Cause, not necessarily to its typed error.
+        Object.defineProperty(projected, 'effectCause', { value: cause, configurable: true });
+
+        return projected;
+      }),
+    ),
+  );
+});
 
 /** Invokes one native CLI case in one fresh Vercel sandbox reused across its retries. */
-const invokeVercelSandboxAgent = async (
+const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function* (
   sandbox: VercelSandbox,
   invocation: VercelSandboxInvocation,
   request: AgentRequest,
   options: VercelSandboxCaseOptions,
-): Promise<InvocationResult> => {
-  const { retries } = parseWithSchemaSync(retryBudgetSchema, invocation);
-  const artifacts = sandbox.artifacts ?? [];
-  const { artifactRoot } = options;
+): Effect.fn.Return<InvocationResult, Error> {
+  return yield* ownOperation((cancelled) =>
+    Effect.gen(function* () {
+      const ownerSignal = AbortSignal.any([cancelled, ...(options.signal ? [options.signal] : [])]);
+      const { retries } = parseWithSchemaSync(retryBudgetSchema, invocation);
+      const artifacts = sandbox.artifacts ?? [];
+      const { artifactRoot } = options;
 
-  if (artifacts.length > 0 && artifactRoot === undefined) {
-    throw new TypeError('Sandbox artifacts require an output directory.');
-  }
-
-  const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
-  let sdk: VercelSandboxSdk | undefined;
-  let result: InvocationResult | undefined;
-  let postRunError: AgentInvocationError | undefined;
-  let nativeFailure: Cause.Cause<SandboxAttemptCleanupError> | undefined;
-  let cleanupConfirmed = true;
-  const setupTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs);
-
-  const setupSignal =
-    options.signal === undefined ? setupTimeout : AbortSignal.any([options.signal, setupTimeout]);
-
-  try {
-    const created = await createCaseSandbox({
-      credentials,
-      factory: options.sandboxFactory,
-      image: sandbox.image,
-      timeoutMs: invocation.sandboxTimeoutMs,
-      signal: setupSignal,
-    });
-
-    sdk = created;
-
-    const uploads = await loadExplicitUploads(
-      options.projectRoot,
-      sandbox.files,
-      invocation.responseBytes,
-    );
-
-    const prepare = await created.runCommand({
-      cmd: 'mkdir',
-      args: ['-p', INTERNAL_ROOT, SANDBOX_WORKSPACE],
-      signal: setupSignal,
-      timeoutMs: invocation.attemptTimeoutMs,
-    });
-
-    if (prepare.exitCode !== 0) {
-      throw new AgentInvocationError('spawn_failed', 'Could not prepare the sandbox workspace.');
-    }
-
-    if (uploads.length > 0) await created.writeFiles(uploads, { signal: setupSignal });
-
-    // EFFECT-BRIDGE(S5): Promise sandbox lifecycle owns the native retry/attempt leaf until S5.
-    const invocationExit = await Effect.runPromiseExit(
-      invokeWithRetries(
-        () => invokeSandboxAttempt(created, invocation, request, options.signal),
-        retries,
-      ),
-    );
-
-    if (Exit.isSuccess(invocationExit)) result = invocationExit.value;
-    else nativeFailure = invocationExit.cause;
-
-    if (nativeFailure === undefined && artifactRoot !== undefined && artifacts.length > 0) {
-      postRunError = await exportArtifacts(created, artifacts, artifactRoot, invocation, options);
-    }
-  } catch (error: unknown) {
-    postRunError = setupError(error, options.signal, setupTimeout);
-  } finally {
-    if (sdk !== undefined) {
-      try {
-        await stopCaseSandbox(sdk, options.cleanupTimeoutMs);
-      } catch (error: unknown) {
-        cleanupConfirmed = false;
-        postRunError ??= new AgentInvocationError('network', 'Vercel sandbox cleanup failed', {
-          cause: error,
-        });
+      if (artifacts.length > 0 && artifactRoot === undefined) {
+        throw new TypeError('Sandbox artifacts require an output directory.');
       }
-    }
-  }
 
-  // Do not turn native defects or interruption into retryable setup errors at the S5 edge.
-  if (nativeFailure !== undefined) {
-    if (!Cause.hasDies(nativeFailure) && !Cause.hasInterrupts(nativeFailure)) {
-      for (const reason of nativeFailure.reasons) {
-        if (Cause.isFailReason(reason)) {
-          Object.defineProperties(reason.error, {
-            effectCause: { value: nativeFailure, configurable: true },
-            sandboxCleanupError: { value: postRunError, configurable: true },
-          });
-          throw reason.error;
+      const credentials = yield* Effect.try({
+        try: () => resolveVercelSandboxCredentials(options.credentialEnv ?? process.env),
+        catch: (cause) =>
+          cause instanceof Error ? cause : new Error('Sandbox credentials failed.', { cause }),
+      });
+
+      let result: InvocationResult | undefined;
+      let postRunError: AgentInvocationError | undefined;
+      let cleanupConfirmed = true;
+      let cleanupCause: Cause.Cause<Error> | undefined;
+      const setupTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs);
+
+      const setupSignal = AbortSignal.any([ownerSignal, setupTimeout]);
+
+      const primary = yield* Effect.exit(
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const created = yield* createCaseSandbox({
+              credentials,
+              factory: options.sandboxFactory,
+              image: sandbox.image,
+              timeoutMs: invocation.sandboxTimeoutMs,
+              signal: setupSignal,
+            });
+
+            return yield* withRelease(
+              Effect.gen(function* () {
+                if (setupSignal.aborted)
+                  return yield* Effect.fail(abortedError(options.signal, 'Vercel sandbox setup'));
+
+                const uploads = yield* loadExplicitUploads(
+                  options.projectRoot,
+                  sandbox.files,
+                  invocation.responseBytes,
+                );
+
+                const prepare = yield* foreign((foreignSignal) =>
+                  created.runCommand({
+                    cmd: 'mkdir',
+                    args: ['-p', INTERNAL_ROOT, SANDBOX_WORKSPACE],
+                    signal: AbortSignal.any([foreignSignal, setupSignal]),
+                    timeoutMs: invocation.attemptTimeoutMs,
+                  }),
+                );
+
+                if (prepare.exitCode !== 0)
+                  return yield* Effect.fail(
+                    new AgentInvocationError(
+                      'spawn_failed',
+                      'Could not prepare the sandbox workspace.',
+                    ),
+                  );
+
+                if (uploads.length > 0)
+                  yield* foreign((foreignSignal) =>
+                    created.writeFiles(uploads, {
+                      signal: AbortSignal.any([foreignSignal, setupSignal]),
+                    }),
+                  );
+
+                if (setupSignal.aborted)
+                  return yield* Effect.fail(abortedError(options.signal, 'Vercel sandbox setup'));
+                result = yield* invokeWithRetries(
+                  () =>
+                    invokeSandboxAttempt(created, invocation, request, options.signal, cancelled),
+                  retries,
+                );
+
+                if (artifactRoot !== undefined && artifacts.length > 0)
+                  postRunError = yield* exportArtifacts(
+                    created,
+                    artifacts,
+                    artifactRoot,
+                    invocation,
+                    options,
+                  );
+              }),
+              Effect.gen(function* () {
+                const stopped = yield* Effect.exit(
+                  stopCaseSandbox(created, options.cleanupTimeoutMs),
+                );
+
+                if (Exit.isFailure(stopped)) {
+                  cleanupConfirmed = false;
+                  cleanupCause = stopped.cause;
+                  postRunError ??= new AgentInvocationError(
+                    'network',
+                    'Vercel sandbox cleanup failed',
+                    { cause: stopped.cause },
+                  );
+
+                  return yield* Effect.failCause(stopped.cause);
+                }
+              }),
+            );
+          }),
+        ),
+      );
+
+      if (Exit.isFailure(primary)) {
+        // Defects and interruption remain native; release annotations retain cleanup evidence.
+        if (Cause.hasDies(primary.cause) || Cause.hasInterrupts(primary.cause))
+          return yield* Effect.failCause(primary.cause);
+
+        // Native attempt cleanup failures retain their typed completed attempt.
+        for (const reason of primary.cause.reasons) {
+          if (Cause.isFailReason(reason) && reason.error instanceof SandboxAttemptCleanupError)
+            return yield* Effect.failCause(primary.cause);
+        }
+
+        for (const reason of primary.cause.reasons) {
+          if (
+            Cause.isFailReason(reason) &&
+            !(
+              reason.error instanceof EnvironmentCleanupError &&
+              result !== undefined &&
+              !cleanupConfirmed
+            )
+          ) {
+            // Nested setup cleanup has no attempt yet; keep its Cause instead of treating it as VM-stop evidence.
+            postRunError = setupError(reason.error, options.signal, setupTimeout);
+            Object.defineProperty(postRunError, 'effectCause', {
+              value: primary.cause,
+              configurable: true,
+            });
+          }
         }
       }
-    }
 
-    throw new Error('Native sandbox invocation did not complete normally.', {
-      cause: { effectCause: nativeFailure, cleanupError: postRunError },
-    });
-  }
+      if (postRunError === undefined && result !== undefined) return result;
+      const cleanupDiagnostics = cleanupConfirmed ? {} : { sandboxCleanupConfirmed: false };
 
-  if (postRunError === undefined && result !== undefined) return result;
-  const cleanupDiagnostics = cleanupConfirmed ? {} : { sandboxCleanupConfirmed: false };
+      const recordedError = result?.status === 'invocation_error' ? result.error : postRunError;
 
-  if (result?.status === 'invocation_error') {
-    return {
-      ...result,
-      diagnostics: {
-        ...result.diagnostics,
-        sandboxError: postRunError?.message ?? 'Sandbox execution did not produce a result.',
-        ...cleanupDiagnostics,
-      },
-    };
-  }
+      if (cleanupCause && recordedError)
+        Object.defineProperty(recordedError, 'sandboxCleanupCause', {
+          value: cleanupCause,
+          configurable: true,
+        });
 
-  const diagnostics: InvocationDiagnostics = { ...cleanupDiagnostics };
+      if (result?.status === 'invocation_error') {
+        if (postRunError)
+          Object.defineProperty(result.error, 'sandboxPostRunError', {
+            value: postRunError,
+            configurable: true,
+          });
 
-  if (postRunError !== undefined) diagnostics.sandboxError = postRunError.message;
+        return {
+          ...result,
+          diagnostics: {
+            ...result.diagnostics,
+            sandboxError: postRunError?.message ?? 'Sandbox execution did not produce a result.',
+            ...cleanupDiagnostics,
+          },
+        };
+      }
 
-  const attempt = createFailedAttempt(
-    postRunError ??
-      new AgentInvocationError('network', 'Sandbox execution did not produce a result.'),
-    {
-      diagnostics,
-      durationMs: result?.durationMs ?? 0,
-    },
+      const diagnostics: InvocationDiagnostics = { ...result?.diagnostics, ...cleanupDiagnostics };
+
+      if (postRunError !== undefined) diagnostics.sandboxError = postRunError.message;
+
+      const attempt = createFailedAttempt(
+        postRunError ??
+          new AgentInvocationError('network', 'Sandbox execution did not produce a result.'),
+        {
+          diagnostics,
+          durationMs: result?.durationMs ?? 0,
+          rawExcerpt: result?.rawExcerpt,
+        },
+      );
+
+      return { ...attempt, attempts: [...(result?.attempts ?? []), attempt] };
+    }),
   );
-
-  return { ...attempt, attempts: [...(result?.attempts ?? []), attempt] };
-};
+});
 
 export { invokeVercelSandboxAgent };

@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { CaseExecution } from '../types.js';
 import type { StoredMetricEvaluation } from '@attest/core';
 import { justBashIsolation, type CaseEnvironment } from '@attest/executor';
@@ -42,11 +43,11 @@ const stagedRunner = (
 
 /** A fake environment whose finalization steps can be scripted. */
 const fakeEnvironment = (overrides: Partial<CaseEnvironment> = {}): CaseEnvironment => ({
-  beginFinalization: vi.fn(() => Promise.resolve()),
+  beginFinalization: vi.fn(() => Effect.void),
   exec: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
-  dispose: vi.fn(() => Promise.resolve()),
+  dispose: vi.fn(() => Effect.void),
   ...overrides,
 });
 
@@ -58,13 +59,15 @@ describe('eval hooks and case environments', () => {
     const runner = stagedRunner(
       async ({ resolvedCase, environment }) => {
         stages.get(resolvedCase.case_id)?.push('invoke');
-        expect(await environment?.readFile('case.txt')).toBe(resolvedCase.case_id);
+        expect(await Effect.runPromise(environment!.readFile('case.txt'))).toBe(
+          resolvedCase.case_id,
+        );
 
         return completedExecution(resolvedCase).execution;
       },
       async ({ resolvedCase, environment }) => {
         stages.get(resolvedCase.case_id)?.push('evaluate');
-        expect(await environment?.readFile('after-agent.txt')).toBe('ready');
+        expect(await Effect.runPromise(environment!.readFile('after-agent.txt'))).toBe('ready');
 
         return [];
       },
@@ -81,16 +84,18 @@ describe('eval hooks and case environments', () => {
             before_run: () => void runStages.push('before'),
             before_case: async ({ resolvedCase, environment }) => {
               stages.set(resolvedCase.case_id, ['before']);
-              await environment?.writeFile('case.txt', resolvedCase.case_id);
+              await Effect.runPromise(environment!.writeFile('case.txt', resolvedCase.case_id));
             },
             after_agent: async ({ resolvedCase, environment }) => {
               stages.get(resolvedCase.case_id)?.push('after_agent');
-              await environment?.writeFile('after-agent.txt', 'ready');
+              await Effect.runPromise(environment!.writeFile('after-agent.txt', 'ready'));
             },
             after_evaluation: ({ resolvedCase }) =>
               void stages.get(resolvedCase.case_id)?.push('after_evaluation'),
             after_case: async ({ resolvedCase, environment }) => {
-              expect(await environment?.readFile('case.txt')).toBe(resolvedCase.case_id);
+              expect(await Effect.runPromise(environment!.readFile('case.txt'))).toBe(
+                resolvedCase.case_id,
+              );
               stages.get(resolvedCase.case_id)?.push('after');
             },
             after_run: ({ status }) => void runStages.push(status),
@@ -114,7 +119,7 @@ describe('eval hooks and case environments', () => {
   });
 
   it('runs all final hooks and disposes the environment when setup throws', async () => {
-    const dispose = vi.fn(() => Promise.resolve());
+    const dispose = vi.fn(() => Effect.void);
     const environment = fakeEnvironment({ dispose });
     const after = vi.fn();
     const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();
@@ -124,7 +129,7 @@ describe('eval hooks and case environments', () => {
       { executeCase },
       createPersistence().adapter,
       {
-        isolation: () => Promise.resolve(environment),
+        isolation: () => Effect.succeed(environment),
         hooks: [
           {
             before_case: () => {
@@ -176,10 +181,10 @@ describe('eval hooks and case environments', () => {
   it.each([
     {
       disposal: 'fails',
-      disposeResult: () => Promise.reject(new Error('environment disposal failed')),
+      disposeResult: () => Effect.fail(new Error('environment disposal failed')),
       canRelease: false,
     },
-    { disposal: 'succeeds', disposeResult: () => Promise.resolve(), canRelease: true },
+    { disposal: 'succeeds', disposeResult: () => Effect.void, canRelease: true },
   ])(
     'records every finalization failure on fresh evidence when disposal $disposal',
     async ({ disposeResult, canRelease }) => {
@@ -194,12 +199,12 @@ describe('eval hooks and case environments', () => {
         persistence.adapter,
         {
           isolation: () =>
-            Promise.resolve(
+            Effect.succeed(
               fakeEnvironment({
                 beginFinalization: () => {
                   finalization.push('begin');
 
-                  return Promise.reject(new Error('finalization transition failed'));
+                  return Effect.fail(new Error('finalization transition failed'));
                 },
                 dispose: () => {
                   finalization.push('dispose');

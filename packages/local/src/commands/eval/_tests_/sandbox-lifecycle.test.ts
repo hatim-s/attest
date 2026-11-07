@@ -15,11 +15,7 @@ import {
   type EvalRun,
 } from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
-import {
-  AgentInvocationError,
-  type invokeVercelSandboxAgent,
-  type InvocationResult,
-} from '@attest/executor';
+import { AgentInvocationError, type invokeVercelSandboxAgent } from '@attest/executor';
 import { EvalCaseStageError, type ResolvedEvalCase } from '@attest/runtime';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -106,16 +102,16 @@ const createCase = (index: number): ResolvedEvalCase<ResolvedEvalCaseInput> => {
 };
 
 /** Simulates the adapter completing artifact publication and cleanup before returning. */
-const publishArtifact: typeof invokeVercelSandboxAgent = async (
+const publishArtifact: typeof invokeVercelSandboxAgent = Effect.fn(function* (
   _sandbox,
   _agent,
   request,
   { artifactRoot },
-): Promise<InvocationResult> => {
+) {
   if (artifactRoot === undefined) throw new Error('Artifact root is required by this fixture.');
-  await mkdir(artifactRoot, { recursive: true });
-  expect(await readdir(artifactRoot)).toEqual([]);
-  await writeFile(join(artifactRoot, 'X'), request.case_id);
+  yield* Effect.promise(() => mkdir(artifactRoot, { recursive: true }));
+  expect(yield* Effect.promise(() => readdir(artifactRoot))).toEqual([]);
+  yield* Effect.promise(() => writeFile(join(artifactRoot, 'X'), request.case_id));
   const raw = { protocol: AGENT_PROTOCOL, output: 'done' };
 
   const attempt = {
@@ -128,7 +124,7 @@ const publishArtifact: typeof invokeVercelSandboxAgent = async (
   };
 
   return { ...attempt, attempts: [attempt] };
-};
+});
 
 beforeEach(() => {
   sandboxInvoke.mockReset();
@@ -263,7 +259,7 @@ describe('sandbox eval lifecycle integration', () => {
       warnings: [],
     };
 
-    sandboxInvoke.mockResolvedValue({ ...attempt, attempts: [attempt] });
+    sandboxInvoke.mockReturnValue(Effect.succeed({ ...attempt, attempts: [attempt] }));
     const runner = createEvalCaseRunner(root, cache, run, { invokeSandbox: sandboxInvoke });
 
     const failure = await runner
@@ -380,7 +376,7 @@ describe('sandbox eval lifecycle integration', () => {
       warnings: [],
     };
 
-    sandboxInvoke.mockResolvedValue({ ...attempt, attempts: [attempt] });
+    sandboxInvoke.mockReturnValue(Effect.succeed({ ...attempt, attempts: [attempt] }));
     const runner = createEvalCaseRunner(root, cache, run, { invokeSandbox: sandboxInvoke });
 
     const result = await runner.executeCase(

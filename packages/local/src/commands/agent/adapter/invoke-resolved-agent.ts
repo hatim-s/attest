@@ -163,7 +163,10 @@ const dispatch = async (
 
       if (options.signal !== undefined) execution.signal = options.signal;
 
-      return invokeSandbox(resolved.sandbox, invocation, request, execution);
+      // EFFECT-BRIDGE(S7b): removed with the owning Promise caller.
+      return Effect.runPromiseExit(
+        invokeSandbox(resolved.sandbox, invocation, request, execution),
+      ).then(valueFromExit);
     }
 
     case 'stream': {
@@ -181,7 +184,7 @@ const dispatch = async (
     }
 
     case 'mapped_http': {
-      // EFFECT-BRIDGE(S7b)
+      // EFFECT-BRIDGE(S7b): removed with the owning Promise caller.
       const exit = await Effect.runPromiseExit(
         invokeMappedHttpAgent(resolved.agent, request, {
           headers: resolved.headers,
@@ -208,7 +211,7 @@ const dispatch = async (
         invocation.workingDirectory = options.workerDirectory;
       }
 
-      // EFFECT-BRIDGE(S7b)
+      // EFFECT-BRIDGE(S7b): removed with the owning Promise caller.
       const exit = await Effect.runPromiseExit(invokeAgent(resolved.target, request, invocation));
 
       try {

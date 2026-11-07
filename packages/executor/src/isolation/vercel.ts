@@ -1,3 +1,7 @@
+import * as Exit from 'effect/Exit';
+import * as Option from 'effect/Option';
+import * as Semaphore from 'effect/Semaphore';
+import { foreign, withRelease, ownOperation } from './operation.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';
@@ -13,7 +17,7 @@ import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbo
 import { readRemoteFile } from '../adapters/sandbox/sandbox-transfer.js';
 import type { VercelSandboxFactory } from '../adapters/sandbox/types.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
-import type { CaseEnvironmentFactory } from './types.js';
+import type { CaseEnvironment, CaseEnvironmentFactory } from './types.js';
 import { normalizeWorkspacePath } from './workspace-path.js';
 
 /**
@@ -88,192 +92,254 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
   const { commandTimeoutMs, cleanupTimeoutMs, outputBytes: cap } = options;
   const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
 
-  return async ({ signal }) => {
-    signal.throwIfAborted();
-    const credentials = resolveVercelSandboxCredentials(credentialEnv ?? process.env);
-    const files = resolveSeedFiles(options.files, cap);
-
-    const sdk = await createCaseSandbox({
-      credentials,
-      factory: sandboxFactory,
-      image: options.image,
-      timeoutMs: options.timeoutMs,
-      signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),
-    });
-
-    let poisonReason: Error | undefined;
-    let stopping: Promise<void> | undefined;
-    let disposal: Promise<void> | undefined;
-
-    const lifecycle = createEnvironmentLifecycle({
-      signal,
-      finalizationTimeoutMs,
-      poisonedError: () => poisonReason ?? new Error('Case environment has been poisoned.'),
-    });
-
-    /** Stops this SDK instance at most once, including concurrent poison and disposal paths. */
-    const stop = (): Promise<void> => {
-      stopping ??= Promise.resolve().then(() => stopCaseSandbox(sdk, cleanupTimeoutMs));
-
-      return stopping;
-    };
-
-    /** Stops a VM whose command rejected because the remote process may still be running. */
-    const poison = async (cause: unknown): Promise<never> => {
-      poisonReason ??=
-        cause instanceof Error
-          ? cause
-          : new Error('Vercel Sandbox command rejected.', { cause: cause });
-      lifecycle.poison(cause);
-
-      try {
-        await stop();
-      } catch (cleanupError) {
-        if (!(poisonReason instanceof SandboxCleanupError)) {
-          poisonReason = new SandboxCleanupError(
-            [poisonReason, cleanupError],
-            'Sandbox operation and cleanup failed.',
-          );
-        }
-      }
-
-      throw poisonReason;
-    };
-
-    /** Adds per-command and caller deadlines to an admitted phase signal. */
-    const operationSignal = (admitted: AbortSignal, extra?: AbortSignal): AbortSignal =>
-      AbortSignal.any([admitted, AbortSignal.timeout(commandTimeoutMs), ...(extra ? [extra] : [])]);
-
-    /** Aborts and drains all operations, then confirms the VM stopped. */
-    const dispose = async (): Promise<void> => {
-      const drained = lifecycle.close(new Error('Case environment disposed.'));
-      // Stop right away so an SDK call that ignores local abort still loses its remote VM.
-      let cleanupError: unknown;
-
-      const stopped = stop().catch((cause: unknown) => {
-        cleanupError = cause;
-      });
-
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-
-      const settled = await Promise.race([
-        Promise.all([drained, stopped]).then(() => true),
-        new Promise<false>((resolve) => {
-          timeout = setTimeout(() => resolve(false), cleanupTimeoutMs);
-        }),
-      ]);
-
-      clearTimeout(timeout);
-
-      if (settled && cleanupError === undefined) return;
-
-      if (poisonReason instanceof SandboxCleanupError) throw poisonReason;
-      throw new SandboxCleanupError(
-        [cleanupError ?? new Error('Sandbox operations did not drain before cleanup timed out.')],
-        'Sandbox cleanup failed.',
+  return Effect.fn(function* ({ signal }) {
+    if (signal.aborted)
+      return yield* Effect.fail(
+        signal.reason instanceof Error ? signal.reason : new Error('Case acquisition aborted.'),
       );
-    };
 
-    try {
-      const setupSignal = operationSignal(signal);
+    const credentials = yield* Effect.try({
+      try: () => resolveVercelSandboxCredentials(credentialEnv ?? process.env),
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error('Sandbox credentials failed.', { cause }),
+    });
 
-      const ready = await sdk
-        .runCommand({
-          cmd: 'mkdir',
-          args: ['-p', SANDBOX_WORKSPACE],
-          signal: setupSignal,
-          timeoutMs: commandTimeoutMs,
-        })
-        .catch((cause: unknown) => poison(cause));
+    const files = yield* Effect.try({
+      try: () => resolveSeedFiles(options.files, cap),
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error('Sandbox seed failed.', { cause }),
+    });
 
-      if (ready.exitCode !== 0) throw new Error('Could not prepare case sandbox.');
+    return yield* ownOperation((cancelled) =>
+      Effect.gen(function* () {
+        signal = AbortSignal.any([signal, cancelled]);
 
-      if (files.length > 0) await sdk.writeFiles(files, { signal: setupSignal });
-    } catch (error) {
-      try {
-        await stop();
-      } catch (cleanupError) {
-        if (error instanceof SandboxCleanupError) throw error;
-        throw new SandboxCleanupError(
-          [error, cleanupError],
-          'Sandbox operation and cleanup failed.',
+        const sdk = yield* createCaseSandbox({
+          credentials,
+          factory: sandboxFactory,
+          image: options.image,
+          timeoutMs: options.timeoutMs,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),
+        });
+
+        let poisonReason: Error | undefined;
+
+        const lifecycle = createEnvironmentLifecycle({
+          signal,
+          finalizationTimeoutMs,
+          poisonedError: () => poisonReason ?? new Error('Case environment has been poisoned.'),
+        });
+
+        const stopLock = yield* Semaphore.make(1);
+        let stopped: Exit.Exit<void, Error> | undefined;
+
+        /** Every caller observes the same stop receipt, including failed confirmation. */
+        const stop = () =>
+          stopLock.withPermits(1)(
+            Effect.gen(function* () {
+              stopped ??= yield* Effect.exit(stopCaseSandbox(sdk, cleanupTimeoutMs));
+
+              return yield* stopped;
+            }),
+          );
+
+        /** A rejected command cannot be retried or reused until the VM has been stopped. */
+        const poison = (error: Error): Effect.Effect<never, Error> => {
+          poisonReason ??= error;
+          lifecycle.poison(error);
+
+          return withRelease(Effect.fail(error), stop()).pipe(
+            Effect.catchCause((cause) => {
+              // Keep the original Cause, including any attached cleanup diagnostic.
+              if (stopped && Exit.isFailure(stopped))
+                poisonReason = new SandboxCleanupError(
+                  [error, stopped.cause],
+                  'Sandbox operation and cleanup failed.',
+                );
+
+              return Effect.failCause(cause);
+            }),
+          );
+        };
+
+        const operationSignal = (admitted: AbortSignal, extra?: AbortSignal) =>
+          AbortSignal.any([
+            admitted,
+            AbortSignal.timeout(commandTimeoutMs),
+            ...(extra ? [extra] : []),
+          ]);
+
+        // A factory may finish after cancellation. Release its VM before starting any setup work.
+        if (signal.aborted)
+          return yield* withRelease(
+            Effect.fail(
+              signal.reason instanceof Error
+                ? signal.reason
+                : new Error('Sandbox acquisition aborted.'),
+            ),
+            stop(),
+          );
+
+        const setup = yield* Effect.exit(
+          Effect.gen(function* () {
+            const setupSignal = operationSignal(signal);
+
+            const ready = yield* foreign((foreignSignal) =>
+              sdk.runCommand({
+                cmd: 'mkdir',
+                args: ['-p', SANDBOX_WORKSPACE],
+                signal: AbortSignal.any([foreignSignal, setupSignal]),
+                timeoutMs: commandTimeoutMs,
+              }),
+            );
+
+            if (ready.exitCode !== 0)
+              return yield* Effect.fail(new Error('Could not prepare case sandbox.'));
+
+            if (files.length > 0)
+              yield* foreign((foreignSignal) =>
+                sdk.writeFiles(files, { signal: AbortSignal.any([foreignSignal, setupSignal]) }),
+              );
+          }),
         );
-      }
 
-      throw error;
-    }
+        if (signal.aborted && Exit.isSuccess(setup))
+          return yield* withRelease(
+            Effect.fail(
+              signal.reason instanceof Error
+                ? signal.reason
+                : new Error('Sandbox acquisition aborted.'),
+            ),
+            stop(),
+          );
 
-    return {
-      exec: (script, execution = {}) =>
-        lifecycle.track(async (admitted) => {
-          const commandLifetime = new AbortController();
-          const stdoutCap = Math.ceil(cap / 2);
-          const stderrCap = Math.floor(cap / 2);
+        if (Exit.isFailure(setup)) return yield* withRelease(Effect.failCause(setup.cause), stop());
+        const disposeLock = yield* Semaphore.make(1);
+        let disposal: Exit.Exit<void, Error> | undefined;
 
-          const onExceeded = (): void =>
-            commandLifetime.abort(new Error('Sandbox command output exceeds outputBytes.'));
+        const environment: CaseEnvironment = {
+          exec: (script, execution = {}) =>
+            lifecycle.track((admitted) =>
+              Effect.gen(function* () {
+                const commandLifetime = new AbortController();
 
-          const stdout = new BoundedOutputWritable(stdoutCap, onExceeded);
-          const stderr = new BoundedOutputWritable(stderrCap, onExceeded);
+                const onExceeded = (): void =>
+                  commandLifetime.abort(new Error('Sandbox command output exceeds outputBytes.'));
 
-          const result = await sdk
-            .runCommand({
-              cmd: 'sh',
-              args: ['-c', script],
-              cwd: SANDBOX_WORKSPACE,
-              env: { ...options.env, ...execution.env },
-              signal: operationSignal(
-                AbortSignal.any([admitted, commandLifetime.signal]),
-                execution.signal,
+                const stdout = new BoundedOutputWritable(Math.ceil(cap / 2), onExceeded);
+                const stderr = new BoundedOutputWritable(Math.floor(cap / 2), onExceeded);
+
+                const result = yield* foreign((foreignSignal) =>
+                  sdk.runCommand({
+                    cmd: 'sh',
+                    args: ['-c', script],
+                    cwd: SANDBOX_WORKSPACE,
+                    env: { ...options.env, ...execution.env },
+                    signal: AbortSignal.any([
+                      foreignSignal,
+                      operationSignal(
+                        AbortSignal.any([admitted, commandLifetime.signal]),
+                        execution.signal,
+                      ),
+                    ]),
+                    timeoutMs: commandTimeoutMs,
+                    stdout,
+                    stderr,
+                  }),
+                ).pipe(Effect.catch(poison));
+
+                if (stdout.exceeded || stderr.exceeded)
+                  return yield* poison(new Error('Sandbox command output exceeds outputBytes.'));
+
+                return {
+                  stdout: stdout.buffer().toString('utf8'),
+                  stderr: stderr.buffer().toString('utf8'),
+                  exitCode: result.exitCode,
+                };
+              }),
+            ),
+          readFile: (path) =>
+            lifecycle.track((admitted) =>
+              Effect.gen(function* () {
+                const contents = yield* readRemoteFile(
+                  sdk,
+                  resolveRemotePath(normalizeWorkspacePath(path)),
+                  cap,
+                  operationSignal(admitted),
+                );
+
+                if (contents === null)
+                  return yield* Effect.fail(new Error(`Sandbox file does not exist: ${path}`));
+
+                return contents.toString('utf8');
+              }),
+            ),
+          writeFile: (path, content) =>
+            lifecycle.track((admitted) =>
+              Effect.gen(function* () {
+                if (Buffer.byteLength(content) > cap)
+                  return yield* Effect.fail(new Error('Sandbox file exceeds outputBytes.'));
+                yield* foreign((foreignSignal) =>
+                  sdk.writeFiles(
+                    [{ path: resolveRemotePath(normalizeWorkspacePath(path)), content }],
+                    { signal: AbortSignal.any([foreignSignal, operationSignal(admitted)]) },
+                  ),
+                );
+              }),
+            ),
+          beginFinalization: lifecycle.beginFinalization,
+          dispose: () =>
+            Effect.uninterruptible(
+              disposeLock.withPermits(1)(
+                Effect.gen(function* () {
+                  if (disposal) return yield* disposal;
+                  disposal = yield* Effect.exit(
+                    Effect.gen(function* () {
+                      // Close admission immediately; stop concurrently so ignored local abort cannot keep a VM alive.
+                      const releases = yield* Effect.all(
+                        [
+                          Effect.exit(
+                            Effect.timeoutOption(
+                              Effect.interruptible(
+                                lifecycle.close(new Error('Case environment disposed.')),
+                              ),
+                              cleanupTimeoutMs,
+                            ),
+                          ),
+                          Effect.exit(stop()),
+                        ],
+                        { concurrency: 'unbounded' },
+                      );
+
+                      const failed = releases.filter((exit): exit is Exit.Failure<unknown, Error> =>
+                        Exit.isFailure<unknown, Error>(exit),
+                      );
+
+                      const drained = releases[0];
+                      const errors: unknown[] = failed.map((exit) => exit.cause);
+
+                      if (Exit.isSuccess(drained) && Option.isNone(drained.value))
+                        errors.push(
+                          new Error('Sandbox operations did not drain before cleanup timed out.'),
+                        );
+
+                      if (errors.length > 0)
+                        return yield* Effect.fail(
+                          new SandboxCleanupError(errors, 'Sandbox cleanup failed.'),
+                        );
+                    }),
+                  );
+
+                  return yield* disposal;
+                }),
               ),
-              timeoutMs: commandTimeoutMs,
-              stdout,
-              stderr,
-            })
-            .catch((cause: unknown) => poison(cause));
+            ),
+        };
 
-          if (stdout.exceeded || stderr.exceeded) {
-            throw new Error('Sandbox command output exceeds outputBytes.');
-          }
-
-          return {
-            stdout: stdout.buffer().toString('utf8'),
-            stderr: stderr.buffer().toString('utf8'),
-            exitCode: result.exitCode,
-          };
-        }),
-      readFile: (path) =>
-        lifecycle.track(async (admitted) => {
-          const contents = await readRemoteFile(
-            sdk,
-            resolveRemotePath(normalizeWorkspacePath(path)),
-            cap,
-            operationSignal(admitted),
-          );
-
-          if (contents === null) throw new Error(`Sandbox file does not exist: ${path}`);
-
-          return contents.toString('utf8');
-        }),
-      writeFile: (path, content) =>
-        lifecycle.track(async (admitted) => {
-          if (Buffer.byteLength(content) > cap) {
-            throw new Error('Sandbox file exceeds outputBytes.');
-          }
-
-          await sdk.writeFiles(
-            [{ path: resolveRemotePath(normalizeWorkspacePath(path)), content }],
-            { signal: operationSignal(admitted) },
-          );
-        }),
-      beginFinalization: lifecycle.beginFinalization,
-      dispose: () => {
-        disposal ??= dispose();
-
-        return disposal;
-      },
-    };
-  };
+        return environment;
+      }),
+    );
+  });
 };
 
 export { vercelSandboxIsolation, type VercelIsolationOptions };

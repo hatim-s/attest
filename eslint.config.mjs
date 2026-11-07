@@ -51,6 +51,31 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/runtime/src/eval/_tests_/portability.check.mjs',
+    operations: ['Effect.runPromise'],
+    owner: 'Node and Bun native environment portability fixture root',
+  },
+  {
+    file: 'packages/executor/src/isolation/_tests_/operation.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'Native environment lifetime invariant fixture root',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/metric-sandbox.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'S5 native environment fixture execution',
+  },
+  {
+    file: 'packages/runtime/src/eval/_tests_/hooks.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'S5 native environment fixture execution',
+  },
+  {
+    file: 'packages/executor/src/_tests_/support/run-effect.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S5 native environment fixture execution',
+  },
+  {
     file: 'packages/executor/src/adapters/websocket/_tests_/websocket-connection.test.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'WebSocket socket invariant test root',
@@ -320,6 +345,30 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
+    file: 'packages/runtime/src/metrics/environment-transport.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise environment caller until S6',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S6',
+        owner: 'S6 native caller migration',
+      },
+    ],
+  },
+  {
+    file: 'packages/runtime/src/eval/hooks.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise environment caller until S7a',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7a',
+        owner: 'S7a native caller migration',
+      },
+    ],
+  },
+  {
     file: 'packages/local/src/commands/agent/adapter/process-session.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'local Promise eval retains native process session scope',
@@ -365,18 +414,6 @@ const effectMigrationBridges = [
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S7b',
         owner: 'local agent dispatch awaits native executor evidence',
-      },
-    ],
-  },
-  {
-    file: 'packages/executor/src/adapters/sandbox/vercel-sandbox-adapter.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'S5 Promise sandbox lifecycle invokes native retry and sandbox attempt',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S5',
-        owner: 'S5 sandbox lifecycle migration',
       },
     ],
   },
@@ -561,18 +598,6 @@ const effectMigrationBridges = [
       {
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S7b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/eval/metric-sandbox.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S5',
         owner: 'declared migration owner',
       },
     ],

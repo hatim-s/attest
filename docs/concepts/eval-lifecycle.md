@@ -245,6 +245,7 @@ hooks with the same timeout and environment rules as existing case hooks. Projec
 execute on the host in the worker directory.
 
 ```ts
+import * as Effect from 'effect/Effect';
 import { justBashIsolation } from '@attest/executor';
 import { EvalCaseStageError, executeResolvedEvalPlan, type EvalCaseRunner } from '@attest/runtime';
 
@@ -273,10 +274,10 @@ await executeResolvedEvalPlan(plan, runner, persistence, {
   hooks: [
     {
       before_case: async ({ environment }) => {
-        await environment!.exec('mkdir -p output');
+        await Effect.runPromise(environment!.exec('mkdir -p output'));
       },
       after_agent: async ({ environment }) => {
-        const check = await environment!.exec('test -f output/result.txt');
+        const check = await Effect.runPromise(environment!.exec('test -f output/result.txt'));
         if (check.exitCode !== 0) throw new Error('Agent did not write output/result.txt');
       },
     },

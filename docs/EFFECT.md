@@ -510,3 +510,30 @@ Local's `process-session.ts` is the temporary S7b forward boundary. Its Promise 
 retains a native Scope through all invocations and disposes it only on close. The three S4c
 execution bridges are removed. The integrated WebSocket and callback/stream owners remain
 native. Shared Promise helpers with later-slice consumers remain outside S4c.
+
+## S5 native case environments
+
+`CaseEnvironmentFactory` now returns `Effect<CaseEnvironment, Error>` and each
+`CaseEnvironment` operation returns an Effect. `metricSandboxIsolation` returns an
+Effect with an optional environment. `invokeVercelSandboxAgent` and sandbox file
+transfers also return Effects. These are deliberate TypeScript API breaks; execute
+operations at the owning root. Wire formats, public invocation codes, and hashes
+are unchanged. Factories transfer an explicit lifetime to the caller, which must
+run `beginFinalization`, final hooks, and `dispose` in that order.
+
+Operations admit work when their Effect runs. Finalization closes run admission,
+aborts and drains admitted work, then opens a separate bounded final-hook phase.
+Native fiber cancellation becomes an operation signal and waits for the owned Exit;
+its Cause retains completed evidence. VM commands that reject poison the environment
+and stop it at most once. An unconfirmed stop or drain rejects disposal and forbids
+reuse. Late creation after cancellation is stopped before ownership can transfer.
+No deadline races an evidence-producing command and then redispatches it.
+
+Release failures retain the primary Cause through cleanup annotations. A successful
+operation followed by release failure yields `EnvironmentCleanupError` with the
+completed value. Sandbox invocation retains completed attempts and raw evidence
+when projecting artifact or VM-stop failure into invocation diagnostics. The
+original command error now remains primary when both command and stop fail, with
+the stop Cause attached internally; older callers expecting an AggregateError for
+that combination must consume the original Error instead. Runtime Promise callers
+use declared S7a forward bridges; the metric environment transport uses S6 bridges.

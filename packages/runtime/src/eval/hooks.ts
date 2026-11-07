@@ -1,3 +1,5 @@
+import { valueFromExit } from '../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import type { EvalRun } from '@attest/contracts';
 import { EvalCaseStageError, isCleanupUncertain } from './errors.js';
 import type {
@@ -115,14 +117,20 @@ const withEvalHooks = <Payload>(
     worker: EvalCaseExecutionContext,
   ): Promise<CaseAttempt> => {
     try {
-      context.environment = await isolation?.({
-        runId,
-        caseId: context.resolvedCase.case_id,
-        testId: context.resolvedCase.test_id,
-        configuredIndex: context.resolvedCase.configured_index,
-        workerIndex: worker.workerIndex,
-        signal: context.signal,
-      });
+      context.environment =
+        isolation === undefined
+          ? undefined
+          : // EFFECT-BRIDGE(S7a): removed with the owning Promise caller.
+            await Effect.runPromiseExit(
+              isolation({
+                runId,
+                caseId: context.resolvedCase.case_id,
+                testId: context.resolvedCase.test_id,
+                configuredIndex: context.resolvedCase.configured_index,
+                workerIndex: worker.workerIndex,
+                signal: context.signal,
+              }),
+            ).then(valueFromExit);
       await dispatch('before_case', context);
 
       const result = await runner.executeCase(runId, context.resolvedCase, context.signal, {
@@ -157,7 +165,9 @@ const withEvalHooks = <Payload>(
     const failures: unknown[] = [];
 
     try {
-      await context.environment?.beginFinalization();
+      if (context.environment)
+        // EFFECT-BRIDGE(S7a): removed with the owning Promise caller.
+        await Effect.runPromiseExit(context.environment.beginFinalization()).then(valueFromExit);
     } catch (error: unknown) {
       latchUncertainCleanup(error);
       failures.push(error);
@@ -175,7 +185,9 @@ const withEvalHooks = <Payload>(
     }
 
     try {
-      await context.environment?.dispose();
+      if (context.environment)
+        // EFFECT-BRIDGE(S7a): removed with the owning Promise caller.
+        await Effect.runPromiseExit(context.environment.dispose()).then(valueFromExit);
     } catch (error: unknown) {
       // A failed disposal always leaves the environment's resources unconfirmed.
       cleanupFailures.push(error);
