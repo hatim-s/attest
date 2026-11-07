@@ -55,6 +55,11 @@
   padding: 0;
   color: var(--ink);
 }
+/* Responsive dismissal restores focus here even after a pointer opened the drawer. */
+.attest-sidebar .attest-wordmark:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 .attest-tree {
   padding: 20px 12px 8px;
 }
