@@ -22,6 +22,7 @@ export {
 } from './adapters/http/index.js';
 
 export {
+  ProcessCleanupError,
   startBackgroundAgent,
   startJsonlBridgeAgent,
   type BackgroundAgentResource,

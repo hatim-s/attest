@@ -1,3 +1,4 @@
+import { openProcessSession } from './support/retained-process.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve, join } from 'node:path';
@@ -7,7 +8,14 @@ import { tmpdir } from 'node:os';
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
-import { startJsonlBridgeAgent, type JsonlBridgeAgentResource } from '../jsonl-bridge-adapter.js';
+import {
+  startJsonlBridgeAgent as nativeStart,
+  type JsonlBridgeAgentResource,
+} from '../jsonl-bridge-adapter.js';
+
+/** Retains the native process scope for each existing lifecycle fixture. */
+const startJsonlBridgeAgent = (...args: Parameters<typeof nativeStart>) =>
+  openProcessSession(nativeStart(...args));
 
 const fixture = resolve(import.meta.dirname, '../../../_tests_/fixtures/jsonl-bridge-agent.cjs');
 
@@ -235,7 +243,9 @@ it('handles automatic cleanup rejection before close observes it', async () => {
 
   const program = `
     import assert from 'node:assert/strict';
-    import { startJsonlBridgeAgent } from ${JSON.stringify(moduleUrl)};
+    import { startJsonlBridgeAgent as nativeStart } from ${JSON.stringify(moduleUrl)};
+    import { openProcessSession } from ${JSON.stringify(new URL('./support/retained-process.ts', import.meta.url).href)};
+    const startJsonlBridgeAgent = (...args) => openProcessSession(nativeStart(...args));
     process.env.PATH = ${JSON.stringify(directory)};
     const configured = ${JSON.stringify(configured)};
     configured.transport.argv = [process.execPath, '-e', 'setTimeout(() => process.exit(0), 100)'];

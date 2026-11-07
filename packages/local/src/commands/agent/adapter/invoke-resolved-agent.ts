@@ -1,3 +1,4 @@
+import { openProcessSession } from './process-session.js';
 import { startWebSocketSession } from './websocket-session.js';
 import type { CaseExecution } from '@attest/runtime';
 import * as Effect from 'effect/Effect';
@@ -8,6 +9,7 @@ import type { AgentRequest, AgentResource } from '@attest/contracts';
 import {
   AgentInvocationError,
   CliCleanupError,
+  ProcessCleanupError,
   CallbackCleanupError,
   StreamCleanupError,
   WebSocketCleanupError,
@@ -70,27 +72,31 @@ const startAgentRuntime = async (
       return {
         kind: 'session',
         resolved,
-        session: await startBackgroundAgent(resolved.agent, {
-          cwd: resolved.cwd,
-          env: resolved.env,
-          invokeHeaders: resolved.invokeHeaders,
-          invokeQuery: resolved.invokeQuery,
-          secrets: resolved.secrets,
-          shutdownHeaders: resolved.shutdownHeaders,
-          shutdownQuery: resolved.shutdownQuery,
-          signal,
-        }),
+        session: await openProcessSession(
+          startBackgroundAgent(resolved.agent, {
+            cwd: resolved.cwd,
+            env: resolved.env,
+            invokeHeaders: resolved.invokeHeaders,
+            invokeQuery: resolved.invokeQuery,
+            secrets: resolved.secrets,
+            shutdownHeaders: resolved.shutdownHeaders,
+            shutdownQuery: resolved.shutdownQuery,
+            signal,
+          }),
+        ),
       };
     case 'jsonl_bridge':
       return {
         kind: 'session',
         resolved,
-        session: await startJsonlBridgeAgent(resolved.agent, {
-          cwd: resolved.cwd,
-          env: resolved.env,
-          secrets: resolved.secrets,
-          signal,
-        }),
+        session: await openProcessSession(
+          startJsonlBridgeAgent(resolved.agent, {
+            cwd: resolved.cwd,
+            env: resolved.env,
+            secrets: resolved.secrets,
+            signal,
+          }),
+        ),
       };
     case 'websocket':
       return {
@@ -245,6 +251,27 @@ const invokeResolvedAgent = async (
 
 /** Projects operational startup or completed-attempt cleanup failures into recordable evidence. */
 const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
+  if (cause instanceof ProcessCleanupError && cause.completed !== undefined) {
+    const completed = cause.completed;
+
+    const error = new AgentInvocationError(
+      completed.status === 'invocation_error' ? completed.error.code : cause.code,
+      completed.status === 'invocation_error' ? completed.error.message : cause.message,
+      { cause, applicationStarted: true },
+    );
+
+    const failed = {
+      status: 'invocation_error' as const,
+      error,
+      diagnostics: completed.diagnostics,
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...failed, attempts: [...completed.attempts.slice(0, -1), failed] };
+  }
+
   if (
     cause instanceof CallbackCleanupError ||
     cause instanceof StreamCleanupError ||

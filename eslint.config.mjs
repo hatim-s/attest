@@ -71,6 +71,16 @@ const effectRoots = [
     owner: 'native stream framing and lifecycle invariant test root',
   },
   {
+    file: 'packages/executor/src/adapters/process/_tests_/native-lifecycle.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'native process interruption, cleanup and defect invariants',
+  },
+  {
+    file: 'packages/executor/src/adapters/process/_tests_/support/retained-process.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'process fixture scope and invocation execution',
+  },
+  {
     file: 'packages/executor/src/_tests_/portability.check.mjs',
     operations: ['Effect.runPromise'],
     owner: 'Node and Bun native executor portability process roots',
@@ -310,6 +320,18 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
+    file: 'packages/local/src/commands/agent/adapter/process-session.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'local Promise eval retains native process session scope',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'local eval process session lifetime',
+      },
+    ],
+  },
+  {
     file: 'packages/local/src/commands/agent/adapter/websocket-session.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'local WebSocket run lifetime',
@@ -333,18 +355,7 @@ const effectMigrationBridges = [
       },
     ],
   },
-  {
-    file: 'packages/executor/src/adapters/process/background-adapter.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'background process lifecycle invokes native mapped HTTP',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S4c',
-        owner: 'background process lifecycle invokes native mapped HTTP',
-      },
-    ],
-  },
+
   {
     file: 'packages/local/src/commands/agent/adapter/invoke-resolved-agent.ts',
     operations: ['Effect.runPromiseExit'],
@@ -366,18 +377,6 @@ const effectMigrationBridges = [
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S5',
         owner: 'S5 sandbox lifecycle migration',
-      },
-    ],
-  },
-  {
-    file: 'packages/executor/src/adapters/process/managed-child.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'managed process snapshot and termination',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S4c',
-        owner: 'managed process snapshot and termination',
       },
     ],
   },

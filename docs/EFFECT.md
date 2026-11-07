@@ -479,3 +479,34 @@ flowchart TD
     Backoff --> Open
     Retry -->|No| Stop
 ```
+
+## S4c managed process sessions
+
+`startBackgroundAgent` and `startJsonlBridgeAgent` now return native Effects requiring
+`Scope.Scope`. Their `invoke` and `close` operations return Effects. This is a deliberate
+TypeScript API break. Retain the scope for the entire run and explicitly yield `close()`
+to observe cleanup confirmation. The scope finalizer captures the same memoized cleanup
+Exit; `cleanupExits` remains owned by the session and repeated close observes the original
+outcome without another process sweep.
+
+JSONL framing runs in a scoped worker. Request admission and each frame queue are bounded
+at 256. Overflow refuses new work or ends the session with `output_cap_exceeded`; it never
+replays a possibly dispatched request. Cancellation and deadlines first request in-band
+cancellation. Interruption joins acknowledgement or fallback before releasing the observer.
+Fallback stops admission, interrupts protocol workers and verifies the owned process tree.
+The original automatic-close rejection is retained as a Deferred Exit, with no detached
+rejected Promise. Cleanup errors retain the last completed invocation, including its earlier
+attempts, in `ProcessCleanupError.completed`. Background close stops admission, requests
+cancellation of active HTTP observations and joins them before shutdown and process cleanup.
+
+Readiness races only observations. Readiness socket/listener releases and response body
+cancellation retain their full Exits; unconfirmed readiness body cleanup stops startup.
+Authored background shutdown remains best effort, with its outcome retained separately from
+mandatory process cleanup. ManagedChild captures snapshot, tree sweep and direct-child close
+outcomes. A snapshot failure cannot skip the sweep, and an unconfirmed close forbids reuse.
+Primary startup failures, defects and interruption retain their Cause with cleanup annotation.
+
+Local's `process-session.ts` is the temporary S7b forward boundary. Its Promise run owner
+retains a native Scope through all invocations and disposes it only on close. The three S4c
+execution bridges are removed. The integrated WebSocket and callback/stream owners remain
+native. Shared Promise helpers with later-slice consumers remain outside S4c.

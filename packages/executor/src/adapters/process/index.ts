@@ -9,3 +9,5 @@ export {
   type JsonlBridgeAgentResource,
   type JsonlBridgeSession,
 } from './jsonl-bridge-adapter.js';
+
+export { ProcessCleanupError } from './process-cleanup.js';

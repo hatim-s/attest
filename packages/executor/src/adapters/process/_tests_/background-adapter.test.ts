@@ -1,3 +1,4 @@
+import { openProcessSession } from './support/retained-process.js';
 import { AgentInvocationError } from '../../../errors.js';
 import { createServer as createNetServer } from 'node:net';
 import { resolve, join } from 'node:path';
@@ -15,7 +16,14 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 
 import { startLoopbackServer } from '../../../_tests_/support/loopback-server.js';
-import { startBackgroundAgent, type BackgroundAgentResource } from '../background-adapter.js';
+import {
+  startBackgroundAgent as nativeStart,
+  type BackgroundAgentResource,
+} from '../background-adapter.js';
+
+/** Retains the native process scope for each existing lifecycle fixture. */
+const startBackgroundAgent = (...args: Parameters<typeof nativeStart>) =>
+  openProcessSession(nativeStart(...args));
 
 const fixture = resolve(import.meta.dirname, '../../../_tests_/fixtures/background-agent.cjs');
 

@@ -1,5 +1,6 @@
 import {
   CliCleanupError,
+  ProcessCleanupError,
   CallbackCleanupError,
   StreamCleanupError,
   WebSocketCleanupError,
@@ -395,3 +396,38 @@ it('preserves a failed WebSocket primary and its warnings during cleanup project
   expect(projected.error).toBe(cleanup);
   expect(projected.error.message).toContain('Caller cancelled.');
 });
+
+it.each(['ok', 'invocation_error'] as const)(
+  'retains completed process evidence and earlier attempts after %s cleanup failure',
+  (status) => {
+    const earlier: InvocationAttempt = {
+      status: 'invocation_error',
+      error: new AgentInvocationError('network', 'Earlier attempt'),
+      diagnostics: { httpStatus: 503 },
+      durationMs: 1,
+      warnings: [],
+    };
+
+    const evidence = {
+      diagnostics: { exitCode: 0 },
+      durationMs: 12,
+      warnings: [],
+      rawExcerpt: { text: 'completed bytes', truncated: false, sha256: 'a'.repeat(64) },
+    };
+
+    const terminal: InvocationAttempt =
+      status === 'ok'
+        ? { ...evidence, status, raw: { output: 'completed' } }
+        : { ...evidence, status, error: new AgentInvocationError('timeout', 'Primary timeout') };
+
+    const completed = { ...terminal, attempts: [earlier, terminal] };
+    const projected = startupFailure(new ProcessCleanupError([], completed), 100);
+    expect(projected).toMatchObject({
+      status: 'invocation_error',
+      error: { code: status === 'ok' ? 'network' : 'timeout', applicationStarted: true },
+      ...evidence,
+    });
+    expect(projected.attempts[0]).toBe(earlier);
+    expect(projected.attempts[1]).toMatchObject({ status: 'invocation_error', ...evidence });
+  },
+);
