@@ -545,10 +545,7 @@ const effectRoots = [
   },
 ];
 
-// Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
-const effectMigrationBridges = [];
-
-const effectExecutionBlock = ({ file, operations, removalSlice, bridges }) => {
+const effectExecutionBlock = ({ file, operations }) => {
   const dataOnly =
     /^(packages\/core\/src\/(records|analytics)\/|packages\/api\/src\/contract\/)/.test(file);
 
@@ -560,16 +557,12 @@ const effectExecutionBlock = ({ file, operations, removalSlice, bridges }) => {
 
   const options = { operations, dataOnly, browser };
 
-  if (removalSlice) options.removalSlice = removalSlice;
-
-  if (bridges) options.bridges = bridges;
-
   return { files: [file], rules: { 'anti-slop/effect-boundaries': ['error', options] } };
 };
 
-const effectExecutionBlocks = [...effectRoots, ...effectMigrationBridges].map(effectExecutionBlock);
+const effectExecutionBlocks = effectRoots.map(effectExecutionBlock);
 
-export { effectRoots, effectMigrationBridges, effectExecutionBlock };
+export { effectRoots, effectExecutionBlock };
 
 export default tseslint.config(
   ...antiSlopConfig,
@@ -630,12 +623,7 @@ export default tseslint.config(
     languageOptions: { parserOptions: { project: './conformance/tsconfig.json' } },
   },
   {
-    files: [
-      'packages/contracts/src/schema/parse.ts',
-      'packages/contracts/src/project/shared.ts',
-      // Typecheck-only upstream API probe, removed with its workspace in S10.
-      'tools/effect-probe/src/probe.ts',
-    ],
+    files: ['packages/contracts/src/schema/parse.ts', 'packages/contracts/src/project/shared.ts'],
     rules: { 'anti-slop/schema-decoding': 'off' },
   },
   {

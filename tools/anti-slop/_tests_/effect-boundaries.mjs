@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { ESLint } from 'eslint';
 import { RuleTester } from './runtime.mjs';
 import { coreModules, effectBoundariesRule } from '../rules/effect-boundaries.mjs';
-import { effectRoots, effectMigrationBridges, effectExecutionBlock } from '../../../eslint.config.mjs';
+import { effectRoots, effectExecutionBlock } from '../../../eslint.config.mjs';
 
 const tester = new RuleTester();
 const error = { messageId: 'boundary' };
@@ -18,20 +18,16 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
       options: [{ dataOnly: true, schemaConstructionModules: ['SchemaGetter'] }],
     },
     {
-      code: "import { Stream } from 'effect';\n// EFFECT-BRIDGE(S9a)\nStream.toReadableStream(stream);",
-      options: [{ operations: ['Stream.toReadableStream'], removalSlice: 'S9a' }],
+      code: "import { Stream } from 'effect';\nStream.toReadableStream(stream);",
+      options: [{ operations: ['Stream.toReadableStream'] }],
     },
     {
       code: "import { FiberSet } from 'effect'; FiberSet.runtimePromise(set)();",
       options: [{ operations: ['FiberSet.runtimePromise'] }],
     },
     {
-      code: "import { Effect } from 'effect';\n/* EFFECT-BRIDGE(S2) */\nEffect.runPromise(job);",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-    },
-    {
-      code: "import { runPromise as execute } from 'effect/Effect';\n// EFFECT-BRIDGE(S2)\nexecute(job);",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
+      code: "import { runPromise as execute } from 'effect/Effect';\nexecute(job);",
+      options: [{ operations: ['Effect.runPromise'] }],
     },
     "import { Effect as E } from 'effect'; E.succeed(1);",
     "import { succeed } from 'effect/Effect'; succeed(1);",
@@ -40,10 +36,6 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
     {
       code: "import { Effect } from 'effect'; Effect.runPromise(job);",
       options: [{ operations: ['Effect.runPromise'] }],
-    },
-    {
-      code: "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2)\nEffect.runPromise(job);",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
     },
     "import { Effect } from 'effect'; function f(Effect) { Effect.runPromise(job); }",
   ],
@@ -63,17 +55,6 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
     { code: "require('@effect/platform-bun');", errors: [error] },
     { code: "import(modulePath);", errors: [error] },
     { code: "require(modulePath);", errors: [error] },
-    { code: '// EFFECT-BRIDGE(S2\nfoo();', errors: [error] },
-    {
-      code: "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2\nEffect.runPromise(job);",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-      errors: [error, error],
-    },
-    {
-      code: "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2) EFFECT-BRIDGE(S2\nEffect.runPromise(job);",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-      errors: [error],
-    },
     ...[
       ['Runtime', 'makeRunMain'],
       ...['FiberSet', 'FiberMap', 'FiberHandle'].flatMap((module) =>
@@ -91,16 +72,6 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
       code: `import { ${module} } from 'effect'; ${module}.${name}(job);`,
       errors: [error],
     })),
-    {
-      code: "import { Effect } from 'effect';\nexport const results = [\n  'EFFECT-BRIDGE(S2)',\n  Effect.runPromise(Effect.succeed(1)),\n];",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-      errors: [error],
-    },
-    {
-      code: "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2) EFFECT-BRIDGE(S3)\nexport const result = Effect.runPromise(Effect.succeed(1));",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-      errors: [error],
-    },
     ...['runPromise', 'runSync', 'runForkWith', 'runPromiseExitWith'].map((name) => ({
       code: `import { Effect as E } from 'effect'; const run = E.${name};`,
       errors: [error],
@@ -152,26 +123,15 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
     { code: "import('effect/Effect');", errors: [error] },
     { code: "const E = require('effect');", errors: [error] },
     { code: "export { runPromise } from 'effect/Effect';", errors: [error] },
-    { code: '// EFFECT-BRIDGE(S2)\nfoo();', errors: [error] },
-    {
-      code: "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2)\nEffect.runPromise(job);\n// EFFECT-BRIDGE(S2)\nfoo();",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-      errors: [error],
-    },
     {
       code: "import { Effect } from 'effect'; Effect.runPromise(job);",
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
-      errors: [error],
-    },
-    {
-      code: '// EFFECT-BRIDGE(S2)\nfoo();',
-      options: [{ operations: ['Effect.runPromise'], removalSlice: 'S2' }],
+      options: [{ operations: ['Effect.runSync'] }],
       errors: [error, error],
     },
   ],
 });
 
-// Synthetic entries exercise the production ledger mapper even when ledgers are empty.
+// Synthetic entries exercise root routing across browser and data-only entries.
 for (const [file, dataOnly, browser] of [
   ['packages/core/src/records/probe.ts', true, true],
   ['packages/core/src/analytics/probe.ts', true, true],
@@ -182,9 +142,9 @@ for (const [file, dataOnly, browser] of [
   ['packages/client/src/index.ts', false, true],
   ['packages/local/src/probe.ts', false, false],
 ]) {
-  const block = effectExecutionBlock({ file, operations: ['Effect.runPromise'], removalSlice: 'S2' });
+  const block = effectExecutionBlock({ file, operations: ['Effect.runPromise'] });
   assert.deepEqual(block.rules['anti-slop/effect-boundaries'][1], {
-    operations: ['Effect.runPromise'], dataOnly, browser, removalSlice: 'S2',
+    operations: ['Effect.runPromise'], dataOnly, browser,
   });
 }
 
@@ -210,7 +170,7 @@ const testConfig = await eslint.calculateConfigForFile('packages/local/src/_test
 assert.equal(testConfig.rules['anti-slop/effect-boundaries'][0], 2);
 assert.equal(testConfig.rules['anti-slop/effect-boundaries'][1]?.operations, undefined);
 const installed = readFileSync(
-  new URL('../../effect-probe/node_modules/effect/src/index.ts', import.meta.url),
+  new URL('../../../packages/local/node_modules/effect/src/index.ts', import.meta.url),
   'utf8',
 );
 assert.deepEqual(
@@ -218,20 +178,13 @@ assert.deepEqual(
   [...installed.matchAll(/export \* as (\w+) from/g)].map((match) => match[1]),
 );
 const files = new Set();
-for (const entry of [...effectRoots, ...effectMigrationBridges]) {
+for (const entry of effectRoots) {
   assert.match(entry.file, /^(packages|tools)\/.+\.[cm]?[jt]sx?$/);
   assert.doesNotMatch(entry.file, /[*?{}!]/);
   assert.ok(!files.has(entry.file), 'One ownership entry per file');
   files.add(entry.file);
   assert.ok(entry.owner?.trim());
   assert.ok(entry.operations.length);
-  if (effectMigrationBridges.includes(entry)) {
-    for (const bridge of entry.bridges) {
-      assert.match(bridge.removalSlice, /^S(?:[1-9]|10)[a-z]?(?:\.[0-9])?$/);
-      assert.ok(entry.operations.includes(bridge.operation));
-      assert.ok(bridge.owner.trim());
-    }
-  }
   readFileSync(entry.file, 'utf8');
   const results = await eslint.lintFiles(entry.file);
   assert.equal(
@@ -241,7 +194,7 @@ for (const entry of [...effectRoots, ...effectMigrationBridges]) {
     0,
   );
 }
-console.log('Effect import, execution, flat-config and bridge ledger checks passed.');
+console.log('Effect import, execution, flat-config and execution root checks passed.');
 
 // Construction imports are approved only at their concrete schema owners.
 for (const [file, modules] of [
@@ -255,24 +208,6 @@ for (const [file, modules] of [
   assert.equal(options.operations, undefined, file);
 }
 
-const mixedOptions = [{
-  operations: ['Effect.runPromiseExit'],
-  bridges: [
-    { operation: 'Effect.runPromiseExit', removalSlice: 'S2', owner: 'registry read' },
-    { operation: 'Effect.runPromiseExit', removalSlice: 'S8c', owner: 'registry write' },
-  ],
-}];
-const mixedCode = "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2)\nEffect.runPromiseExit(read);\n// EFFECT-BRIDGE(S8c)\nEffect.runPromiseExit(write);";
-tester.run('Mixed bridge owners retain per-execution enforcement', effectBoundariesRule, {
-  valid: [{ code: mixedCode, options: mixedOptions }],
-  invalid: [
-    { code: mixedCode.replace('// EFFECT-BRIDGE(S2)\n', ''), options: mixedOptions, errors: [error, error] },
-    { code: mixedCode.replace('EFFECT-BRIDGE(S2)', 'EFFECT-BRIDGE(S7b)'), options: mixedOptions, errors: [error, error, error] },
-    { code: mixedCode.replace('// EFFECT-BRIDGE(S8c)\nEffect.runPromiseExit(write);', ''), options: mixedOptions, errors: [error] },
-    { code: mixedCode.replace('// EFFECT-BRIDGE(S2)', '"EFFECT-BRIDGE(S2)";'), options: mixedOptions, errors: [error, error] },
-    { code: mixedCode.replace('EFFECT-BRIDGE(S2)', 'EFFECT-BRIDGE(S2'), options: mixedOptions, errors: [error, error, error] },
-  ],
-});
 const nativeRegistry = await eslint.calculateConfigForFile('packages/local/src/registry/project-registry.ts');
 assert.equal(nativeRegistry.rules['anti-slop/effect-boundaries'][1], undefined);
 const [registryExecution] = await eslint.lintText(

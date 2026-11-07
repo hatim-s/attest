@@ -93,7 +93,6 @@ for (const code of [
 for (const path of [
   filePath,
   'scripts/block-source-publish.mjs',
-  'tools/effect-probe/src/ownership-check.ts',
 ]) {
   for (const module of ['effect/Schema', 'effect/SchemaParser']) {
     for (const method of methods) {
