@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { DatasetImportMapping } from '@attest/contracts';
 import {
   prepareImportSource,
@@ -26,14 +28,17 @@ const runPreparedImport = (
   context: CommandContext,
   preparedImportSource: Uint8Array,
 ) =>
-  runTestMutationCommand({
-    preparedImportSource,
-    project: options.project,
-    readImportStdin: context.interaction.readImportStdin,
-    readStdin: context.interaction.readStdin,
-    request,
-    workingDirectory: context.workingDirectory,
-  });
+  // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    runTestMutationCommand({
+      preparedImportSource,
+      project: options.project,
+      readImportStdin: context.interaction.readImportStdin,
+      readStdin: context.interaction.readStdin,
+      request,
+      workingDirectory: context.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 /**
  * Applies a `--yes` dataset import bound to its own dry run: the commit must match the previewed
@@ -44,12 +49,15 @@ const runConfirmedDatasetImport = async (
   options: MutationCliOptions,
   context: CommandContext,
 ): Promise<void> => {
-  const prepared = await prepareImportSource(
-    request.source,
-    context.workingDirectory,
-    context.interaction.readImportStdin,
-    request.import.format,
-  );
+  const prepared = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    prepareImportSource(
+      request.source,
+      context.workingDirectory,
+      context.interaction.readImportStdin,
+      request.import.format,
+    ),
+  ).then((exit) => valueFromExit(exit));
 
   const preview = await runPreparedImport(
     validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
@@ -164,12 +172,15 @@ const runGuidedImport = async (
   options: MutationCliOptions,
   context: CommandContext,
 ): Promise<void> => {
-  const prepared = await prepareImportSource(
-    request.source,
-    context.workingDirectory,
-    context.interaction.readImportStdin,
-    request.import.format,
-  );
+  const prepared = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    prepareImportSource(
+      request.source,
+      context.workingDirectory,
+      context.interaction.readImportStdin,
+      request.import.format,
+    ),
+  ).then((exit) => valueFromExit(exit));
 
   const needsMappings = prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0;
 

@@ -18,19 +18,21 @@ const noStdin = (): Promise<string> => Promise.reject(new Error('stdin must not 
 const importAgent = (
   root: string,
   request: Parameters<typeof runAgentImportCommand>[0]['request'],
-): ReturnType<typeof runAgentImportCommand> =>
-  runAgentImportCommand({
-    interactive: false,
-    project: root,
-    readStdin: noStdin,
-    request,
-    workingDirectory: root,
-  });
+): Promise<Effect.Success<ReturnType<typeof runAgentImportCommand>>> =>
+  Effect.runPromiseExit(
+    runAgentImportCommand({
+      interactive: false,
+      project: root,
+      readStdin: noStdin,
+      request,
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 const importCurl = (
   root: string,
   fields: Omit<CurlImportFields, 'responsePointer'> & { responsePointer?: string },
-): ReturnType<typeof runAgentImportCommand> =>
+): Promise<Effect.Success<ReturnType<typeof runAgentImportCommand>>> =>
   importAgent(root, createCurlImportRequest({ responsePointer: '', ...fields }));
 
 const importJson = (root: string, source: string, as: string) =>

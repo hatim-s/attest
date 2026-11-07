@@ -32,13 +32,15 @@ const createProject = async (): Promise<string> => {
 const schema = COMMAND_REQUEST_SCHEMA_ID;
 
 const mutate = (root: string, request: MetricAuthoringRequest, stdin = '') =>
-  runMetricMutationCommand({
-    interactive: false,
-    project: root,
-    readStdin: () => Promise.resolve(stdin),
-    request,
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runMetricMutationCommand({
+      interactive: false,
+      project: root,
+      readStdin: () => Promise.resolve(stdin),
+      request,
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 /** Resolves to the rejection reason, or undefined when the mutation succeeds. */
 const rejection = async <T>(attempt: Promise<T>): Promise<Error | undefined> => {
@@ -203,14 +205,16 @@ describe('runMetricMutationCommand', () => {
 
     const errors = [
       await rejection(
-        createMetricResource({
-          metricId: 'flag-secret',
-          preset: 'http',
-          url: 'https://metric.example/evaluate',
-          bodyJson: JSON.stringify({ accessToken: secrets[0] }),
-          readStdin: () => Promise.resolve(''),
-          workingDirectory: root,
-        }),
+        Effect.runPromiseExit(
+          createMetricResource({
+            metricId: 'flag-secret',
+            preset: 'http',
+            url: 'https://metric.example/evaluate',
+            bodyJson: JSON.stringify({ accessToken: secrets[0] }),
+            readStdin: () => Promise.resolve(''),
+            workingDirectory: root,
+          }),
+        ).then((exit) => valueFromExit(exit)),
       ),
       await rejection(
         mutate(
@@ -248,14 +252,16 @@ describe('runMetricMutationCommand', () => {
   it('builds executable and HTTP metrics with secret references from flag fields', async () => {
     const fields = { readStdin: () => Promise.resolve(''), workingDirectory: tmpdir() };
 
-    const exec = await createMetricResource({
-      ...fields,
-      metricId: 'exec',
-      preset: 'command',
-      argvJson: JSON.stringify(['metric']),
-      env: ['METRIC_SECRET=ATTEST_METRIC_SOURCE_SECRET'],
-      timeout: '5s',
-    });
+    const exec = await Effect.runPromiseExit(
+      createMetricResource({
+        ...fields,
+        metricId: 'exec',
+        preset: 'command',
+        argvJson: JSON.stringify(['metric']),
+        env: ['METRIC_SECRET=ATTEST_METRIC_SOURCE_SECRET'],
+        timeout: '5s',
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     expect(exec.definition).toEqual({
       kind: 'exec',
@@ -264,15 +270,17 @@ describe('runMetricMutationCommand', () => {
       timeout_ms: 5_000,
     });
 
-    const http = await createMetricResource({
-      ...fields,
-      metricId: 'http',
-      preset: 'http',
-      url: 'https://metric.example/evaluate',
-      headerEnv: ['Authorization=ATTEST_METRIC_SOURCE_SECRET'],
-      scorePointer: '/verdict/score',
-      passPointer: '/verdict/pass',
-    });
+    const http = await Effect.runPromiseExit(
+      createMetricResource({
+        ...fields,
+        metricId: 'http',
+        preset: 'http',
+        url: 'https://metric.example/evaluate',
+        headerEnv: ['Authorization=ATTEST_METRIC_SOURCE_SECRET'],
+        scorePointer: '/verdict/score',
+        passPointer: '/verdict/pass',
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     expect(http.definition).toMatchObject({
       kind: 'http',

@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import {
   createCurlImportRequest,
@@ -92,15 +94,18 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
         request: Parameters<typeof runAgentImportCommand>[0]['request'],
         sourceText?: string,
       ): Promise<void> => {
-        const result = await runAgentImportCommand({
-          interactive,
-          project: options.project,
-          prompt: context.interaction.prompt,
-          readStdin: context.interaction.readStdin,
-          request,
-          sourceText,
-          workingDirectory: context.workingDirectory,
-        });
+        const result = await // EFFECT-BRIDGE(S9b)
+        Effect.runPromiseExit(
+          runAgentImportCommand({
+            interactive,
+            project: options.project,
+            prompt: context.interaction.prompt,
+            readStdin: context.interaction.readStdin,
+            request,
+            sourceText,
+            workingDirectory: context.workingDirectory,
+          }),
+        ).then((exit) => valueFromExit(exit));
 
         context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
       };
@@ -144,11 +149,10 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
         return;
       }
 
-      const curlSource = await readCurlDocument(
-        importSource,
-        context.workingDirectory,
-        context.interaction.readStdin,
-      );
+      const curlSource = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        readCurlDocument(importSource, context.workingDirectory, context.interaction.readStdin),
+      ).then((exit) => valueFromExit(exit));
 
       let fields: CurlImportFields = await promptCurlImportFields(
         {

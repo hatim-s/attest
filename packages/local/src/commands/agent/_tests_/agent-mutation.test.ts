@@ -39,32 +39,36 @@ describe('agent mutation confirmation', () => {
         return 'yes';
       };
 
-    const add = runAgentAddCommand({
-      interactive: true,
-      project: root,
-      prompt: addWhilePrompting('- add agent previewed', 'racer'),
-      request: {
-        schema: COMMAND_REQUEST_SCHEMA_ID,
-        command: 'agent.add',
-        agent: agent('previewed'),
-      },
-      workingDirectory: root,
-    });
+    const add = Effect.runPromiseExit(
+      runAgentAddCommand({
+        interactive: true,
+        project: root,
+        prompt: addWhilePrompting('- add agent previewed', 'racer'),
+        request: {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'agent.add',
+          agent: agent('previewed'),
+        },
+        workingDirectory: root,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     await expect(add).rejects.toMatchObject(projectChanged);
 
-    const remove = runAgentRemoveCommand({
-      interactive: true,
-      project: root,
-      prompt: addWhilePrompting('- remove test refund', 'concurrent'),
-      request: {
-        schema: COMMAND_REQUEST_SCHEMA_ID,
-        command: 'agent.remove',
-        agent_id: 'support',
-        detach: true,
-      },
-      workingDirectory: root,
-    });
+    const remove = Effect.runPromiseExit(
+      runAgentRemoveCommand({
+        interactive: true,
+        project: root,
+        prompt: addWhilePrompting('- remove test refund', 'concurrent'),
+        request: {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'agent.remove',
+          agent_id: 'support',
+          detach: true,
+        },
+        workingDirectory: root,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     await expect(remove).rejects.toMatchObject(projectChanged);
 
@@ -87,13 +91,15 @@ describe('agent mutation confirmation', () => {
     candidate = { ...candidate, agents: [...candidate.agents, agent('stale')] };
     await addAgent(root, agent('racer'));
 
-    const commit = mutationResult({
-      candidate,
-      command: 'agent.add',
-      confirmation: { interactive: false, requireExplicit: false, yes: true },
-      loaded,
-      request: {},
-    });
+    const commit = Effect.runPromiseExit(
+      mutationResult({
+        candidate,
+        command: 'agent.add',
+        confirmation: { interactive: false, requireExplicit: false, yes: true },
+        loaded,
+        request: {},
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     await expect(commit).rejects.toMatchObject(projectChanged);
 

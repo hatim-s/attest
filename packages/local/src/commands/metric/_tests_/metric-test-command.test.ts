@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { renameSync, symlinkSync } from 'node:fs';
 import { access, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
@@ -61,13 +63,15 @@ const execMetric = (
 });
 
 const addMetric = (root: string, metric: MetricResource) =>
-  runMetricMutationCommand({
-    interactive: false,
-    project: root,
-    readStdin: () => Promise.reject(new Error('stdin must not be read')),
-    request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'metric.add', metric },
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runMetricMutationCommand({
+      interactive: false,
+      project: root,
+      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'metric.add', metric },
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 const testMetric = (root: string, metricId: string, document = fixture('Paris', true)) =>
   runMetricTestCommand({

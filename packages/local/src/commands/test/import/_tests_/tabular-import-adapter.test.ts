@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,12 +20,16 @@ const importFailure = async (options: {
   readImportStdin?: () => AsyncIterable<string | Uint8Array>;
   source: string;
 }): Promise<LocalError> => {
-  const error: unknown = await runTabularImportAdapter({
-    importOptions: options.importOptions ?? {},
-    readImportStdin: options.readImportStdin ?? noStdin,
-    source: options.source,
-    workingDirectory: tmpdir(),
-  }).catch((cause: unknown) => cause);
+  const error: unknown = await Effect.runPromiseExit(
+    runTabularImportAdapter({
+      importOptions: options.importOptions ?? {},
+      readImportStdin: options.readImportStdin ?? noStdin,
+      source: options.source,
+      workingDirectory: tmpdir(),
+    }),
+  )
+    .then((exit) => valueFromExit(exit))
+    .catch((cause: unknown) => cause);
 
   if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
 
@@ -115,7 +121,11 @@ describe('collectBoundedImportSource', () => {
       yield new Uint8Array([5]);
     };
 
-    await expect(collectBoundedImportSource(chunks(), 3)).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(collectBoundedImportSource(chunks(), 3)).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).rejects.toMatchObject({
       diagnostics: [{ code: 'import_size_limit' }],
     });
     expect(consumedPastLimit).toBe(false);

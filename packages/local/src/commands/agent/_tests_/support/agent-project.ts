@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,12 +21,14 @@ const createAgentProject = async (): Promise<string> => {
 
 /** Adds one agent without prompting, as a non-interactive `agent add --from-json` would. */
 const addAgent = async (root: string, agent: AgentResource): Promise<void> => {
-  await runAgentAddCommand({
-    interactive: false,
-    project: root,
-    request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'agent.add', agent },
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runAgentAddCommand({
+      interactive: false,
+      project: root,
+      request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'agent.add', agent },
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 };
 
 /** Reads every file below `root` as text, keyed by sorted relative path, for no-write checks. */

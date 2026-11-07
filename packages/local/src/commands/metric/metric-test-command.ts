@@ -40,11 +40,10 @@ const runMetricTestCommand = async (
 
   const metric = findResource('metric', loaded.metrics, options.metricId ?? '');
 
-  const fixture = await readMetricTestFixture(
-    options.fixture,
-    options.workingDirectory,
-    options.readStdin,
-  );
+  const fixture = await // EFFECT-BRIDGE(S8b)
+  Effect.runPromiseExit(
+    readMetricTestFixture(options.fixture, options.workingDirectory, options.readStdin),
+  ).then((exit) => valueFromExit(exit));
 
   if (metric.definition.kind === 'judge' || metric.definition.kind === 'http') {
     return {

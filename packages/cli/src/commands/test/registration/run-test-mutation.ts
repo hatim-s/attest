@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { runTestMutationCommand, type TestAuthoringCommand } from '@attest/local/test';
 
 import { outputFormat, type MutationCliOptions } from '../../shared/cli-options.js';
@@ -11,14 +13,17 @@ const runTestMutation = async (
   context: CommandContext,
   preparedImportSource?: Uint8Array,
 ): Promise<void> => {
-  const result = await runTestMutationCommand({
-    preparedImportSource,
-    project: options.project,
-    readImportStdin: context.interaction.readImportStdin,
-    readStdin: context.interaction.readStdin,
-    request,
-    workingDirectory: context.workingDirectory,
-  });
+  const result = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    runTestMutationCommand({
+      preparedImportSource,
+      project: options.project,
+      readImportStdin: context.interaction.readImportStdin,
+      readStdin: context.interaction.readStdin,
+      request,
+      workingDirectory: context.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   context.io.output(renderCommandResult(request.command, outputFormat(options), result));
 };

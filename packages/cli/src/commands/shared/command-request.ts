@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { readCommandRequest, validateCommandRequest } from '@attest/local/agent';
 import type { Command } from 'commander';
@@ -65,10 +67,13 @@ const readJsonRequest = async <TCommand extends CommandRequest['command']>({
 }: ReadRequestOptions<TCommand>): Promise<CommandRequestFor<TCommand>> => {
   assertNoRequestOverlap(options, authoredFieldPresence(leaf));
 
-  const request = await readCommandRequest(command, options.fromJson, {
-    readStdin: context.interaction.readStdin,
-    workingDirectory: context.workingDirectory,
-  });
+  const request = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    readCommandRequest(command, options.fromJson, {
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   if (options.fromJson === '-' && requestReadsStdin(request)) {
     throw new AttestCliError(

@@ -154,10 +154,13 @@ const runProjectInitCommand = async (
   const request =
     options.fromJson === undefined
       ? undefined
-      : await readCommandRequest('project.init', options.fromJson, {
-          readStdin: options.readStdin,
-          workingDirectory: options.workingDirectory,
-        });
+      : await // EFFECT-BRIDGE(S8b)
+        Effect.runPromiseExit(
+          readCommandRequest('project.init', options.fromJson, {
+            readStdin: options.readStdin,
+            workingDirectory: options.workingDirectory,
+          }),
+        ).then((exit) => valueFromExit(exit));
 
   const requestedDirectory =
     options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
@@ -250,12 +253,15 @@ const runProjectInitCommand = async (
     }
 
     await assertUninitialized(inspected.root);
-    await publishProjectManifest(inspected.root, manifest.contents);
+    await // EFFECT-BRIDGE(S8b)
+    Effect.runPromiseExit(publishProjectManifest(inspected.root, manifest.contents)).then((exit) =>
+      valueFromExit(exit),
+    );
     published = true;
 
-    // EFFECT-BRIDGE(S8b)
-    const loaded = await Effect.runPromiseExit(loadProject({ project: inspected.root })).then(
-      (exit) => valueFromExit(exit),
+    const loaded = await // EFFECT-BRIDGE(S8b)
+    Effect.runPromiseExit(loadProject({ project: inspected.root })).then((exit) =>
+      valueFromExit(exit),
     );
 
     if (loaded.projectHash !== prepared.projectHash) {
@@ -266,7 +272,10 @@ const runProjectInitCommand = async (
   } catch (error: unknown) {
     if (published) {
       try {
-        await rollbackPublishedManifest(inspected.root, manifest.contents);
+        await // EFFECT-BRIDGE(S8b)
+        Effect.runPromiseExit(rollbackPublishedManifest(inspected.root, manifest.contents)).then(
+          (exit) => valueFromExit(exit),
+        );
       } catch (rollbackError: unknown) {
         throw new LocalError(
           'project_recovery_required',

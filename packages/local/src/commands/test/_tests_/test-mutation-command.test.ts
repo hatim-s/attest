@@ -54,15 +54,17 @@ const writeSource = async (root: string, name: string, contents: string): Promis
 };
 
 const mutate = (root: string, request: TestAuthoringCommand) =>
-  runTestMutationCommand({
-    project: root,
-    readImportStdin: () => {
-      throw new Error('stdin must not be read');
-    },
-    readStdin: () => Promise.reject(new Error('stdin must not be read')),
-    request,
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runTestMutationCommand({
+      project: root,
+      readImportStdin: () => {
+        throw new Error('stdin must not be read');
+      },
+      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      request,
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 const addTest = (root: string, id: string) =>
   mutate(root, {
@@ -478,10 +480,14 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const secret = 'super-secret-auth-token';
     const requestPath = await writeSource(root, 'request.json', `{not-json:${secret}}`);
 
-    const error: unknown = await readCommandRequest('test.add', requestPath, {
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
-      workingDirectory: root,
-    }).catch((cause: unknown) => cause);
+    const error: unknown = await Effect.runPromiseExit(
+      readCommandRequest('test.add', requestPath, {
+        readStdin: () => Promise.reject(new Error('stdin must not be read')),
+        workingDirectory: root,
+      }),
+    )
+      .then((exit) => valueFromExit(exit))
+      .catch((cause: unknown) => cause);
 
     if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
     expect(error.code).toBe('cli_usage');

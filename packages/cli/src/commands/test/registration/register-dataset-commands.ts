@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '@attest/contracts';
 import { runTestDatasetRemovePreflight } from '@attest/local/test';
@@ -326,11 +328,14 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       });
 
       if (request.dry_run !== true) {
-        await runTestDatasetRemovePreflight({
-          datasetId: request.dataset_id,
-          project: options.project,
-          workingDirectory: context.workingDirectory,
-        });
+        await // EFFECT-BRIDGE(S9b)
+        Effect.runPromiseExit(
+          runTestDatasetRemovePreflight({
+            datasetId: request.dataset_id,
+            project: options.project,
+            workingDirectory: context.workingDirectory,
+          }),
+        ).then((exit) => valueFromExit(exit));
       }
 
       if (!(await confirmRemoval(request, `dataset ${request.dataset_id}`, options, context))) {

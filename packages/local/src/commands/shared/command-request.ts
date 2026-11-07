@@ -1,11 +1,9 @@
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../../internal/effect-exit.js';
 import {
   parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
   commandRequestSchema,
   type CommandRequest,
-  type JsonValue,
 } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
@@ -68,30 +66,35 @@ const validateCommandRequest = <TCommand extends CommandRequest['command']>(
  * Reads one `--from-json` document from a file or stdin without validating it, for callers that
  * inspect the document before choosing a schema.
  */
-const readRequestDocument = async (
+const readRequestDocument = Effect.fn('readRequestDocument')(function* (
   source: string,
   options: ReadRequestDocumentOptions,
-): Promise<JsonValue> => {
-  // EFFECT-BRIDGE(S8b)
-  const text = await Effect.runPromiseExit(
-    readSourceText(source, { ...options, path: '--from-json' }),
-  ).then((exit) => valueFromExit(exit));
+) {
+  try {
+    const text = yield* readSourceText(source, { ...options, path: '--from-json' });
 
-  return parseJsonText(text, { path: '--from-json', hint: options.hint });
-};
+    return parseJsonText(text, { path: '--from-json', hint: options.hint });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 /** Reads one `--from-json` request document from a file or stdin and validates it. */
-const readCommandRequest = async <TCommand extends CommandRequest['command']>(
-  command: TCommand,
-  source: string,
-  options: ReadCommandRequestOptions,
-): Promise<CommandRequestFor<TCommand>> => {
-  const value = await readRequestDocument(source, {
-    ...options,
-    hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
-  });
+const readCommandRequest = Effect.fn('readCommandRequest')(function* <
+  TCommand extends CommandRequest['command'],
+>(command: TCommand, source: string, options: ReadCommandRequestOptions) {
+  try {
+    const value = yield* readRequestDocument(source, {
+      ...options,
+      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
+    });
 
-  return parseCommandRequest(command, value, '--from-json');
-};
+    return parseCommandRequest(command, value, '--from-json');
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 export { readCommandRequest, readRequestDocument, validateCommandRequest };

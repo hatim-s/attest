@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { runAgentRemoveCommand, runAgentRenameCommand } from '@attest/local/agent';
 import type { Command } from 'commander';
@@ -55,13 +57,16 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
         }),
       });
 
-      const result = await runAgentRenameCommand({
-        interactive,
-        project: options.project,
-        prompt: context.interaction.prompt,
-        request,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runAgentRenameCommand({
+          interactive,
+          project: options.project,
+          prompt: context.interaction.prompt,
+          request,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('agent.rename', outputFormat(options), result));
     },
@@ -102,13 +107,16 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
         },
       });
 
-      const result = await runAgentRemoveCommand({
-        interactive,
-        project: options.project,
-        prompt: context.interaction.prompt,
-        request,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runAgentRemoveCommand({
+          interactive,
+          project: options.project,
+          prompt: context.interaction.prompt,
+          request,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('agent.remove', outputFormat(options), result));
     });

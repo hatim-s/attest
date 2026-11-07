@@ -75,8 +75,8 @@ const guidedTraceCapability = async (
   options: MetricAddOptions,
   context: CommandContext,
 ): Promise<string> => {
-  // EFFECT-BRIDGE(S8b)
-  const loaded = await Effect.runPromiseExit(
+  const loaded = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
     loadCommandProject({
       project: options.project,
       recover: options.dryRun !== true,

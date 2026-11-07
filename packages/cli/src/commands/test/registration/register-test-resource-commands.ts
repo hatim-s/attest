@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { TEST_RESOURCE_SCHEMA_ID } from '@attest/contracts';
 import { runTestListCommand, runTestShowCommand } from '@attest/local/test';
 import type { Command } from 'commander';
@@ -84,10 +86,13 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
 
   addCommonOptions(test.command('list').description('List tests.')).action(
     async (options: CommonCliOptions) => {
-      const result = await runTestListCommand({
-        project: options.project,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runTestListCommand({
+          project: options.project,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('test.list', outputFormat(options), result));
     },
@@ -105,11 +110,14 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
         },
       );
 
-      const result = await runTestShowCommand({
-        project: options.project,
-        testId: id,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runTestShowCommand({
+          project: options.project,
+          testId: id,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('test.show', outputFormat(options), result));
     });

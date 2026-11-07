@@ -1,3 +1,5 @@
+import { withCommandCleanup } from '../../shared/command-cleanup.js';
+import * as Effect from 'effect/Effect';
 import { createReadStream } from 'node:fs';
 import { extname, resolve } from 'node:path';
 
@@ -7,7 +9,6 @@ import {
   discoverCsvHeaders,
   importTabularCases,
   TabularImportError,
-  type TabularImportResult,
 } from '@attest/core';
 
 import { LocalError } from '../../../errors/index.js';
@@ -26,42 +27,86 @@ type ImportCommandAdapterOptions = {
  * Collects an import stream and stops reading as soon as it passes the byte limit, so an
  * oversized file or stdin pipe is never fully buffered.
  */
-const collectBoundedImportSource = async (
+const collectBoundedImportSource = Effect.fn('collectBoundedImportSource')(function* (
   chunks: AsyncIterable<string | Uint8Array>,
   maxBytes = DEFAULT_IMPORT_LIMITS.maxBytes,
-): Promise<Uint8Array> => {
+) {
   const collected: Uint8Array[] = [];
   let byteLength = 0;
 
-  for await (const chunk of chunks) {
-    const bytes = chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk);
-    byteLength += bytes.byteLength;
+  const iterator = chunks[Symbol.asyncIterator]();
 
-    if (byteLength > maxBytes) {
-      throw new TabularImportError('Import source validation failed.', [
-        {
-          code: 'import_size_limit',
-          destination_path: '',
-          hint: 'Split the source into smaller explicit imports.',
-          message: `Import source exceeds the ${maxBytes}-byte limit.`,
-          source_field: '<record>',
-        },
-      ]);
-    }
+  return yield* withCommandCleanup(
+    Effect.gen(function* () {
+      try {
+        for (;;) {
+          const next = yield* Effect.tryPromise({
+            try: () => iterator.next(),
+            catch: (cause) =>
+              new LocalError('cli_usage', 'Could not read the requested import source.', {
+                path: '<source>',
+                cause,
+              }),
+          });
 
-    collected.push(bytes);
-  }
+          if (next.done) break;
+          const chunk = next.value;
+          const bytes = chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk);
+          byteLength += bytes.byteLength;
 
-  const source = new Uint8Array(byteLength);
-  let offset = 0;
+          if (byteLength > maxBytes) {
+            throw new TabularImportError('Import source validation failed.', [
+              {
+                code: 'import_size_limit',
+                destination_path: '',
+                hint: 'Split the source into smaller explicit imports.',
+                message: `Import source exceeds the ${maxBytes}-byte limit.`,
+                source_field: '<record>',
+              },
+            ]);
+          }
 
-  for (const chunk of collected) {
-    source.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+          collected.push(bytes);
+        }
 
-  return source;
-};
+        const source = new Uint8Array(byteLength);
+        let offset = 0;
+
+        for (const chunk of collected) {
+          source.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+
+        return source;
+      } catch (error) {
+        if (error instanceof TabularImportError) return yield* Effect.fail(error);
+        throw error;
+      }
+    }),
+    [
+      Effect.tryPromise({
+        try: () => Promise.resolve(iterator.return?.()),
+        catch: (cause) =>
+          new LocalError('cli_usage', 'Could not read the requested import source.', {
+            path: '<source>',
+            cause,
+          }),
+      }).pipe(
+        Effect.interruptible,
+        Effect.timeoutOption('1 second'),
+        Effect.flatMap((result) =>
+          result._tag === 'None'
+            ? Effect.fail(
+                new LocalError('cli_usage', 'Import reader cleanup timed out.', {
+                  path: '<source>',
+                }),
+              )
+            : Effect.void,
+        ),
+      ),
+    ],
+  );
+});
 
 const inferImportFormat = (source: string, explicit?: ImportFormat): ImportFormat => {
   if (explicit !== undefined) return explicit;
@@ -87,25 +132,26 @@ const inferImportFormat = (source: string, explicit?: ImportFormat): ImportForma
 };
 
 /** Reads import bytes without retaining or reporting an absolute private source path. */
-const readImportSource = async (
+const readImportSource = Effect.fn('readImportSource')(function* (
   source: string,
   workingDirectory: string,
   readImportStdin: () => AsyncIterable<string | Uint8Array>,
-): Promise<Uint8Array> => {
-  try {
-    const chunks =
-      source === '-' ? readImportStdin() : createReadStream(resolve(workingDirectory, source));
+) {
+  const chunks =
+    source === '-' ? readImportStdin() : createReadStream(resolve(workingDirectory, source));
 
-    return await collectBoundedImportSource(chunks);
-  } catch (error: unknown) {
-    if (error instanceof TabularImportError) throw error;
-    throw new LocalError('cli_usage', 'Could not read the requested import source.', {
-      path: '<source>',
-      hint: 'Pass a readable UTF-8 CSV, JSON, or JSONL file, or `-` for stdin.',
-      cause: error,
-    });
-  }
-};
+  return yield* collectBoundedImportSource(chunks).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof TabularImportError
+        ? cause
+        : new LocalError('cli_usage', 'Could not read the requested import source.', {
+            path: '<source>',
+            hint: 'Pass a readable UTF-8 CSV, JSON, or JSONL file, or `-` for stdin.',
+            cause,
+          }),
+    ),
+  );
+});
 
 type PreparedImportSource = { csvHeaders: string[]; format: ImportFormat; source: Uint8Array };
 
@@ -128,59 +174,82 @@ const toCliImportError = (error: TabularImportError): LocalError => {
 };
 
 /** Reads one bounded source once so a guided preview and its confirmed write use identical bytes. */
-const prepareImportSource = async (
+const prepareImportSource = Effect.fn('prepareImportSource')(function* (
   source: string,
   workingDirectory: string,
   readImportStdin: () => AsyncIterable<string | Uint8Array>,
   explicitFormat?: ImportFormat,
-): Promise<PreparedImportSource> => {
+) {
   try {
-    const format = inferImportFormat(source, explicitFormat);
-    const boundedSource = await readImportSource(source, workingDirectory, readImportStdin);
+    try {
+      const format = inferImportFormat(source, explicitFormat);
 
-    return {
-      csvHeaders: format === 'csv' ? discoverCsvHeaders(boundedSource) : [],
-      format,
-      source: boundedSource,
-    };
-  } catch (error: unknown) {
-    if (error instanceof TabularImportError) throw toCliImportError(error);
+      const boundedSource = yield* readImportSource(source, workingDirectory, readImportStdin).pipe(
+        Effect.mapError((error) =>
+          error instanceof TabularImportError ? toCliImportError(error) : error,
+        ),
+      );
+
+      return {
+        csvHeaders: format === 'csv' ? discoverCsvHeaders(boundedSource) : [],
+        format,
+        source: boundedSource,
+      } satisfies PreparedImportSource;
+    } catch (error: unknown) {
+      if (error instanceof TabularImportError) throw toCliImportError(error);
+      throw error;
+    }
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
     throw error;
   }
-};
+});
 
 /** Adapts a CLI request to the reusable all-in-memory import engine. */
-const runTabularImportAdapter = async (
+const runTabularImportAdapter = Effect.fn('runTabularImportAdapter')(function* (
   options: ImportCommandAdapterOptions,
-): Promise<TabularImportResult> => {
-  const format = inferImportFormat(options.source, options.importOptions.format);
-
+) {
   try {
-    const source =
-      options.preparedSource ??
-      (await readImportSource(options.source, options.workingDirectory, options.readImportStdin));
+    const format = inferImportFormat(options.source, options.importOptions.format);
 
-    return importTabularCases({
-      collisionContexts: options.collisionContexts,
-      dedupe: options.importOptions.dedupe,
-      existingCases: options.existingCases,
-      format,
-      keySource: options.importOptions.key,
-      mappings: options.importOptions.mapping,
-      onConflict: options.importOptions.on_conflict,
-      parseJsonSources: options.importOptions.parse_json,
-      recordsPointer: options.importOptions.records_pointer,
-      source,
-      sync: options.importOptions.sync,
-    });
-  } catch (error: unknown) {
-    if (error instanceof TabularImportError) {
-      throw toCliImportError(error);
+    try {
+      const source =
+        options.preparedSource ??
+        (yield* readImportSource(
+          options.source,
+          options.workingDirectory,
+          options.readImportStdin,
+        ).pipe(
+          Effect.mapError((error) =>
+            error instanceof TabularImportError ? toCliImportError(error) : error,
+          ),
+        ));
+
+      return importTabularCases({
+        collisionContexts: options.collisionContexts,
+        dedupe: options.importOptions.dedupe,
+        existingCases: options.existingCases,
+        format,
+        keySource: options.importOptions.key,
+        mappings: options.importOptions.mapping,
+        onConflict: options.importOptions.on_conflict,
+        parseJsonSources: options.importOptions.parse_json,
+        recordsPointer: options.importOptions.records_pointer,
+        source,
+        sync: options.importOptions.sync,
+      });
+    } catch (error: unknown) {
+      if (error instanceof TabularImportError) {
+        throw toCliImportError(error);
+      }
+
+      throw error;
     }
-
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
     throw error;
   }
-};
+});
 
 export {
   collectBoundedImportSource,

@@ -1,3 +1,4 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -301,31 +302,33 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const root = await temporaryRoot();
     await writeFixtureProject(root);
     await writeTaggedDatasetRows(root);
-    await runTestMutationCommand({
-      project: root,
-      readImportStdin: () => {
-        throw new Error('stdin must not be read');
-      },
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
-      request: {
-        schema: COMMAND_REQUEST_SCHEMA_ID,
-        command: 'test.add',
-        test: {
-          schema: TEST_RESOURCE_SCHEMA_ID,
-          id: 'smoke',
-          name: 'Smoke',
-          agent_id: 'support',
-          cases: [
-            { id: 'one', input: 'one', tags: ['fast', 'billing'] },
-            { id: 'two', input: 'two', tags: ['fast'] },
-          ],
-          // Only the rows tagged `billing`, so `late` and its tags stay out of this test.
-          datasets: [{ dataset_id: 'refunds', tags: ['billing'] }],
-          metrics: [],
+    await Effect.runPromiseExit(
+      runTestMutationCommand({
+        project: root,
+        readImportStdin: () => {
+          throw new Error('stdin must not be read');
         },
-      },
-      workingDirectory: root,
-    });
+        readStdin: () => Promise.reject(new Error('stdin must not be read')),
+        request: {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'test.add',
+          test: {
+            schema: TEST_RESOURCE_SCHEMA_ID,
+            id: 'smoke',
+            name: 'Smoke',
+            agent_id: 'support',
+            cases: [
+              { id: 'one', input: 'one', tags: ['fast', 'billing'] },
+              { id: 'two', input: 'two', tags: ['fast'] },
+            ],
+            // Only the rows tagged `billing`, so `late` and its tags stay out of this test.
+            datasets: [{ dataset_id: 'refunds', tags: ['billing'] }],
+            metrics: [],
+          },
+        },
+        workingDirectory: root,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     const tests = await launcherIn(root).listTests('demo');
 

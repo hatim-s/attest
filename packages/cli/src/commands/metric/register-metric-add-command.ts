@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import {
   METRIC_PRESETS,
   httpRequestTemplateSchema,
@@ -107,12 +109,15 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
           const selected = await selectGuidedMetricFields(options, interactive, context);
           const guided = await fillGuidedMetricFields(selected, interactive, context);
 
-          const resource = await createMetricResource({
-            ...guided,
-            metricId: id,
-            readStdin: context.interaction.readStdin,
-            workingDirectory: context.workingDirectory,
-          });
+          const resource = await // EFFECT-BRIDGE(S9b)
+          Effect.runPromiseExit(
+            createMetricResource({
+              ...guided,
+              metricId: id,
+              readStdin: context.interaction.readStdin,
+              workingDirectory: context.workingDirectory,
+            }),
+          ).then((exit) => valueFromExit(exit));
 
           return { ...mutationRequestFields('metric.add', options), metric: resource };
         },

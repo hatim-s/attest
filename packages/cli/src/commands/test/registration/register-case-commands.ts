@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import type { JsonValue } from '@attest/contracts';
 import { validateCommandRequest } from '@attest/local/agent';
 import { parseJsonFlag, runTestCaseListCommand, runTestCaseShowCommand } from '@attest/local/test';
@@ -181,11 +183,14 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
         promptContext(options, context.interaction),
       );
 
-      const result = await runTestCaseListCommand({
-        project: options.project,
-        testId: id,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runTestCaseListCommand({
+          project: options.project,
+          testId: id,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('test.case.list', outputFormat(options), result));
     });
@@ -209,12 +214,15 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
           prompt,
         );
 
-        const result = await runTestCaseShowCommand({
-          caseId: resolvedCaseId,
-          project: options.project,
-          testId: resolvedTestId,
-          workingDirectory: context.workingDirectory,
-        });
+        const result = await // EFFECT-BRIDGE(S9b)
+        Effect.runPromiseExit(
+          runTestCaseShowCommand({
+            caseId: resolvedCaseId,
+            project: options.project,
+            testId: resolvedTestId,
+            workingDirectory: context.workingDirectory,
+          }),
+        ).then((exit) => valueFromExit(exit));
 
         context.io.output(renderCommandResult('test.case.show', outputFormat(options), result));
       },

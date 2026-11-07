@@ -1,3 +1,5 @@
+import { promptEffect } from '../shared/prompt-effect.js';
+import * as Effect from 'effect/Effect';
 import { parseWithSchemaSync } from '@attest/contracts';
 import type { JsonValue, ProjectResources } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
@@ -27,7 +29,7 @@ type AgentMutationOptions = {
 };
 
 /** Previews, confirms, and publishes one agent mutation with the rendered semantic diff. */
-const mutationResult = async ({
+const mutationResult = Effect.fn('mutationResult')(function* ({
   candidate,
   command,
   confirmation,
@@ -35,85 +37,104 @@ const mutationResult = async ({
   renames,
   request,
   warnings,
-}: AgentMutationOptions): Promise<CommandResult<'mutation', MutationResult>> => {
-  const renderPreview = (preview: Awaited<ReturnType<typeof executeProjectMutation>>): string => {
-    const operationLines = preview.diff.operations.map((operation) => {
-      const renamed = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
-      const changes = operation.changes.map(({ path }) => path).join(', ');
+}: AgentMutationOptions) {
+  try {
+    const renderPreview = (
+      preview: Effect.Success<ReturnType<typeof executeProjectMutation>>,
+    ): string => {
+      const operationLines = preview.diff.operations.map((operation) => {
+        const renamed = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
+        const changes = operation.changes.map(({ path }) => path).join(', ');
 
-      const references = [
-        ...operation.references_added.map(({ id }) => `+ref:${id}`),
-        ...operation.references_removed.map(({ id }) => `-ref:${id}`),
-      ].join(', ');
+        const references = [
+          ...operation.references_added.map(({ id }) => `+ref:${id}`),
+          ...operation.references_removed.map(({ id }) => `-ref:${id}`),
+        ].join(', ');
 
-      const details = [changes, references].filter((value) => value.length > 0).join('; ');
+        const details = [changes, references].filter((value) => value.length > 0).join('; ');
 
-      return `- ${operation.op} ${operation.resource.type} ${operation.resource.id}${renamed}${details.length === 0 ? '' : ` (${details})`}`;
+        return `- ${operation.op} ${operation.resource.type} ${operation.resource.id}${renamed}${details.length === 0 ? '' : ` (${details})`}`;
+      });
+
+      return [
+        `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
+        ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
+        ...preview.diff.warnings.map((warning) => `Warning: ${warning}`),
+        ...(confirmation.definitionPreview === undefined
+          ? []
+          : [`Redacted definition preview: ${JSON.stringify(confirmation.definitionPreview)}`]),
+      ].join('\n');
+    };
+
+    const result = yield* executeProjectMutation({
+      dryRun: request.dry_run === true,
+      mutation: {
+        candidate,
+        // The candidate was built from `loaded`, so a write since then must reject the commit.
+        expectedProjectHash: request.if_project_hash ?? loaded.projectHash,
+        projectRoot: loaded.root,
+        renames,
+        warnings,
+      },
+      confirm: (preview) =>
+        Effect.gen(function* () {
+          try {
+            if (confirmation.yes === true) return;
+            const previewText = renderPreview(preview);
+
+            if (confirmation.interactive === true && confirmation.prompt !== undefined) {
+              const answer = (yield* promptEffect(() =>
+                confirmation.prompt!(`${previewText}\nApply these changes? [y/N]: `),
+              )).trim();
+
+              if (!/^y(?:es)?$/iu.test(answer)) {
+                throw new LocalError('cancelled', 'Project mutation was not confirmed.');
+              }
+            } else if (confirmation.requireExplicit === true) {
+              throw new LocalError(
+                'cli_usage',
+                'This destructive mutation requires confirmation.',
+                {
+                  path: '--yes',
+                  hint: 'Review `--dry-run --output json`, then pass `--yes` to apply the exact cascade.',
+                  details: {
+                    operations: parseWithSchemaSync(Schema.Json, preview.diff.operations),
+                  },
+                },
+              );
+            }
+          } catch (error) {
+            if (error instanceof LocalError) return yield* Effect.fail(error);
+            throw error;
+          }
+        }),
     });
 
-    return [
-      `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
-      ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
-      ...preview.diff.warnings.map((warning) => `Warning: ${warning}`),
-      ...(confirmation.definitionPreview === undefined
-        ? []
-        : [`Redacted definition preview: ${JSON.stringify(confirmation.definitionPreview)}`]),
-    ].join('\n');
-  };
+    const mutationPayload: MutationResult = {
+      committed: result.committed,
+      dry_run: request.dry_run === true,
+      operations: result.diff.operations,
+      warnings: result.diff.warnings,
+    };
 
-  const result = await executeProjectMutation({
-    dryRun: request.dry_run === true,
-    mutation: {
-      candidate,
-      // The candidate was built from `loaded`, so a write since then must reject the commit.
-      expectedProjectHash: request.if_project_hash ?? loaded.projectHash,
-      projectRoot: loaded.root,
-      renames,
-      warnings,
-    },
-    confirm: async (preview) => {
-      if (confirmation.yes === true) return;
-      const previewText = renderPreview(preview);
+    if (confirmation.definitionPreview !== undefined) {
+      mutationPayload.import_preview = confirmation.definitionPreview;
+    }
 
-      if (confirmation.interactive === true && confirmation.prompt !== undefined) {
-        const answer = (
-          await confirmation.prompt(`${previewText}\nApply these changes? [y/N]: `)
-        ).trim();
+    if (!(request.dry_run === true || confirmation.nextCommand === undefined)) {
+      mutationPayload.next_command = confirmation.nextCommand;
+    }
 
-        if (!/^y(?:es)?$/iu.test(answer)) {
-          throw new LocalError('cancelled', 'Project mutation was not confirmed.');
-        }
-      } else if (confirmation.requireExplicit === true) {
-        throw new LocalError('cli_usage', 'This destructive mutation requires confirmation.', {
-          path: '--yes',
-          hint: 'Review `--dry-run --output json`, then pass `--yes` to apply the exact cascade.',
-          details: { operations: parseWithSchemaSync(Schema.Json, preview.diff.operations) },
-        });
-      }
-    },
-  });
-
-  const mutationPayload: MutationResult = {
-    committed: result.committed,
-    dry_run: request.dry_run === true,
-    operations: result.diff.operations,
-    warnings: result.diff.warnings,
-  };
-
-  if (confirmation.definitionPreview !== undefined) {
-    mutationPayload.import_preview = confirmation.definitionPreview;
+    return {
+      operation: 'mutation' as const,
+      projectHashAfter: result.projectHashAfter,
+      projectHashBefore: result.projectHashBefore,
+      result: mutationPayload,
+    } satisfies CommandResult<'mutation', MutationResult>;
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-
-  if (!(request.dry_run === true || confirmation.nextCommand === undefined)) {
-    mutationPayload.next_command = confirmation.nextCommand;
-  }
-
-  return {
-    operation: 'mutation',
-    projectHashAfter: result.projectHashAfter,
-    projectHashBefore: result.projectHashBefore,
-    result: mutationPayload,
-  };
-};
+});
 
 export { mutationResult };

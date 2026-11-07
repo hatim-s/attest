@@ -668,3 +668,49 @@ flowchart TD
   I --> J[Interrupt remaining fibers and retain shutdown Exit]
   F --> I
 ```
+
+## Native resource commands
+
+Resource authoring and inspection operations in local now return Effect directly. This is a
+public TypeScript API break. Agent add/import/rename/remove, metric authoring and mutations,
+test/case/dataset authoring and reads, generic list/show, project show/validate, request-document
+reads, bounded tabular import reads, and manifest publication compose with `yield*`.
+Pure resource builders, semantic diffs, cURL parsing, reference rewrites and import algorithms
+remain synchronous unless they read external input.
+
+```ts
+import * as Effect from 'effect/Effect';
+import { runAgentAddCommand } from '@attest/local/agent';
+import { runProjectShowCommand } from '@attest/local/project';
+
+// The host supplies typed options and runs this program at its application entry point.
+const authorAndInspect = (options: Parameters<typeof runAgentAddCommand>[0]) =>
+  Effect.gen(function* () {
+    yield* runAgentAddCommand(options);
+    return yield* runProjectShowCommand({
+      project: options.project,
+      workingDirectory: options.workingDirectory,
+    });
+  });
+```
+
+Mutation confirmation callbacks return `Effect<void, LocalError>`. The command adapts an
+individual foreign terminal prompt callback; the native mutation coordinator does not execute
+an Effect runtime. Dry-run returns before confirmation and uses the native transaction preview.
+The candidate's loaded hash remains the commit guard, with manifest-last publication owned by
+the project transaction. Transaction cleanup errors and committed evidence propagate unchanged.
+
+Bounded import iterators are closed even after validation failure. Remote JSON readers attempt
+both cancellation and lock release, with a one-second cancellation bound. Reader cleanup is
+masked and retains its full Cause. A successful read followed by failed cleanup fails through E
+and keeps the successful value internally. Primary typed failure, interruption and defects retain
+precedence, with cleanup diagnostics attached as `CommandCleanup`. cURL body reads use the
+existing anchored descriptor owner. Manifest publication masks pending filesystem operations,
+attempts every cleanup, and rolls back its exact no-overwrite publication on failure.
+
+Execution-test and initialization coordinators remain Promise parents for phase B. The committed
+native metric evaluation and S8c registry forward bridges remain intact. Phase B will compose
+their native interfaces after S7 integration and remove the remaining S8b forward bridges.
+Remaining Promise CLI actions and guided metric loading use exact-file S9b bridges. Test
+runners are permanent execution roots. These staging bridges do not establish completion of
+the CLI application lifetime migration.

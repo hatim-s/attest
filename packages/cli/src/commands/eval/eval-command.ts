@@ -1,4 +1,5 @@
 import { readExitValue } from '../../errors/read-exit-value.js';
+import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import {
   COMMAND_REQUEST_SCHEMA_ID,
@@ -86,11 +87,14 @@ const readRunRequest = async (
 
   assertNoEvalFlags(fields.fromJson, command);
 
-  const document = await readRequestDocument(fields.fromJson, {
-    hint: REQUEST_DOCUMENT_HINT,
-    readStdin: context.interaction.readStdin,
-    workingDirectory: context.workingDirectory,
-  });
+  const document = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    readRequestDocument(fields.fromJson, {
+      hint: REQUEST_DOCUMENT_HINT,
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const output = requestedOutput(document);
 
@@ -210,11 +214,14 @@ const readCancelRequest = async (
 
   assertNoEvalFlags(options.fromJson, command);
 
-  const document = await readRequestDocument(options.fromJson, {
-    hint: REQUEST_DOCUMENT_HINT,
-    readStdin: context.interaction.readStdin,
-    workingDirectory: context.workingDirectory,
-  });
+  const document = await // EFFECT-BRIDGE(S9b)
+  Effect.runPromiseExit(
+    readRequestDocument(options.fromJson, {
+      hint: REQUEST_DOCUMENT_HINT,
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   const output = requestedOutput(document);
 

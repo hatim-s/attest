@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import {
   agentTransportSchema,
   webSocketConnectionModeSchema,
@@ -217,13 +219,16 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
         },
       });
 
-      const result = await runAgentAddCommand({
-        interactive,
-        project: options.project,
-        prompt: context.interaction.prompt,
-        request,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runAgentAddCommand({
+          interactive,
+          project: options.project,
+          prompt: context.interaction.prompt,
+          request,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
     });

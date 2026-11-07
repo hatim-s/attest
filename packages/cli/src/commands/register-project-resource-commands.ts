@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import {
   runListCommand,
@@ -117,10 +119,17 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
   for (const { description, name, run } of inspections) {
     addCommonOptions(project.command(name).description(description)).action(
       async (options: CommonCliOptions) => {
-        const result = await run({
-          project: options.project,
-          workingDirectory: context.workingDirectory,
-        });
+        const result = await // EFFECT-BRIDGE(S9b)
+        Effect.runPromiseExit<
+          | Awaited<Effect.Success<ReturnType<typeof runProjectShowCommand>>>
+          | Effect.Success<ReturnType<typeof runProjectValidateCommand>>,
+          Effect.Error<ReturnType<typeof runProjectShowCommand>>
+        >(
+          run({
+            project: options.project,
+            workingDirectory: context.workingDirectory,
+          }),
+        ).then((exit) => valueFromExit(exit));
 
         context.io.output(renderCommandResult(`project.${name}`, outputFormat(options), result));
       },
@@ -142,11 +151,14 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
       ]),
     )
     .action(async (resourceType: ListResourceType, options: CommonCliOptions) => {
-      const result = await runListCommand({
-        project: options.project,
-        resourceType,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runListCommand({
+          project: options.project,
+          resourceType,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('list', outputFormat(options), result));
     });
@@ -163,12 +175,15 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
     )
     .argument('<id>', 'resource id')
     .action(async (resourceType: ShowResourceType, id: string, options: CommonCliOptions) => {
-      const result = await runShowCommand({
-        id,
-        project: options.project,
-        resourceType,
-        workingDirectory: context.workingDirectory,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        runShowCommand({
+          id,
+          project: options.project,
+          resourceType,
+          workingDirectory: context.workingDirectory,
+        }),
+      ).then((exit) => valueFromExit(exit));
 
       context.io.output(renderCommandResult('show', outputFormat(options), result));
     });

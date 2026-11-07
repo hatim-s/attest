@@ -1,5 +1,4 @@
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../../../internal/effect-exit.js';
 import {
   parseWithSchema,
   assertionCheckSchema,
@@ -139,40 +138,42 @@ const requireValue = (value: string | undefined, path: string): string => {
   });
 };
 
-const readExclusiveText = async (
+const readExclusiveText = Effect.fn('readExclusiveText')(function* (
   literal: string | undefined,
   source: string | undefined,
   literalPath: string,
   sourcePath: string,
   fields: MetricAddFields,
-): Promise<string> => {
-  if (literal !== undefined && source !== undefined) {
-    throw new LocalError('cli_usage', 'Metric text input sources overlap.', {
-      path: literalPath,
-      hint: `Pass either ${literalPath} or ${sourcePath}.`,
-    });
-  }
+) {
+  try {
+    if (literal !== undefined && source !== undefined) {
+      throw new LocalError('cli_usage', 'Metric text input sources overlap.', {
+        path: literalPath,
+        hint: `Pass either ${literalPath} or ${sourcePath}.`,
+      });
+    }
 
-  if (literal?.trim()) return literal.trim();
+    if (literal?.trim()) return literal.trim();
 
-  if (source !== undefined) {
-    // EFFECT-BRIDGE(S8b)
-    const text = await Effect.runPromiseExit(
-      readSourceText(source, {
+    if (source !== undefined) {
+      const text = yield* readSourceText(source, {
         path: sourcePath,
         readStdin: fields.readStdin,
         workingDirectory: fields.workingDirectory,
-      }),
-    ).then((exit) => valueFromExit(exit));
+      });
 
-    if (text.trim()) return text;
+      if (text.trim()) return text;
+    }
+
+    throw new LocalError('cli_missing_input', `Required metric input ${literalPath} is missing.`, {
+      path: literalPath,
+      hint: `Pass ${literalPath} or ${sourcePath}.`,
+    });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-
-  throw new LocalError('cli_missing_input', `Required metric input ${literalPath} is missing.`, {
-    path: literalPath,
-    hint: `Pass ${literalPath} or ${sourcePath}.`,
-  });
-};
+});
 
 export {
   parseAssertionJson,

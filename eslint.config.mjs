@@ -454,6 +454,36 @@ const effectRoots = [
     operations: ['Effect.runPromiseExit'],
     owner: 'transaction and caller invariant test root',
   },
+  {
+    file: 'packages/local/src/commands/agent/_tests_/support/agent-project.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native resource command fixture execution root',
+  },
+  {
+    file: 'packages/local/src/commands/metric/_tests_/metric-test-command.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native resource command fixture execution root',
+  },
+  {
+    file: 'packages/local/src/commands/test/import/_tests_/tabular-import-adapter.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native resource command fixture execution root',
+  },
+  {
+    file: 'packages/local/src/run-control/_tests_/run-launcher.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native resource command fixture execution root',
+  },
+  {
+    file: 'packages/local/src/commands/project/_tests_/manifest-publication.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'no-overwrite publication and rollback fence invariant root',
+  },
+  {
+    file: 'packages/local/src/commands/shared/_tests_/command-effects.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'command cleanup and typed failure invariant test root',
+  },
 ];
 
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
@@ -587,18 +617,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/commands/agent/import.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/commands/project/project-init-command.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'unmigrated Promise parent of Phase A project operations',
@@ -660,42 +678,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/commands/metric/metric-mutation-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/test/test-mutation-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/authoring/resource-import.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/commands/agent/test.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'temporary Promise parent of native S1c file operations',
@@ -708,151 +690,7 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/commands/metric/authoring/resource-readers.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/metric/authoring/value-parsers.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/shared/command-request.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/add.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/remove.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/rename.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/list/list-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/commands/metric/metric-test-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/project/manifest-publish.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/project/project-inspection-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/shared/project-mutation.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/show/show-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/test/test-read-command.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'Promise caller of native local operations',
     bridges: [
@@ -878,12 +716,156 @@ const effectMigrationBridges = [
   {
     file: 'packages/cli/src/commands/metric/guided-metric-add.ts',
     operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
+    owner: 'staged native resource command caller',
     bridges: [
       {
         operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/agent/register-agent-add-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/agent/register-agent-import-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/agent/register-agent-lifecycle-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/metric/register-metric-add-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/metric/run-metric-mutation.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/register-project-resource-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/shared/command-request.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/test/registration/dataset-import-flow.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/test/registration/register-case-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/test/registration/register-dataset-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/test/registration/register-test-resource-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/test/registration/run-test-mutation.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'staged native resource command caller',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'declared command migration owner',
       },
     ],
   },

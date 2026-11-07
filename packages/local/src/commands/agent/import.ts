@@ -1,10 +1,10 @@
-import { valueFromExit } from '../../internal/effect-exit.js';
+import { LocalError } from '../../errors/index.js';
 import * as Effect from 'effect/Effect';
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
 import { discoverProject } from '../../project/discover-project.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
-import type { CommandResult, MutationResult } from '../shared/command-result.js';
+
 import { assertNewId } from '../shared/resource-lookup.js';
 import { redactAgentResource } from '../show/redact-resource.js';
 import {
@@ -23,89 +23,93 @@ type ImportedCurlPreview = {
 };
 
 /** Builds the imported agent and the redacted preview shown before confirmation. */
-const importAgentResource = async (
+const importAgentResource = Effect.fn('importAgentResource')(function* (
   request: AgentRequest<'agent.import'>,
   options: AgentImportCommandOptions,
-): Promise<{ agent: AgentResource; preview?: JsonValue }> => {
-  if (request.source_type === 'json') {
-    const agent = await readImportedAgentResource(
-      request.source,
-      request.as,
-      request.name,
-      options.workingDirectory,
-      options.readStdin,
-    );
+) {
+  try {
+    if (request.source_type === 'json') {
+      const agent = yield* readImportedAgentResource(
+        request.source,
+        request.as,
+        request.name,
+        options.workingDirectory,
+        options.readStdin,
+      );
 
-    return {
-      agent,
-      preview: agent.transport.kind === 'websocket' ? redactAgentResource(agent) : undefined,
-    };
-  }
+      return {
+        agent,
+        preview: agent.transport.kind === 'websocket' ? redactAgentResource(agent) : undefined,
+      } satisfies { agent: AgentResource; preview?: JsonValue };
+    }
 
-  const curlSource =
-    options.sourceText ??
-    (await readCurlDocument(request.source, options.workingDirectory, options.readStdin));
+    const curlSource =
+      options.sourceText ??
+      (yield* readCurlDocument(request.source, options.workingDirectory, options.readStdin));
 
-  // EFFECT-BRIDGE(S8b)
-  const { root } = await Effect.runPromiseExit(
-    discoverProject({
+    const { root } = yield* discoverProject({
       project: options.project,
       workingDirectory: options.workingDirectory,
-    }),
-  ).then((exit) => valueFromExit(exit));
+    });
 
-  const imported = await createImportedCurlAgentResource(request, curlSource, root);
+    const imported = yield* createImportedCurlAgentResource(request, curlSource, root);
 
-  const preview: ImportedCurlPreview = {
-    request: imported.preview,
-    extraction: request.extraction,
-  };
+    const preview: ImportedCurlPreview = {
+      request: imported.preview,
+      extraction: request.extraction,
+    };
 
-  if (request.polling !== undefined) {
-    preview.polling = request.polling;
+    if (request.polling !== undefined) {
+      preview.polling = request.polling;
+    }
+
+    return {
+      agent: imported.agent,
+      preview,
+    } satisfies { agent: AgentResource; preview?: JsonValue };
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-
-  return {
-    agent: imported.agent,
-    preview,
-  };
-};
+});
 
 /** Imports one canonical JSON resource or inert cURL mapping without retaining source contents. */
-const runAgentImportCommand = async (
+const runAgentImportCommand = Effect.fn('runAgentImportCommand')(function* (
   options: AgentImportCommandOptions,
-): Promise<CommandResult<'mutation', MutationResult>> => {
-  const { request } = options;
-  const { agent, preview } = await importAgentResource(request, options);
+) {
+  try {
+    const { request } = options;
+    const { agent, preview } = yield* importAgentResource(request, options);
 
-  // EFFECT-BRIDGE(S8b)
-  const loaded = await Effect.runPromiseExit(
-    loadCommandProject({
+    const loaded = yield* loadCommandProject({
       project: options.project,
       recover: request.dry_run !== true,
       workingDirectory: options.workingDirectory,
-    }),
-  ).then((exit) => valueFromExit(exit));
+    });
 
-  assertNewId('agent', loaded.agents, agent.id);
+    assertNewId('agent', loaded.agents, agent.id);
 
-  let candidate = candidateFromLoadedProject(loaded);
-  candidate = { ...candidate, agents: [...candidate.agents, agent] };
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = { ...candidate, agents: [...candidate.agents, agent] };
 
-  return mutationResult({
-    command: 'agent.import',
-    loaded,
-    candidate,
-    request,
-    confirmation: {
-      definitionPreview: preview,
-      interactive: options.interactive,
-      nextCommand: `attest agent test ${agent.id}`,
-      prompt: options.prompt,
-      requireExplicit: false,
-      yes: request.yes,
-    },
-  });
-};
+    return yield* mutationResult({
+      command: 'agent.import',
+      loaded,
+      candidate,
+      request,
+      confirmation: {
+        definitionPreview: preview,
+        interactive: options.interactive,
+        nextCommand: `attest agent test ${agent.id}`,
+        prompt: options.prompt,
+        requireExplicit: false,
+        yes: request.yes,
+      },
+    });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 export { runAgentImportCommand };

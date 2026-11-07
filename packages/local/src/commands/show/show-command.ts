@@ -1,4 +1,4 @@
-import { valueFromExit } from '../../internal/effect-exit.js';
+import { LocalError } from '../../errors/index.js';
 import * as Effect from 'effect/Effect';
 import type { JsonValue } from '@attest/contracts';
 
@@ -20,74 +20,79 @@ type ShowCommandOptions = {
   workingDirectory: string;
 };
 
-const showRun = async (project: LoadedProject, id: string): Promise<JsonValue> => {
-  const run = valueFromExit(
-    // EFFECT-BRIDGE(S8b)
-    await Effect.runPromiseExit(
-      withRunNotFound(
-        () => withReadonlyRunStore(project.root, (store) => store.getRun(id)),
-        () => missingResource('run', id),
-      ),
-    ),
-  );
+const showRun = Effect.fn('showRun')(function* (project: LoadedProject, id: string) {
+  try {
+    const run = yield* withRunNotFound(
+      () => withReadonlyRunStore(project.root, (store) => store.getRun(id)),
+      () => missingResource('run', id),
+    );
 
-  if (run === undefined) throw missingResource('run', id);
+    if (run === undefined) throw missingResource('run', id);
 
-  return toSafeRunSummary(run);
-};
+    return toSafeRunSummary(run);
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
-const showResource = async (
+const showResource = Effect.fn('showResource')(function* (
   project: LoadedProject,
   type: ShowResourceType,
   id: string,
-): Promise<JsonValue> => {
-  if (type === 'run') {
-    return await showRun(project, id);
-  }
-
-  if (type === 'agent') {
-    const resource = project.agents.find((candidate) => candidate.id === id);
-
-    if (resource !== undefined) return redactAgentResource(resource);
-  } else if (type === 'test') {
-    const resource = project.tests.find((candidate) => candidate.id === id);
-
-    if (resource !== undefined) return resource;
-  } else if (type === 'metric') {
-    const resource = project.metrics.find((candidate) => candidate.id === id);
-
-    if (resource !== undefined) return redactMetricResource(resource);
-  } else {
-    const resource = project.datasets.find(({ metadata }) => metadata.id === id);
-
-    if (resource !== undefined) {
-      return { metadata: resource.metadata, cases: resource.cases };
+) {
+  try {
+    if (type === 'run') {
+      return yield* showRun(project, id);
     }
-  }
 
-  throw missingResource(type, id);
-};
+    if (type === 'agent') {
+      const resource = project.agents.find((candidate) => candidate.id === id);
+
+      if (resource !== undefined) return redactAgentResource(resource);
+    } else if (type === 'test') {
+      const resource = project.tests.find((candidate) => candidate.id === id);
+
+      if (resource !== undefined) return resource;
+    } else if (type === 'metric') {
+      const resource = project.metrics.find((candidate) => candidate.id === id);
+
+      if (resource !== undefined) return redactMetricResource(resource);
+    } else {
+      const resource = project.datasets.find(({ metadata }) => metadata.id === id);
+
+      if (resource !== undefined) {
+        return { metadata: resource.metadata, cases: resource.cases } satisfies JsonValue;
+      }
+    }
+
+    throw missingResource(type, id);
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 /** Shows one validated canonical resource through the shared output envelope. */
-const runShowCommand = async (
-  options: ShowCommandOptions,
-): Promise<CommandResult<'show', ResourceShowResult>> => {
-  // EFFECT-BRIDGE(S8b)
-  const project = await Effect.runPromiseExit(
-    loadCommandProject({
+const runShowCommand = Effect.fn('runShowCommand')(function* (options: ShowCommandOptions) {
+  try {
+    const project = yield* loadCommandProject({
       project: options.project,
       workingDirectory: options.workingDirectory,
-    }),
-  ).then((exit) => valueFromExit(exit));
+    });
 
-  const resource = await showResource(project, options.resourceType, options.id);
+    const resource = yield* showResource(project, options.resourceType, options.id);
 
-  return {
-    operation: 'show',
-    projectHashBefore: project.projectHash,
-    projectHashAfter: project.projectHash,
-    result: { resource_type: options.resourceType, resource },
-  };
-};
+    return {
+      operation: 'show' as const,
+      projectHashBefore: project.projectHash,
+      projectHashAfter: project.projectHash,
+      result: { resource_type: options.resourceType, resource },
+    } satisfies CommandResult<'show', ResourceShowResult>;
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 export { runShowCommand, type ShowCommandOptions, type ShowResourceType };

@@ -162,19 +162,21 @@ const createCallbackProject = async (origin: string): Promise<string> => {
   await writeFile(join(root, 'agent.json'), JSON.stringify(agent));
   await writeFile(join(root, 'score.mjs'), SCORE_METRIC);
 
-  await runAgentImportCommand({
-    interactive: false,
-    project: root,
-    readStdin: () => Promise.reject(new Error('stdin must not be read')),
-    request: {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'agent.import',
-      source: 'agent.json',
-      source_type: 'json',
-      as: 'coder',
-    },
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runAgentImportCommand({
+      interactive: false,
+      project: root,
+      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.import',
+        source: 'agent.json',
+        source_type: 'json',
+        as: 'coder',
+      },
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
   let candidate = candidateFromLoadedProject(
     await Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
