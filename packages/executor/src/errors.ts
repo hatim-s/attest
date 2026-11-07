@@ -13,7 +13,8 @@ type AgentInvocationErrorDetails = {
   rawExcerpt?: RawExcerpt;
   /** Server-requested delay parsed from Retry-After. */
   retryAfterMs?: number;
-  /** A stream delivered an application event, so replaying the request could duplicate work. */
+  /** Replay is unsafe after application evidence or uncertain dispatch/cleanup.
+   * This conservative flag does not prove that remote application execution started. */
   applicationStarted?: boolean;
   /** WebSocket evidence classification recorded for this failure. */
   classification?: WebSocketErrorClassification;

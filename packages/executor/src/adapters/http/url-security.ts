@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { awaitAbort, httpSync } from './http-effects.js';
 import { isIP } from 'node:net';
 import type { LookupAddress } from 'node:dns';
 import { lookup } from 'node:dns/promises';
@@ -74,81 +76,81 @@ type ResolveSafeHttpUrlOptions = {
   callerSignal?: AbortSignal;
 };
 
-/** Rejects once `signal` aborts so a stalled DNS lookup cannot outlive its deadline. */
-const rejectOnAbort = (signal: AbortSignal): Promise<never> =>
-  new Promise<never>((_resolve, reject) => {
-    signal.addEventListener(
-      'abort',
-      () =>
-        reject(
-          signal.reason instanceof Error
-            ? signal.reason
-            : new DOMException('Aborted', 'AbortError'),
-        ),
-      { once: true },
-    );
-  });
-
 /** Validates an HTTP URL and pins a previously validated DNS result for the ensuing connection. */
-const resolveSafeHttpUrl = async (
+const resolveSafeHttpUrl = Effect.fn('http.resolveSafeUrl')(function* (
   value: string,
   options: ResolveSafeHttpUrlOptions,
-): Promise<ResolvedHttpUrl> => {
+): Effect.fn.Return<ResolvedHttpUrl, AgentInvocationError> {
   const { callerSignal, signal } = options;
 
   const throwIfAborted = (): void => {
     if (signal?.aborted === true) throw abortedError(callerSignal, 'HTTP hostname resolution');
   };
 
-  throwIfAborted();
-  let url: URL;
+  yield* httpSync(throwIfAborted);
 
-  try {
-    url = new URL(value);
-  } catch (error: unknown) {
-    throw new AgentInvocationError('network', 'Mapped HTTP URL is invalid.', { cause: error });
-  }
+  const url = yield* httpSync(() => {
+    let url: URL;
 
-  if (
-    !['http:', 'https:'].includes(url.protocol) ||
-    url.username.length > 0 ||
-    url.password.length > 0 ||
-    url.hash.length > 0
-  ) {
-    throw new AgentInvocationError(
-      'network',
-      'Mapped HTTP URL must use HTTP(S) without credentials or a fragment.',
-    );
-  }
-
-  throwIfAborted();
-  const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
-  const combined = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
-  let addresses: LookupAddress[];
-
-  try {
-    addresses = await Promise.race([
-      lookup(url.hostname, { all: true, verbatim: true }),
-      rejectOnAbort(combined),
-    ]);
-  } catch (error: unknown) {
-    if (callerSignal?.aborted === true || signal?.aborted === true) {
-      throw abortedError(callerSignal, 'HTTP hostname resolution', { cause: error });
+    try {
+      url = new URL(value);
+    } catch (error: unknown) {
+      throw new AgentInvocationError('network', 'Mapped HTTP URL is invalid.', { cause: error });
     }
 
-    throw new AgentInvocationError(
-      'network',
-      'Mapped HTTP hostname could not be resolved safely.',
-      { cause: error },
-    );
-  }
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username.length > 0 ||
+      url.password.length > 0 ||
+      url.hash.length > 0
+    ) {
+      throw new AgentInvocationError(
+        'network',
+        'Mapped HTTP URL must use HTTP(S) without credentials or a fragment.',
+      );
+    }
+
+    throwIfAborted();
+
+    return url;
+  });
+
+  const dns = Effect.tryPromise({
+    try: () => lookup(url.hostname, { all: true, verbatim: true }),
+    catch: (cause) =>
+      new AgentInvocationError('network', 'Mapped HTTP hostname could not be resolved safely.', {
+        cause,
+      }),
+  });
+
+  // DNS is a pure observation. Its cancellation cannot discard dispatch evidence.
+  const bounded = dns.pipe(
+    Effect.timeoutOrElse({
+      duration: options.timeoutMs,
+      orElse: () =>
+        Effect.fail(
+          new AgentInvocationError('network', 'Mapped HTTP hostname could not be resolved safely.'),
+        ),
+    }),
+  );
+
+  const addresses: LookupAddress[] = yield* signal === undefined
+    ? bounded
+    : Effect.raceFirst(
+        bounded,
+        awaitAbort(signal).pipe(
+          Effect.andThen(() => Effect.fail(abortedError(callerSignal, 'HTTP hostname resolution'))),
+        ),
+      );
 
   const [selected] = addresses;
 
   if (selected === undefined || addresses.some(({ address }) => !isSafeAddress(address))) {
-    throw new AgentInvocationError(
-      'network',
-      'Mapped HTTP hostname resolves to a prohibited network address.',
+    return yield* Effect.fail(
+      new AgentInvocationError(
+        'network',
+        'Mapped HTTP hostname resolves to a prohibited network address.',
+      ),
     );
   }
 
@@ -158,6 +160,6 @@ const resolveSafeHttpUrl = async (
     loopback: addresses.every(({ address }) => isLoopbackAddress(address)),
     url,
   };
-};
+});
 
 export { resolveSafeHttpUrl, type ResolvedHttpUrl };

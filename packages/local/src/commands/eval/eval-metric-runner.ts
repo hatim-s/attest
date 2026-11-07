@@ -361,11 +361,16 @@ const evaluateHttpMetric = async ({
   const { headers, query, secrets } = await resolveHttpSecrets(definition.request, projectRoot);
   const startedAt = performance.now();
 
-  const invocation = await invokeMappedHttpAgent(
-    agent,
-    { ...request, input: metricRequest },
-    { headers, query, secrets, signal },
+  // EFFECT-BRIDGE(S6)
+  const exit = await Effect.runPromiseExit(
+    invokeMappedHttpAgent(
+      agent,
+      { ...request, input: metricRequest },
+      { headers, query, secrets, signal },
+    ),
   );
+
+  const invocation = valueFromExit(exit);
 
   const durationMs = performance.now() - startedAt;
 

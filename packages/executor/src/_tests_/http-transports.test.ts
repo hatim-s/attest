@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+// EFFECT-ROOT: owned HTTP fixture execution.
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -72,20 +74,24 @@ describe('host HTTP transports', () => {
       Promise.resolve(Response.json({ protocol: AGENT_PROTOCOL, output: 'ok' })),
     );
 
-    const result = await invokeNativeHttpAgent(
-      { type: 'http', url: 'https://agent.example/run' },
-      request,
-      { timeoutMs: 1000, outputCapBytes: 1024, httpFetch },
+    const result = await Effect.runPromise(
+      invokeNativeHttpAgent({ type: 'http', url: 'https://agent.example/run' }, request, {
+        timeoutMs: 1000,
+        outputCapBytes: 1024,
+        httpFetch,
+      }),
     );
 
     expect(result.status).toBe('ok');
     expect(result.status === 'ok' && result.report?.ok).toBe(true);
     const failedFetch = vi.fn(() => Promise.resolve(new Response('unavailable', { status: 503 })));
 
-    const failure = await invokeNativeHttpAgent(
-      { type: 'http', url: 'https://agent.example/run' },
-      request,
-      { timeoutMs: 1000, outputCapBytes: 1024, httpFetch: failedFetch },
+    const failure = await Effect.runPromise(
+      invokeNativeHttpAgent({ type: 'http', url: 'https://agent.example/run' }, request, {
+        timeoutMs: 1000,
+        outputCapBytes: 1024,
+        httpFetch: failedFetch,
+      }),
     );
 
     expect(failure.attempts).toHaveLength(1);
@@ -95,12 +101,20 @@ describe('host HTTP transports', () => {
   it('uses shared mapped extraction and overrides an authored retry budget', async () => {
     const guardedFetch = vi.fn(() => Promise.resolve(Response.json({ answer: { value: 42 } })));
     const transports = createFetchHttpTransports(guardedFetch);
-    const result = await invokeMappedHttpAgent(mapped, request, { ...transports, retries: 0 });
+
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(mapped, request, { ...transports, retries: 0 }),
+    );
+
     expect(result.status === 'ok' && result.report?.ok && result.report.value).toMatchObject({
       output: { value: 42 },
     });
     guardedFetch.mockImplementation(() => Promise.resolve(new Response('failed', { status: 503 })));
-    const failed = await invokeMappedHttpAgent(mapped, request, { ...transports, retries: 0 });
+
+    const failed = await Effect.runPromise(
+      invokeMappedHttpAgent(mapped, request, { ...transports, retries: 0 }),
+    );
+
     expect(failed.attempts).toHaveLength(1);
     expect(guardedFetch).toHaveBeenCalledTimes(2);
   });
@@ -132,10 +146,11 @@ describe('host HTTP transports', () => {
   it('cancels a capped mapped body and an idle stream without replay', async () => {
     const capped = liveResponse('0123456789', 'application/json');
 
-    const result = await invokeMappedHttpAgent(
-      { ...mapped, limits: { response_bytes: 4 } },
-      request,
-      { ...createFetchHttpTransports(() => Promise.resolve(capped.response)), retries: 0 },
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent({ ...mapped, limits: { response_bytes: 4 } }, request, {
+        ...createFetchHttpTransports(() => Promise.resolve(capped.response)),
+        retries: 0,
+      }),
     );
 
     expect(result.status === 'invocation_error' && result.error.code).toBe('output_cap_exceeded');
@@ -160,10 +175,12 @@ describe('host HTTP transports', () => {
       ),
     );
 
-    const result = await invokeMappedHttpAgent(mapped, request, {
-      ...createFetchHttpTransports(guardedFetch),
-      retries: 0,
-    });
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(mapped, request, {
+        ...createFetchHttpTransports(guardedFetch),
+        retries: 0,
+      }),
+    );
 
     expect(result.status === 'invocation_error' && result.error.code).toBe('http_status');
     expect(guardedFetch).toHaveBeenCalledOnce();
@@ -217,10 +234,12 @@ describe('host HTTP transports', () => {
       },
     };
 
-    const result = await invokeMappedHttpAgent(polling, request, {
-      ...createFetchHttpTransports(guardedFetch),
-      retries: 0,
-    });
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(polling, request, {
+        ...createFetchHttpTransports(guardedFetch),
+        retries: 0,
+      }),
+    );
 
     expect(result.status === 'ok' && result.report?.ok && result.report.value).toMatchObject({
       output: 'ok',
@@ -261,7 +280,12 @@ describe('host HTTP transports', () => {
         };
 
         return mode === 'json'
-          ? invokeMappedHttpAgent({ ...mapped, timeouts }, request, { ...transports, retries: 0 })
+          ? Effect.runPromise(
+              invokeMappedHttpAgent({ ...mapped, timeouts }, request, {
+                ...transports,
+                retries: 0,
+              }),
+            )
           : invokeStreamingAgent({ ...streaming('jsonl'), timeouts }, request, {
               ...transports,
               retries: 0,
@@ -305,4 +329,121 @@ describe('host HTTP transports', () => {
       }
     },
   );
+});
+
+it.each(['headers', 'body', 'cleanup'] as const)(
+  'does not replay uncertain guarded %s failure through mapped transport',
+  async (stage) => {
+    const failure = new Error('foreign failure');
+
+    const guarded = vi.fn(() =>
+      stage === 'headers'
+        ? Promise.reject(failure)
+        : Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  if (stage === 'body') controller.error(failure);
+                  else controller.enqueue(new TextEncoder().encode('{"answer":42}'));
+                },
+                pull(controller) {
+                  if (stage === 'cleanup') controller.close();
+                },
+              }),
+            ),
+          ),
+    );
+
+    // A never-ending body observes its idle deadline and a rejected cancel separately.
+    if (stage === 'cleanup')
+      guarded.mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"answer":42}'));
+              },
+              cancel() {
+                return Promise.reject(failure);
+              },
+            }),
+          ),
+        ),
+      );
+
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(mapped, request, createFetchHttpTransports(guarded)),
+    );
+
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      error: { applicationStarted: true },
+    });
+    expect(result.attempts).toHaveLength(1);
+    expect(guarded).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(['ECONNREFUSED', 'ConnectionRefused', 'FailedToOpenSocket'])(
+  'retains retries for known pre-dispatch %s on the error or its cause',
+  async (code) => {
+    for (const nested of [true, false]) {
+      const connection = Object.assign(new Error('connection could not open'), { code });
+
+      const guarded = vi.fn(() =>
+        Promise.reject(nested ? new TypeError('fetch failed', { cause: connection }) : connection),
+      );
+
+      const result = await Effect.runPromise(
+        invokeMappedHttpAgent(mapped, request, createFetchHttpTransports(guarded)),
+      );
+
+      expect(result.attempts).toHaveLength(4);
+      expect(guarded).toHaveBeenCalledTimes(4);
+    }
+  },
+);
+
+it('retries a bodyless guarded 503 using its confirmed status', async () => {
+  const guarded = vi.fn(() => Promise.resolve(new Response(null, { status: 503 })));
+
+  const result = await Effect.runPromise(
+    invokeMappedHttpAgent(mapped, request, createFetchHttpTransports(guarded)),
+  );
+
+  expect(result).toMatchObject({ status: 'invocation_error', error: { code: 'http_status' } });
+  expect(result.attempts).toHaveLength(4);
+  expect(guarded).toHaveBeenCalledTimes(4);
+});
+
+it.each([307, 308])('follows a bodyless guarded %i only to the same origin', async (status) => {
+  const guarded = vi.fn((url: string) =>
+    Promise.resolve(
+      url.endsWith('/run')
+        ? new Response(null, { status, headers: { location: '/result' } })
+        : Response.json({ answer: 'redirected' }),
+    ),
+  );
+
+  const result = await Effect.runPromise(
+    invokeMappedHttpAgent(mapped, request, createFetchHttpTransports(guarded)),
+  );
+
+  expect(result.status).toBe('ok');
+  expect(guarded).toHaveBeenCalledTimes(2);
+  expect(guarded.mock.calls[1]?.[0]).toBe('https://agent.example/result');
+});
+
+it('keeps a bodyless guarded success invalid and prohibits replay', async () => {
+  const guarded = vi.fn(() => Promise.resolve(new Response(null)));
+
+  const result = await Effect.runPromise(
+    invokeMappedHttpAgent(mapped, request, createFetchHttpTransports(guarded)),
+  );
+
+  expect(result).toMatchObject({
+    status: 'invocation_error',
+    error: { code: 'invalid_envelope', applicationStarted: true },
+  });
+  expect(guarded).toHaveBeenCalledOnce();
 });

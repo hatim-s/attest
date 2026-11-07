@@ -272,3 +272,77 @@ the original Cause remains primary and the StoreCleanup annotation retains clean
 Causes. Never serialize these internal diagnostics into public responses. A close
 failure does not authorize retrying a successful mutation. The complete S2 still
 requires caller integration, full gates and independent reviews before commit.
+
+## Native executor operations
+
+The dispatch, CLI/HTTP attempts, shared retry, mapped HTTP execution/polling, JSON
+transport, DNS/pinned header acquisition and process-tree operations return native
+Effects. Attempt failures retain their bounded evidence as values. CLI setup and
+cleanup can additionally fail with closed tagged errors; cleanup after a completed
+attempt retains that attempt. Dispatch propagates those channels and the contracts
+decoder error instead of classifying them as retryable transport failures.
+
+`HttpJsonTransport` is now an Effect-returning host contract. `GuardedHttpFetch`
+remains a foreign Promise boundary. Host transports must distinguish known
+pre-dispatch failures from unknown dispatch honestly. `applicationStarted` is a
+conservative replay prohibition, not proof that a server executed a request. A
+header timeout, opaque rejection or failed local cleanup cannot authorize another
+request when completion is unknown. Confirmed status responses retain their
+existing retry classification. See the HTTP rules in `specs/agent-contract.md`.
+
+Header and body observers have bounded cleanup. An uncooperative guarded fetch
+can settle after the native owner returns; its foreign callback releases a late
+body and updates the retained internal receipt without starting another Effect
+runtime. Missing or failed acknowledgement remains unconfirmed. Local socket
+close is resource evidence, not proof of remote completion or rollback.
+
+The temporary `legacy-stream-fetch.ts` owns the existing Promise/AsyncIterable
+stream body contract until S4a. Its declared bridge acquires native guarded
+headers. Callback, stream, WebSocket and managed-process callers retain explicit
+S4 removal owners; they do not turn native JSON operations back into Promises.
+The sandbox attempt and retry callback compose natively while its surrounding VM
+lifecycle remains the S5 owner. No S3 execution bridge remains.
+
+Process observations return `{ identities, available }`; sweeps return
+`{ unreapedProcessIds, cleanupConfirmed }`. Pass earlier observation availability
+into the sweep. Losing an observation before reparenting cannot be repaired by an
+empty later PID list. CLI retains successful or failed attempt evidence in
+`CliCleanupError` when cleanup is unconfirmed, so the retry loop never starts a
+second attempt. Hook and managed-process callers retain the same confirmation bit.
+These result shapes are deliberate TypeScript API changes. The local invocation
+boundary projects a `CliCleanupError` with an attempt into failed case evidence,
+retaining its diagnostics, excerpt, duration and original failure code. A completed
+attempt becomes a network failure with an explicit cleanup message. This boundary
+does not retry it. Managed sessions mark automatic close promises handled as soon
+as teardown starts; `close()` still returns the original rejection to the owner.
+Startup cancellation and readiness errors remain primary if teardown also fails.
+
+Direct HTTP status errors retain an already-errored body's rejected cancellation
+as internal evidence without prohibiting status retries. A cancellation timeout or
+interruption still prohibits replay. Mapped body observers remain conservative:
+a failed body observation prevents replay even with a retryable status, an
+idempotency key, or a polling GET. Integration guides describe this limit.
+
+```mermaid
+flowchart TD
+  A[CLI terminal observation] --> B[Join snapshots]
+  B --> C[Identity-checked process sweep]
+  C --> D[Observe close and detach listeners]
+  D --> E{Primary Exit}
+  E -->|Failure or interruption| F[Keep primary Cause and attach cleanup evidence]
+  E -->|Attempt completed| G{Cleanup confirmed?}
+  G -->|No| H[Fail with attempt retained; no retry]
+  G -->|Yes| I[Return attempt to retry classifier]
+```
+
+```mermaid
+flowchart TD
+  A[Acquire HTTP headers] --> B{Headers received?}
+  B -->|No| C[Bounded cleanup; retain late-response receipt]
+  B -->|Yes| D[Transfer response to body or status owner]
+  D --> E[Capture body and release outcomes]
+  E --> F[Keep primary evidence and cleanup diagnostics]
+  F --> G{Dispatch or cleanup uncertain?}
+  G -->|Yes| H[Prohibit replay]
+  G -->|No| I[Apply status and envelope retry rules]
+```

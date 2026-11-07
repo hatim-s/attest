@@ -2,6 +2,8 @@ export { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 
 export { invokeAgent } from './invoke.js';
 
+export { CliCleanupError } from './cli-invoker.js';
+
 export { invokeVercelSandboxAgent } from './adapters/sandbox/index.js';
 
 export {
@@ -9,6 +11,8 @@ export {
   listDescendantProcesses,
   spawnInProcessGroup,
   type ProcessIdentity,
+  type ProcessSnapshot,
+  type ProcessCleanup,
 } from './internal/process-tree.js';
 
 export {

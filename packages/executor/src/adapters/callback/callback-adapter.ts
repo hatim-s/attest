@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   AGENT_PROTOCOL,
   parseAgentResponse,
@@ -134,17 +135,19 @@ const clientPolicy = (
 });
 
 /** The trigger only has to be accepted; its body is kept as evidence and never parsed. */
-const discardBody: HttpJsonTransport = async (request, policy) => {
-  const response = await requestHttp(request, policy);
+const discardBody: HttpJsonTransport = Effect.fn('callback.discardBody')(
+  function* (request, policy) {
+    const response = yield* requestHttp(request, policy);
 
-  return {
-    headers: response.headers,
-    raw: null,
-    rawExcerpt: response.rawExcerpt,
-    status: response.status,
-    url: response.url,
-  };
-};
+    return {
+      headers: response.headers,
+      raw: null,
+      rawExcerpt: response.rawExcerpt,
+      status: response.status,
+      url: response.url,
+    };
+  },
+);
 
 /**
  * Sends the trigger: the request envelope plus `callback` as the body of the authored request.
@@ -189,14 +192,17 @@ const triggerCallbackAgent = async (
       responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
     });
 
-    const sent = await requestWithRetries(
-      materialized,
-      { retry: agent.retry, policy, signal, retryAttempts, requestJson: discardBody },
-      {
-        allowRetry: transport.idempotency_header !== undefined,
-        delayFor: (retry, retryAfter) =>
-          parseRetryAfter(retryAfter) ?? retryBackoffDelay(agent.retry?.backoff, retry),
-      },
+    // EFFECT-BRIDGE(S4a): Promise protocol owner executes this native HTTP leaf until S4a.
+    const sent = await Effect.runPromise(
+      requestWithRetries(
+        materialized,
+        { retry: agent.retry, policy, signal, retryAttempts, requestJson: discardBody },
+        {
+          allowRetry: transport.idempotency_header !== undefined,
+          delayFor: (retry, retryAfter) =>
+            parseRetryAfter(retryAfter) ?? retryBackoffDelay(agent.retry?.backoff, retry),
+        },
+      ),
     );
 
     if (!sent.ok) {
@@ -273,7 +279,10 @@ const fetchReference = async (agent: CallbackAgentResource, reference: Reference
     agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
   );
 
-  const response: HttpResponse = await requestHttp(materialized, reference.policy);
+  // EFFECT-BRIDGE(S4a): Promise protocol owner executes this native HTTP leaf until S4a.
+  const response: HttpResponse = await Effect.runPromise(
+    requestHttp(materialized, reference.policy),
+  );
 
   if (response.status < 200 || response.status >= 300) {
     throw new AgentInvocationError(

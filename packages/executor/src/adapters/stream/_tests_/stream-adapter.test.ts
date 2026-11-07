@@ -138,7 +138,7 @@ describe('HTTP streaming adapter', () => {
     if (cancelled.status === 'invocation_error') expect(cancelled.error.code).toBe('cancelled');
   });
 
-  it('retries only before the first application event', async () => {
+  it('does not replay uncertain dispatch or work that delivered an application event', async () => {
     let calls = 0;
 
     const origin = await listen((_request, response) => {
@@ -158,8 +158,14 @@ describe('HTTP streaming adapter', () => {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
 
-    expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
-    expect(calls).toBe(2);
+    const uncertain = await invokeStreamingAgent(configured, request);
+
+    expect(uncertain).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'network', applicationStarted: true },
+    });
+    expect(uncertain.attempts).toHaveLength(1);
+    expect(calls).toBe(1);
 
     calls = 0;
 

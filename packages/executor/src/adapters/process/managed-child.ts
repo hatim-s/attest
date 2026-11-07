@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { AgentRequest } from '@attest/contracts';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -27,6 +28,7 @@ class ManagedChild {
   private stderrBytes = 0;
   private stderrTruncated = false;
   private descendants: ProcessIdentity[] = [];
+  private observationsAvailable = true;
 
   private constructor(child: ChildProcessWithoutNullStreams, stderrCapBytes: number) {
     this.child = child;
@@ -171,10 +173,13 @@ class ManagedChild {
     const processId = this.child.pid;
 
     if (processId === undefined) return;
-    const discovered = await listDescendantProcesses(processId);
+    // EFFECT-BRIDGE(S4c)
+    const discovered = await Effect.runPromise(listDescendantProcesses(processId));
     const retained = new Map(this.descendants.map((identity) => [identityKey(identity), identity]));
 
-    for (const identity of discovered) retained.set(identityKey(identity), identity);
+    this.observationsAvailable = this.observationsAvailable && discovered.available;
+
+    for (const identity of discovered.identities) retained.set(identityKey(identity), identity);
     // Graceful shutdown can reparent descendants; never discard the pre-shutdown snapshot.
     this.descendants = [...retained.values()];
   }
@@ -191,11 +196,23 @@ class ManagedChild {
   async terminate(graceMs: number): Promise<number[]> {
     await this.snapshotDescendants();
 
-    return killProcessTree(this.child, {
-      graceMs,
-      initialDescendants: this.descendants,
-      signalProcessGroup: this.running,
-    });
+    // EFFECT-BRIDGE(S4c)
+    const cleanup = await Effect.runPromise(
+      killProcessTree(this.child, {
+        graceMs,
+        initialDescendants: this.descendants,
+        initialObservationAvailable: this.observationsAvailable,
+        signalProcessGroup: this.running,
+      }),
+    );
+
+    if (!cleanup.cleanupConfirmed)
+      throw new AgentInvocationError('network', 'Managed process cleanup could not be confirmed.', {
+        applicationStarted: true,
+        cause: cleanup,
+      });
+
+    return cleanup.unreapedProcessIds;
   }
 }
 

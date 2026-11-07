@@ -1,14 +1,23 @@
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import * as Fiber from 'effect/Fiber';
 import type { AgentRequest } from '@attest/contracts';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { invokeAgent } from '../invoke.js';
 import { invokeCliAgent } from '../cli-invoker.js';
 import type { NativeAgentTarget } from '../types.js';
 import type { InvocationAttempt, InvokeOptions } from '../types.js';
+
+/** Executes the native CLI owner at this fixture test boundary. */
+const runCliAgent = (...args: Parameters<typeof invokeCliAgent>) =>
+  Effect.runPromise(invokeCliAgent(...args));
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -169,7 +178,7 @@ const parseStderrProcessId = (stderrExcerpt: string | undefined): number => {
 
 describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('writes the request and returns canonical parsed output', async () => {
-    const attempt = await invokeCliAgent(createCanonicalTarget('happy'), request, createOptions());
+    const attempt = await runCliAgent(createCanonicalTarget('happy'), request, createOptions());
 
     expect(attempt.status).toBe('ok');
 
@@ -183,7 +192,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('returns an agent error envelope as unvalidated raw output', async () => {
     const program = `process.stdout.write(JSON.stringify({ protocol: '${request.protocol}', error: { message: 'failed', code: 'fixture_failure' } }));`;
-    const attempt = await invokeCliAgent(createInlineTarget(program), request, createOptions());
+    const attempt = await runCliAgent(createInlineTarget(program), request, createOptions());
 
     expect(attempt.status).toBe('ok');
 
@@ -197,7 +206,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     const startedAt = performance.now();
 
     const attempt = requireInvocationError(
-      await invokeCliAgent(
+      await runCliAgent(
         createCanonicalTarget('hang'),
         request,
         createOptions({ timeoutMs, terminationGraceMs: 500 }),
@@ -213,7 +222,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('kills a grandchild that escaped into a new session', async () => {
     await withHeartbeatFile(async (heartbeatFile) => {
       const attempt = requireInvocationError(
-        await invokeCliAgent(
+        await runCliAgent(
           createPrivateFixtureTarget('session-escape-agent.cjs'),
           request,
           createOptions({
@@ -235,7 +244,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('sweeps a detached descendant created by a SIGTERM handler', async () => {
     await withHeartbeatFile(async (heartbeatFile) => {
       const attempt = requireInvocationError(
-        await invokeCliAgent(
+        await runCliAgent(
           createPrivateFixtureTarget('sigterm-forks-setsid-agent.cjs'),
           request,
           createOptions({
@@ -261,7 +270,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       const startedAt = performance.now();
 
       const attempt = requireInvocationError(
-        await invokeCliAgent(
+        await runCliAgent(
           createPrivateFixtureTarget('ignore-sigterm-agent.cjs'),
           request,
           createOptions({
@@ -287,7 +296,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     const startedAt = performance.now();
 
     const attempt = requireInvocationError(
-      await invokeCliAgent(
+      await runCliAgent(
         createCanonicalTarget('huge-output'),
         request,
         createOptions({
@@ -310,7 +319,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('gives caller cancellation precedence when timeout also expires', async () => {
     const abortController = new AbortController();
 
-    const invocation = invokeCliAgent(
+    const invocation = runCliAgent(
       createCanonicalTarget('hang'),
       request,
       createOptions({
@@ -332,7 +341,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     'returns invalid_envelope for canonical %s output',
     async (behavior) => {
       const attempt = requireInvocationError(
-        await invokeCliAgent(createCanonicalTarget(behavior), request, createOptions()),
+        await runCliAgent(createCanonicalTarget(behavior), request, createOptions()),
       );
 
       expect(attempt.error.code).toBe('invalid_envelope');
@@ -342,7 +351,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   );
 
   it('assembles canonical slow-drip output across streaming chunks', async () => {
-    const attempt = await invokeCliAgent(
+    const attempt = await runCliAgent(
       createCanonicalTarget('slow-drip'),
       request,
       createOptions({
@@ -357,7 +366,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('keeps canonical stderr noise out of the response envelope', async () => {
-    const attempt = await invokeCliAgent(
+    const attempt = await runCliAgent(
       createCanonicalTarget('stderr-noise'),
       request,
       createOptions(),
@@ -372,7 +381,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('reports the canonical non-zero exit code before parsing its valid envelope', async () => {
     const attempt = requireInvocationError(
-      await invokeCliAgent(createCanonicalTarget('nonzero-exit'), request, createOptions()),
+      await runCliAgent(createCanonicalTarget('nonzero-exit'), request, createOptions()),
     );
 
     expect(attempt.error.code).toBe('nonzero_exit');
@@ -382,7 +391,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('classifies a valid envelope followed by exit 23 as nonzero_exit', async () => {
     const attempt = requireInvocationError(
-      await invokeCliAgent(
+      await runCliAgent(
         createPrivateFixtureTarget('envelope-then-exit-23-agent.cjs'),
         request,
         createOptions(),
@@ -400,18 +409,188 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       command: [join(PRIVATE_FIXTURE_DIRECTORY, 'missing-agent.cjs')],
     };
 
-    const attempt = requireInvocationError(await invokeCliAgent(target, request, createOptions()));
+    const attempt = requireInvocationError(await runCliAgent(target, request, createOptions()));
 
     expect(attempt.error.code).toBe('spawn_failed');
   });
 
   it('decodes a 4096-byte stderr tail on a UTF-8 code-point boundary', async () => {
     const program = `process.stderr.write('€'.repeat(2000)); process.stdout.write(JSON.stringify({ protocol: '${request.protocol}', output: 'ok' }));`;
-    const attempt = await invokeCliAgent(createInlineTarget(program), request, createOptions());
+    const attempt = await runCliAgent(createInlineTarget(program), request, createOptions());
     const stderrExcerpt = attempt.diagnostics.stderrExcerpt ?? '';
 
     expect(attempt.status).toBe('ok');
     expect(stderrExcerpt).not.toContain('\uFFFD');
     expect(Buffer.byteLength(stderrExcerpt)).toBeLessThanOrEqual(4096);
   });
+
+  it('joins child cleanup on fiber interruption without interrupting a sibling attempt', async () => {
+    await withHeartbeatFile(async (heartbeatFile) => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const victim = yield* Effect.forkChild(
+            invokeCliAgent(
+              createInlineTarget(
+                `const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.appendFileSync(process.env.ORPHAN_HEARTBEAT_FILE, 'PID ' + process.pid + ' '); setInterval(() => fs.appendFileSync(process.env.ORPHAN_HEARTBEAT_FILE, 'tick '), 30);`,
+              ),
+              request,
+              createOptions({
+                terminationGraceMs: 100,
+                env: createEnvironment({ ORPHAN_HEARTBEAT_FILE: heartbeatFile }),
+              }),
+            ),
+          );
+
+          const sibling = yield* Effect.forkChild(
+            invokeCliAgent(
+              createInlineTarget(
+                `setTimeout(() => process.stdout.write(JSON.stringify({ output: 'sibling' })), 500);`,
+              ),
+              request,
+              createOptions(),
+            ),
+          );
+
+          const contents = yield* Effect.tryPromise(() => readHeartbeat(heartbeatFile));
+          yield* Fiber.interrupt(victim);
+
+          return {
+            contents,
+            victim: yield* Fiber.await(victim),
+            sibling: yield* Fiber.join(sibling),
+          };
+        }),
+      );
+
+      expect(Exit.isFailure(result.victim)).toBe(true);
+
+      if (Exit.isFailure(result.victim))
+        expect(Cause.hasInterrupts(result.victim.cause)).toBe(true);
+      expect(result.sibling).toMatchObject({ status: 'ok', raw: { output: 'sibling' } });
+      await expectHeartbeatStopped(heartbeatFile);
+      expect(await waitForMissingProcessError(parseStderrProcessId(result.contents))).toMatchObject(
+        { code: 'ESRCH' },
+      );
+    });
+  });
+
+  it('joins the first-output snapshot and sweeps an escaped descendant after normal root close', async () => {
+    await withHeartbeatFile(async (heartbeatFile) => {
+      const program = `
+        const { spawn } = require('node:child_process');
+        const code = "const fs = require('node:fs'); const file = process.argv[1]; fs.appendFileSync(file, 'PID ' + process.pid + ' '); setInterval(() => fs.appendFileSync(file, 'tick '), 30);";
+        const child = spawn(process.execPath, ['-e', code, process.env.ORPHAN_HEARTBEAT_FILE], { detached: true, stdio: 'ignore' });
+        child.unref();
+        setTimeout(() => { process.stdout.write(JSON.stringify({ output: 'normal' })); setTimeout(() => process.exit(0), 250); }, 100);
+      `;
+
+      const attempt = await runCliAgent(
+        createInlineTarget(program),
+        request,
+        createOptions({
+          terminationGraceMs: 100,
+          env: createEnvironment({ ORPHAN_HEARTBEAT_FILE: heartbeatFile }),
+        }),
+      );
+
+      expect(attempt).toMatchObject({ status: 'ok', raw: { output: 'normal' } });
+      expect(attempt.diagnostics.unreapedProcessIds).toBeUndefined();
+      await expectHeartbeatStopped(heartbeatFile);
+      const processId = parseHeartbeatProcessId(await readHeartbeat(heartbeatFile));
+      expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
+    });
+  });
+
+  it('fails directory setup through the closed infrastructure channel', async () => {
+    const exit = await Effect.runPromiseExit(
+      invokeCliAgent(
+        createCanonicalTarget('happy'),
+        request,
+        createOptions({ workingDirectory: CANONICAL_AGENT_PATH }),
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+
+    if (Exit.isFailure(exit)) {
+      expect(Cause.hasDies(exit.cause)).toBe(false);
+      const failure = exit.cause.reasons.find((reason) => reason._tag === 'Fail');
+      expect(failure?._tag).toBe('Fail');
+
+      if (failure?._tag === 'Fail') {
+        expect(failure.error._tag).toBe('CliInfrastructureError');
+
+        if (failure.error._tag === 'CliInfrastructureError')
+          expect(failure.error.operation).toBe('create_directory');
+      }
+    }
+  });
 });
+
+it.each([
+  { stdout: 'invalid JSON', status: 'invocation_error' },
+  { stdout: '{"output":"done"}', status: 'ok' },
+])(
+  'retains $status attempt evidence and prohibits retry when descendant observations are unavailable',
+  async ({ stdout, status }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-unavailable-ps-'));
+    const pidFile = join(directory, 'owned-pids');
+    await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+    await writeFile(pidFile, '');
+
+    const program = `
+    const { spawn } = require('node:child_process');
+    const fs = require('node:fs');
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+    fs.appendFileSync(${JSON.stringify(pidFile)}, child.pid + '\\n');
+    child.unref();
+    setTimeout(() => process.stdout.write(${JSON.stringify(stdout)}), 150);
+  `;
+
+    try {
+      vi.stubEnv('PATH', directory);
+
+      const exit = await Effect.runPromiseExit(
+        invokeAgent(createInlineTarget(program), request, {
+          ...createOptions({
+            workingDirectory: directory,
+            terminationGraceMs: 0,
+            env: { PATH: directory },
+          }),
+          retries: 1,
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+
+      if (Exit.isFailure(exit)) {
+        const failure = exit.cause.reasons.find((reason) => reason._tag === 'Fail');
+        expect(failure).toMatchObject({
+          error: {
+            _tag: 'CliCleanupError',
+            attempt:
+              status === 'ok'
+                ? { status, raw: { output: 'done' } }
+                : { status, error: { code: 'invalid_envelope' } },
+          },
+        });
+      }
+
+      const pids = (await readFile(pidFile, 'utf8')).trim().split('\n').filter(Boolean).map(Number);
+      expect(pids).toHaveLength(1);
+      expect(() => process.kill(pids[0]!, 0)).not.toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+
+      for (const value of (await readFile(pidFile, 'utf8')).trim().split('\n').filter(Boolean)) {
+        try {
+          process.kill(Number(value), 'SIGKILL');
+        } catch {
+          /* The owned fixture may already have exited. */
+        }
+      }
+
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);

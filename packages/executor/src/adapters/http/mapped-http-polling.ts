@@ -1,9 +1,10 @@
+import * as Effect from 'effect/Effect';
+import { httpDelay, httpSync } from './http-effects.js';
 import { isDeepStrictEqual } from 'node:util';
 
 import { isNumber, isString, type AgentRequest } from '@attest/contracts';
 
-import { AgentInvocationError, abortedError } from '../../errors.js';
-import { abortableWait } from '../../internal/abortable-wait.js';
+import { AgentInvocationError } from '../../errors.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { HttpJsonResponse } from './http-client.js';
@@ -126,25 +127,25 @@ const pollingFailure = (
 };
 
 /** Submits remote work, then polls its status URL until an authored terminal value appears. */
-const runPolling = async (
+const runPolling = Effect.fn('http.polling')(function* (
   transport: PollingTransport,
   request: AgentRequest,
   submission: MaterializedHttpRequest,
   context: ExchangeContext,
-): Promise<ExchangeOutcome> => {
+): Effect.fn.Return<ExchangeOutcome, AgentInvocationError> {
   const { policy, retry: retryPolicy, signal } = context;
-  assertStatusUrlTemplate(transport);
+  yield* httpSync(() => assertStatusUrlTemplate(transport));
   const idempotencyHeader = transport.idempotency_header;
 
   if (idempotencyHeader !== undefined) {
-    setIdempotencyHeader(submission.headers, idempotencyHeader, request);
+    yield* httpSync(() => setIdempotencyHeader(submission.headers, idempotencyHeader, request));
   }
 
   const pollingDelay = (retry: number, retryAfter: string | undefined): number =>
     boundedPollingDelay(transport, retryAfter, retryBackoffDelay(retryPolicy?.backoff, retry));
 
   // Replaying a submit can create duplicate remote work unless the server can deduplicate it.
-  const submitted = await requestWithRetries(submission, context, {
+  const submitted = yield* requestWithRetries(submission, context, {
     allowRetry: idempotencyHeader !== undefined,
     delayFor: pollingDelay,
   });
@@ -153,10 +154,12 @@ const runPolling = async (
   const jobId = readJsonPointer(submitted.response.raw, transport.job_id_pointer);
 
   if (!isString(jobId) && !isNumber(jobId)) {
-    throw new AgentInvocationError('invalid_envelope', 'Polling job id extraction failed.');
+    return yield* Effect.fail(
+      new AgentInvocationError('invalid_envelope', 'Polling job id extraction failed.'),
+    );
   }
 
-  const statusUrl = pollingUrl(transport, submitted.response, jobId);
+  const statusUrl = yield* httpSync(() => pollingUrl(transport, submitted.response, jobId));
 
   const pollRequest: MaterializedHttpRequest = {
     method: 'GET',
@@ -174,11 +177,9 @@ const runPolling = async (
   let interval = transport.minimum_interval_ms;
 
   for (;;) {
-    await abortableWait(interval, signal, () =>
-      abortedError(policy.callerSignal, 'Mapped HTTP invocation'),
-    );
+    yield* httpDelay(interval, signal, policy.callerSignal);
 
-    const polledOutcome = await requestWithRetries(pollRequest, context, {
+    const polledOutcome = yield* requestWithRetries(pollRequest, context, {
       allowRetry: true,
       delayFor: pollingDelay,
     });
@@ -193,7 +194,9 @@ const runPolling = async (
         durationMs: polledDurationMs,
         response: polled,
         remoteJobId:
-          extractRemoteJobId(polled.raw, transport.extraction.remote_job_id_pointer) ?? jobId,
+          (yield* httpSync(() =>
+            extractRemoteJobId(polled.raw, transport.extraction.remote_job_id_pointer),
+          )) ?? jobId,
       };
     }
 
@@ -208,6 +211,6 @@ const runPolling = async (
     const next = parseRetryAfter(polled.headers['retry-after']) ?? interval * 2;
     interval = clampInterval(transport, next);
   }
-};
+});
 
 export { runPolling };

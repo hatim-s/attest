@@ -1,3 +1,8 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as Effect from 'effect/Effect';
+import * as Fiber from 'effect/Fiber';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -77,20 +82,216 @@ describe('killProcessTree', () => {
     });
 
     const closed = new Promise((resolve) => child.once('close', resolve));
-    let descendants: Awaited<ReturnType<typeof listDescendantProcesses>> = [];
+
+    let descendants: Effect.Success<ReturnType<typeof listDescendantProcesses>> = {
+      identities: [],
+      available: false,
+    };
+
     await vi.waitFor(async () => {
-      descendants = await listDescendantProcesses(child.pid ?? -1);
-      expect(descendants).toHaveLength(1);
+      descendants = await Effect.runPromise(listDescendantProcesses(child.pid ?? -1));
+      expect(descendants.identities).toHaveLength(1);
+      expect(descendants.available).toBe(true);
     });
 
-    const survivors = await killProcessTree(child, {
-      graceMs: 200,
-      initialDescendants: descendants,
-      signalProcessGroup: true,
-    });
+    const survivors = await Effect.runPromise(
+      killProcessTree(child, {
+        graceMs: 200,
+        initialDescendants: descendants.identities,
+        initialObservationAvailable: descendants.available,
+        signalProcessGroup: true,
+      }),
+    );
 
     await closed;
 
-    expect(survivors).toEqual([]);
+    expect(survivors).toEqual({ unreapedProcessIds: [], cleanupConfirmed: true });
   });
+  it('escalates an owned child that ignores TERM and confirms close', async () => {
+    const child = spawnInProcessGroup(
+      [
+        process.execPath,
+        '-e',
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setInterval(() => {}, 1000);",
+      ],
+      { cwd: process.cwd(), env: { PATH: process.env.PATH ?? '' } },
+    );
+
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+
+    try {
+      await new Promise<void>((resolve) => child.stdout?.once('data', () => resolve()));
+
+      const survivors = await Effect.runPromise(
+        killProcessTree(child, {
+          graceMs: 50,
+          signalProcessGroup: true,
+        }),
+      );
+
+      await closed;
+      expect(survivors).toEqual({ unreapedProcessIds: [], cleanupConfirmed: true });
+      expect(child.signalCode).toBe('SIGKILL');
+    } finally {
+      await Effect.runPromise(killProcessTree(child, { graceMs: 0, signalProcessGroup: true }));
+      await closed;
+    }
+  });
+
+  it('joins a cleanup sweep before honoring fiber interruption', async () => {
+    const child = spawnInProcessGroup(
+      [
+        process.execPath,
+        '-e',
+        "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setInterval(() => {}, 1000);",
+      ],
+      { cwd: process.cwd(), env: { PATH: process.env.PATH ?? '' } },
+    );
+
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+
+    try {
+      await new Promise<void>((resolve) => child.stdout?.once('data', () => resolve()));
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sweep = yield* Effect.forkChild(
+            killProcessTree(child, {
+              graceMs: 75,
+              signalProcessGroup: true,
+            }),
+          );
+
+          yield* Effect.sleep(10);
+          yield* Fiber.interrupt(sweep);
+        }),
+      );
+      await closed;
+      expect(child.signalCode).toBe('SIGKILL');
+    } finally {
+      await Effect.runPromise(killProcessTree(child, { graceMs: 0, signalProcessGroup: true }));
+      await closed;
+    }
+  });
+
+  it('does not signal an identity whose start time no longer matches', async () => {
+    const child = spawnInProcessGroup(
+      [process.execPath, '-e', "process.stdout.write('ready'); setInterval(() => {}, 1000);"],
+      { cwd: process.cwd(), env: { PATH: process.env.PATH ?? '' } },
+    );
+
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+
+    try {
+      await new Promise<void>((resolve) => child.stdout?.once('data', () => resolve()));
+      expect(child.pid).toBeDefined();
+
+      const survivors = await Effect.runPromise(
+        killProcessTree(child, {
+          graceMs: 0,
+          signalProcessGroup: false,
+          initialDescendants: [
+            { processId: child.pid!, startedAt: 'stale identity', command: 'node' },
+          ],
+        }),
+      );
+
+      expect(survivors).toEqual({ unreapedProcessIds: [], cleanupConfirmed: true });
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      await Effect.runPromise(killProcessTree(child, { graceMs: 0, signalProcessGroup: true }));
+      await closed;
+    }
+  });
+  it('bounds an unresponsive ps observation inside a masked cleanup sweep', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-stalled-ps-'));
+    const pidFile = join(directory, 'ps-pid');
+    await writeFile(
+      join(directory, 'ps'),
+      `#!/bin/sh
+ echo $$ > "${pidFile}"
+ exec /bin/sleep 30
+`,
+      { mode: 0o755 },
+    );
+
+    const child = spawnInProcessGroup([process.execPath, '-e', 'setInterval(() => {}, 1000)'], {
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? '' },
+    });
+
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+
+    try {
+      vi.stubEnv('PATH', directory);
+      const started = Date.now();
+
+      const survivors = await Effect.runPromise(
+        killProcessTree(child, {
+          graceMs: 0,
+          signalProcessGroup: true,
+        }),
+      );
+
+      const snapshotPid = Number((await readFile(pidFile, 'utf8')).trim());
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(survivors).toEqual({ unreapedProcessIds: [], cleanupConfirmed: false });
+      expect(() => process.kill(snapshotPid, 0)).toThrow();
+      await closed;
+    } finally {
+      vi.unstubAllEnvs();
+      await Effect.runPromise(killProcessTree(child, { graceMs: 0, signalProcessGroup: true }));
+      await closed;
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 7000);
 });
+
+it('retains verified survivors without confirming cleanup', async () => {
+  const child = spawnInProcessGroup(
+    [process.execPath, '-e', "process.stdout.write('ready'); setInterval(() => {}, 1000);"],
+    { cwd: process.cwd(), env: { PATH: process.env.PATH ?? '' } },
+  );
+
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  const send = process.kill.bind(process);
+  let restoreSignals: (() => void) | undefined;
+
+  try {
+    await new Promise<void>((resolve) => child.stdout?.once('data', () => resolve()));
+    const snapshot = await Effect.runPromise(listDescendantProcesses(process.pid));
+    const identity = snapshot.identities.find((candidate) => candidate.processId === child.pid);
+    expect(identity).toBeDefined();
+
+    if (identity === undefined) throw new Error('Owned fixture identity was not observed');
+
+    // Emulate denied termination only for this owned fixture; every observation still uses real ps.
+    const signals = vi
+      .spyOn(process, 'kill')
+      .mockImplementation((pid, signal) =>
+        pid === child.pid && (signal === 'SIGTERM' || signal === 'SIGKILL')
+          ? true
+          : send(pid, signal),
+      );
+
+    restoreSignals = () => {
+      signals.mockRestore();
+    };
+
+    const cleanup = await Effect.runPromise(
+      killProcessTree(child, {
+        graceMs: 0,
+        signalProcessGroup: false,
+        initialDescendants: [identity],
+        initialObservationAvailable: snapshot.available,
+      }),
+    );
+
+    expect(cleanup).toEqual({ unreapedProcessIds: [child.pid], cleanupConfirmed: false });
+    expect(() => send(child.pid!, 0)).not.toThrow();
+  } finally {
+    restoreSignals?.();
+    child.kill('SIGKILL');
+    await closed;
+  }
+}, 10_000);

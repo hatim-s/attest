@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -104,10 +105,16 @@ const runCommand = (
       terminationReason = reason;
 
       try {
-        // The returned descendant list is not a reliable reap signal: ps exits non-zero when none of
-        // the queried PIDs exist, which the sweep reports as survivors. Direct-child exit decides.
-        await killProcessTree(child, { graceMs: PROCESS_KILL_GRACE_MS, signalProcessGroup: true });
-        settle({ ok: false, error: terminationError(reason, options, await waitForExit(child)) });
+        // EFFECT-BRIDGE(S6)
+        const cleanup = await Effect.runPromise(
+          killProcessTree(child, { graceMs: PROCESS_KILL_GRACE_MS, signalProcessGroup: true }),
+        );
+
+        const closed = await waitForExit(child);
+        settle({
+          ok: false,
+          error: terminationError(reason, options, cleanup.cleanupConfirmed && closed),
+        });
       } catch (error: unknown) {
         const cleanupError = terminationError(reason, options, false);
         const detail = error instanceof Error ? error.message : 'unknown error';

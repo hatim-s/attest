@@ -144,8 +144,15 @@ class JsonlBridgeSession {
 
     // Cancellation can arrive while the OS is spawning the process, before session listeners exist.
     if (options.signal?.aborted) {
-      await process.terminate(options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS);
-      throw new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
+      const failure = new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
+
+      try {
+        await process.terminate(options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS);
+      } catch (cleanupFailure: unknown) {
+        failure.cause = { cleanupFailure };
+      }
+
+      throw failure;
     }
 
     return new JsonlBridgeSession(agent, process, options);
@@ -488,6 +495,8 @@ class JsonlBridgeSession {
           Math.min(DEFAULT_TERMINATION_GRACE_MS, this.agent.transport.cancellation_grace_ms),
       )
       .then(() => undefined);
+    // Teardown can finish before the run owner calls close; keep its rejection for that caller.
+    void this.closePromise.catch(() => undefined);
   }
 
   /** Ends the run-scoped bridge and guarantees process-tree cleanup. */

@@ -1,12 +1,15 @@
 import { stripStruct } from '@attest/contracts';
 import { parseAgentResponse, type ContractIssue } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 import * as Schema from 'effect/Schema';
 
 import { AgentInvocationError } from '../errors.js';
 import { createRawExcerpt } from './raw-excerpt.js';
 import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from '../types.js';
 
-type InvocationAttemptFactory = (attemptIndex: number) => Promise<InvocationAttempt>;
+type InvocationAttemptFactory<E = never, R = never> = (
+  attemptIndex: number,
+) => Effect.Effect<InvocationAttempt, E, R>;
 
 /**
  * Public entries take a raw retry count that never passed through `retryPolicySchema`. A NaN or
@@ -61,6 +64,8 @@ const isRetryableInvocationError = (
 ): boolean => {
   if (diagnostics.sandboxCompletionConfirmed === false) return false;
 
+  if (error.applicationStarted === true) return false;
+
   if (error.code === 'cancelled') return false;
 
   if (error.code !== 'http_status') return true;
@@ -69,15 +74,15 @@ const isRetryableInvocationError = (
 };
 
 /** Runs transport attempts under the common validation, evidence, and retry rules. */
-const invokeWithRetries = async (
-  invokeOnce: InvocationAttemptFactory,
+const invokeWithRetries = Effect.fn('invokeWithRetries')(function* <E, R>(
+  invokeOnce: InvocationAttemptFactory<E, R>,
   retries: number,
-): Promise<InvocationResult> => {
+): Effect.fn.Return<InvocationResult, E, R> {
   const attempts: InvocationAttempt[] = [];
   let attemptIndex = 0;
 
   for (;;) {
-    const transportAttempt = withAttemptEvidence(await invokeOnce(attemptIndex));
+    const transportAttempt = withAttemptEvidence(yield* invokeOnce(attemptIndex));
 
     const attempt =
       transportAttempt.status === 'ok'
@@ -97,6 +102,6 @@ const invokeWithRetries = async (
 
     attemptIndex += 1;
   }
-};
+});
 
 export { invokeWithRetries, retryBudgetSchema, type InvocationAttemptFactory };

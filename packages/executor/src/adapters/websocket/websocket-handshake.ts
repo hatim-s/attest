@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 
@@ -61,11 +62,14 @@ const openWebSocketHandshake = async (
   const httpUrl = new URL(webSocketUrl);
   httpUrl.protocol = webSocketUrl.protocol === 'wss:' ? 'https:' : 'http:';
 
-  const resolved = await resolveSafeHttpUrl(httpUrl.toString(), {
-    timeoutMs: options.openTimeoutMs,
-    signal: options.signal,
-    callerSignal: options.callerSignal,
-  });
+  // EFFECT-BRIDGE(S4b): Promise protocol owner executes this native HTTP leaf until S4b.
+  const resolved = await Effect.runPromise(
+    resolveSafeHttpUrl(httpUrl.toString(), {
+      timeoutMs: options.openTimeoutMs,
+      signal: options.signal,
+      callerSignal: options.callerSignal,
+    }),
+  );
 
   if (options.secrets.length > 0 && webSocketUrl.protocol !== 'wss:' && !resolved.loopback) {
     throw new AgentInvocationError(
@@ -88,28 +92,31 @@ const openWebSocketHandshake = async (
 
   if (options.subprotocol !== undefined) headers['sec-websocket-protocol'] = options.subprotocol;
 
-  const opened = await openPinnedRequest(resolved, {
-    method: 'GET',
-    allowUpgrade: true,
-    headers,
-    signal: options.signal,
-    firstByteTimeoutMs: options.openTimeoutMs,
-    errors: {
-      aborted: () =>
-        abortedError(options.callerSignal, 'WebSocket opening', {
-          classification: 'open_timeout',
-        }),
-      firstByteTimeout: () =>
-        new AgentInvocationError('timeout', 'WebSocket opening timed out.', {
-          classification: 'open_timeout',
-        }),
-      failed: (cause) =>
-        new AgentInvocationError('network', 'WebSocket connection failed.', {
-          cause,
-          classification: 'connection_failed',
-        }),
-    },
-  });
+  // EFFECT-BRIDGE(S4b): Promise protocol owner executes this native HTTP leaf until S4b.
+  const opened = await Effect.runPromise(
+    openPinnedRequest(resolved, {
+      method: 'GET',
+      allowUpgrade: true,
+      headers,
+      signal: options.signal,
+      firstByteTimeoutMs: options.openTimeoutMs,
+      errors: {
+        aborted: () =>
+          abortedError(options.callerSignal, 'WebSocket opening', {
+            classification: 'open_timeout',
+          }),
+        firstByteTimeout: () =>
+          new AgentInvocationError('timeout', 'WebSocket opening timed out.', {
+            classification: 'open_timeout',
+          }),
+        failed: (cause) =>
+          new AgentInvocationError('network', 'WebSocket connection failed.', {
+            cause,
+            classification: 'connection_failed',
+          }),
+      },
+    }),
+  );
 
   if (opened.kind === 'response') {
     opened.response.resume();

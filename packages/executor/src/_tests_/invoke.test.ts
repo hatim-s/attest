@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as Effect from 'effect/Effect';
 
 import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
@@ -20,21 +21,52 @@ const request: AgentRequest = {
 };
 
 describe('invokeAgent', { timeout: 30_000 }, () => {
+  it('does not redispatch a timed-out HTTP request whose completion is unknown', async () => {
+    const pending: Array<() => void> = [];
+
+    const httpFetch = (): Promise<Response> =>
+      new Promise((resolve) => {
+        pending.push(() => resolve(new Response(null, { status: 200 })));
+      });
+
+    try {
+      const result = await Effect.runPromise(
+        invokeAgent({ type: 'http', url: 'https://agent.invalid/' }, request, {
+          timeoutMs: 20,
+          outputCapBytes: 1_024,
+          retries: 2,
+          httpFetch,
+        }),
+      );
+
+      expect(result).toMatchObject({
+        status: 'invocation_error',
+        error: { code: 'timeout', applicationStarted: true },
+      });
+      expect(pending).toHaveLength(1);
+      expect(result.attempts).toHaveLength(1);
+    } finally {
+      for (const complete of pending) complete();
+    }
+  });
+
   it('gives every retry attempt a fresh working directory', async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), 'attest-marker-probe-'));
     const statePath = join(stateDirectory, 'state');
 
     try {
-      const result = await invokeAgent(
-        { type: 'cli', command: [process.execPath, MARKER_PROBE_AGENT_PATH] },
-        request,
-        {
-          outputCapBytes: 1_024 * 1_024,
-          retries: 1,
-          terminationGraceMs: 100,
-          timeoutMs: 8_000,
-          env: { PATH: process.env.PATH ?? '', MARKER_PROBE_STATE_FILE: statePath },
-        },
+      const result = await Effect.runPromise(
+        invokeAgent(
+          { type: 'cli', command: [process.execPath, MARKER_PROBE_AGENT_PATH] },
+          request,
+          {
+            outputCapBytes: 1_024 * 1_024,
+            retries: 1,
+            terminationGraceMs: 100,
+            timeoutMs: 8_000,
+            env: { PATH: process.env.PATH ?? '', MARKER_PROBE_STATE_FILE: statePath },
+          },
+        ),
       );
 
       expect(result).toMatchObject({
@@ -64,13 +96,15 @@ describe('invokeAgent', { timeout: 30_000 }, () => {
       };
 
       await expect(
-        invokeAgent({ type: 'http', url: 'https://agent.invalid/' }, request, {
-          outputCapBytes: 1_024,
-          retries,
-          timeoutMs: 1_000,
-          httpFetch,
-          signal: controller.signal,
-        }),
+        Effect.runPromise(
+          invokeAgent({ type: 'http', url: 'https://agent.invalid/' }, request, {
+            outputCapBytes: 1_024,
+            retries,
+            timeoutMs: 1_000,
+            httpFetch,
+            signal: controller.signal,
+          }),
+        ),
       ).rejects.toThrow(/retries/u);
       expect(requests).toBe(0);
     },

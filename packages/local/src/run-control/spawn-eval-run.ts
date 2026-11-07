@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { open, unlink, type FileHandle } from 'node:fs/promises';
@@ -296,7 +297,10 @@ const spawnEvalRun = async ({
     } catch (error: unknown) {
       // SIGTERM lets the CLI finalize what it recorded; the group is killed after the grace.
       if (child.exitCode === null && child.signalCode === null) {
-        await killProcessTree(child, { graceMs: STOP_GRACE_MS, signalProcessGroup: true });
+        // EFFECT-BRIDGE(S9a)
+        await Effect.runPromise(
+          killProcessTree(child, { graceMs: STOP_GRACE_MS, signalProcessGroup: true }),
+        );
       }
 
       throw error;

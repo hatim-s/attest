@@ -86,6 +86,8 @@ The attempt timeout spans submission, every wait, all polls, and terminal extrac
 
 Submission retries are allowed only when `--idempotency-header` is configured and before a job id is observed. Attest generates a stable per-case header value. Safe polling transport failures and retryable HTTP statuses may use the configured retry budget. Cancellation stops local polling; remote cancellation is not implemented.
 
+Replay permission is subject to transport evidence. A timeout or reset after possible dispatch, a failed body observation, or unconfirmed cleanup prevents another request, including polling GETs and submissions with an idempotency header. Only known pre-dispatch failures and fully observed retryable responses remain eligible. A local timeout does not confirm remote cancellation.
+
 ## SSE and JSONL stream contract
 
 For SSE, return `Content-Type: text/event-stream` and put one JSON value in the combined `data:` fields of each event:

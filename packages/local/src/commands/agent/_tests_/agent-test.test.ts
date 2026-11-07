@@ -1,3 +1,11 @@
+import { CliCleanupError, AgentInvocationError, type InvocationAttempt } from '@attest/executor';
+import { startupFailure } from '../adapter/invoke-resolved-agent.js';
+import { redactInvocation } from '../adapter/evidence-redaction.js';
+import { mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import type { StoredCaseExecution } from '@attest/core';
+import { testNativeAgentConnection } from '../adapter/test-native-agent.js';
 import { COMMAND_REQUEST_SCHEMA_ID, type AgentResource } from '@attest/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -183,3 +191,106 @@ describe('agent test command', () => {
     });
   });
 });
+
+it('records CLI cleanup failure with completed attempt evidence', async () => {
+  const root = await realpath(await createAgentProject());
+  const directory = await mkdtemp(join(tmpdir(), 'attest-recorded-cleanup-'));
+  const pidFile = join(directory, 'owned-pids');
+  await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+  await writeFile(pidFile, '');
+
+  const configured = nativeAgent(
+    'cleanup',
+    `
+    const { spawn } = require('node:child_process');
+    const fs = require('node:fs');
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+    fs.appendFileSync(${JSON.stringify(pidFile)}, child.pid + '\\n');
+    child.unref();
+    setTimeout(() => process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: 'completed' })), 150);
+  `,
+    { retry: { retries: 1, backoff: { kind: 'none' } } },
+  );
+
+  const recorded: StoredCaseExecution[] = [];
+
+  try {
+    process.env.ATTEST_SOURCE_SECRET = 'unused';
+    vi.stubEnv('PATH', directory);
+    await expect(
+      testNativeAgentConnection({
+        agent: configured,
+        input: {},
+        projectRoot: root,
+        onExecution: (execution) => {
+          recorded.push(execution);
+
+          return Promise.resolve();
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'invocation_failed',
+      message: 'Agent connection test failed: CLI cleanup could not be confirmed.',
+    });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      outcome: 'invocation_error',
+      errorCode: 'network',
+      errorMessage: 'CLI cleanup could not be confirmed.',
+      diagnostics: { exitCode: 0 },
+      attempts: [
+        {
+          status: 'invocation_error',
+          diagnostics: { exitCode: 0 },
+        },
+      ],
+    });
+    expect(recorded[0]?.attempts?.[0]?.rawExcerpt?.text).toContain('completed');
+    expect((await readFile(pidFile, 'utf8')).trim().split('\n')).toHaveLength(1);
+  } finally {
+    vi.unstubAllEnvs();
+
+    for (const value of (await readFile(pidFile, 'utf8')).trim().split('\n').filter(Boolean)) {
+      try {
+        process.kill(Number(value), 'SIGKILL');
+      } catch {
+        /* The owned fixture may already have exited. */
+      }
+    }
+
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(['ok', 'invocation_error'] as const)(
+  'preserves survivor evidence when projecting %s CLI cleanup failure',
+  (status) => {
+    const evidence = {
+      diagnostics: { exitCode: 0, unreapedProcessIds: [424242] },
+      durationMs: 12,
+      warnings: [],
+      rawExcerpt: { text: 'completed bytes', truncated: false, sha256: 'a'.repeat(64) },
+    };
+
+    const attempt: InvocationAttempt =
+      status === 'ok'
+        ? { ...evidence, status, raw: { output: 'completed' } }
+        : { ...evidence, status, error: new AgentInvocationError('timeout', 'CLI timed out.') };
+
+    const cleanup = new CliCleanupError({ causes: [], attempt });
+    const projected = startupFailure(cleanup, 100);
+    expect(projected).toMatchObject({ error: { applicationStarted: true } });
+    const result = redactInvocation(projected, []);
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      diagnostics: evidence.diagnostics,
+      durationMs: 12,
+      rawExcerpt: evidence.rawExcerpt,
+      error: { code: status === 'ok' ? 'network' : 'timeout' },
+      attempts: [{ diagnostics: evidence.diagnostics, rawExcerpt: evidence.rawExcerpt }],
+    });
+
+    if (result.status === 'invocation_error')
+      expect(result.error.message).toContain('CLI cleanup could not be confirmed.');
+  },
+);

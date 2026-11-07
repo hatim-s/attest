@@ -1,6 +1,8 @@
 import { AgentInvocationError } from '../../../errors.js';
 import { createServer as createNetServer } from 'node:net';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 
 import {
   AGENT_PROTOCOL,
@@ -10,7 +12,7 @@ import {
   isString,
   type AgentRequest,
 } from '@attest/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { startLoopbackServer } from '../../../_tests_/support/loopback-server.js';
 import { startBackgroundAgent, type BackgroundAgentResource } from '../background-adapter.js';
@@ -331,3 +333,40 @@ describe('background process adapter', () => {
       .toBe(false);
   });
 });
+
+it.each(['cancelled', 'timeout'] as const)(
+  'keeps startup %s primary when background cleanup is unconfirmed',
+  async (code) => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-background-cleanup-'));
+    await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+    const controller = new AbortController();
+    const configured = agent(await freePort(), { kind: 'stderr', pattern: 'NEVER_READY' });
+
+    try {
+      vi.stubEnv('PATH', directory);
+
+      const startup = startBackgroundAgent(
+        {
+          ...configured,
+          timeouts: { connect_ms: 30 },
+          transport: {
+            ...configured.transport,
+            start_argv: [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+            shutdown: undefined,
+            stop_timeout_ms: 0,
+          },
+        },
+        { cwd: directory, env: { PATH: directory }, signal: controller.signal },
+      );
+
+      if (code === 'cancelled') controller.abort();
+      await expect(startup).rejects.toMatchObject({
+        code,
+        cause: { cleanupFailure: { code: 'network' } },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);

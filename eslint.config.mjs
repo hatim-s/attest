@@ -51,6 +51,51 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/executor/src/_tests_/portability.check.mjs',
+    operations: ['Effect.runPromise'],
+    owner: 'Node and Bun native executor portability process roots',
+  },
+  {
+    file: 'packages/executor/src/_tests_/http-invoker.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'owned HTTP, transport and cleanup fixture execution',
+  },
+  {
+    file: 'packages/executor/src/_tests_/http-transports.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'owned HTTP, transport and cleanup fixture execution',
+  },
+  {
+    file: 'packages/executor/src/adapters/http/_tests_/mapped-http-adapter.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'owned HTTP, transport and cleanup fixture execution',
+  },
+  {
+    file: 'packages/executor/src/adapters/http/_tests_/pinned-request.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'owned HTTP, transport and cleanup fixture execution',
+  },
+  {
+    file: 'packages/executor/src/_tests_/cli-invoker.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'CLI native attempt and resource lifetime invariant test root',
+  },
+  {
+    file: 'packages/executor/src/_tests_/invoke.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'native dispatch retry and configuration invariant test root',
+  },
+  {
+    file: 'packages/executor/src/internal/_tests_/invocation-retry.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'native retry policy, typed channel, service inference and defect invariant test roots',
+  },
+  {
+    file: 'packages/executor/src/internal/_tests_/process-tree.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'owned process observation, identity and termination invariants',
+  },
+  {
     file: 'packages/api/src/server/create-api-app.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'Hono request read execution roots; host retains catalog lifetime',
@@ -244,6 +289,131 @@ const effectRoots = [
 
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
+  {
+    file: 'packages/executor/src/adapters/process/background-adapter.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'background process lifecycle invokes native mapped HTTP',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S4c',
+        owner: 'background process lifecycle invokes native mapped HTTP',
+      },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/agent/adapter/invoke-resolved-agent.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'local agent dispatch awaits native executor evidence',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'local agent dispatch awaits native executor evidence',
+      },
+    ],
+  },
+  {
+    file: 'packages/executor/src/adapters/callback/callback-adapter.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'Promise callback protocol HTTP leaf closure',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S4a',
+        owner: 'Promise callback protocol HTTP leaf closure',
+      },
+    ],
+  },
+  {
+    file: 'packages/executor/src/adapters/stream/node-stream-request.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'Promise stream HTTP leaf closure',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S4a',
+        owner: 'Promise stream HTTP leaf closure',
+      },
+    ],
+  },
+  {
+    file: 'packages/executor/src/adapters/websocket/websocket-handshake.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'Promise WebSocket handshake HTTP leaf closure',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S4b',
+        owner: 'Promise WebSocket handshake HTTP leaf closure',
+      },
+    ],
+  },
+  {
+    file: 'packages/executor/src/adapters/http/legacy-stream-fetch.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'Promise async stream body owner acquiring native guarded headers',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S4a',
+        owner: 'Promise async stream body owner acquiring native guarded headers',
+      },
+    ],
+  },
+  {
+    file: 'packages/executor/src/adapters/sandbox/vercel-sandbox-adapter.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S5 Promise sandbox lifecycle invokes native retry and sandbox attempt',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S5',
+        owner: 'S5 sandbox lifecycle migration',
+      },
+    ],
+  },
+  {
+    file: 'packages/executor/src/adapters/process/managed-child.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'managed process snapshot and termination',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S4c',
+        owner: 'managed process snapshot and termination',
+      },
+    ],
+  },
+  {
+    file: 'packages/runtime/src/metrics/internal/exec-command.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'metric command termination',
+    bridges: [
+      { operation: 'Effect.runPromise', removalSlice: 'S6', owner: 'metric command termination' },
+    ],
+  },
+  {
+    file: 'packages/local/src/commands/eval/hook-command.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'eval hook process lifetime',
+    bridges: [
+      { operation: 'Effect.runPromise', removalSlice: 'S7b', owner: 'eval hook process lifetime' },
+    ],
+  },
+  {
+    file: 'packages/local/src/run-control/spawn-eval-run.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'run admission process lifetime',
+    bridges: [
+      {
+        operation: 'Effect.runPromise',
+        removalSlice: 'S9a',
+        owner: 'run admission process lifetime',
+      },
+    ],
+  },
+
   {
     file: 'packages/local/src/internal/promise-store-owner.ts',
     operations: ['Effect.runPromiseExit'],

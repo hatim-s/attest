@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
+import * as Effect from 'effect/Effect';
 import { invokeAgent, justBashIsolation } from '../../dist/index.js';
 
 const request = {
@@ -16,10 +17,8 @@ test('executes a child with the current host runtime and validates its envelope'
   const script =
     'process.stdout.write(JSON.stringify({protocol:"attest.agent-invocation",output:"ok"}))';
 
-  const result = await invokeAgent(
-    { type: 'cli', command: [process.execPath, '-e', script] },
-    request,
-    options,
+  const result = await Effect.runPromise(
+    invokeAgent({ type: 'cli', command: [process.execPath, '-e', script] }, request, options),
   );
 
   assert.equal(result.status, 'ok');
@@ -38,10 +37,8 @@ test('invokes an HTTP agent with bounded response parsing', async () => {
   try {
     const address = server.address();
 
-    const result = await invokeAgent(
-      { type: 'http', url: `http://127.0.0.1:${address.port}` },
-      request,
-      options,
+    const result = await Effect.runPromise(
+      invokeAgent({ type: 'http', url: `http://127.0.0.1:${address.port}` }, request, options),
     );
 
     assert.equal(result.status, 'ok');
@@ -55,10 +52,12 @@ test('invokes an HTTP agent with bounded response parsing', async () => {
 test('times out and reaps a child under the current host runtime', async () => {
   const script = 'process.stderr.write(String(process.pid)); setInterval(() => undefined, 1000)';
 
-  const result = await invokeAgent(
-    { type: 'cli', command: [process.execPath, '-e', script] },
-    request,
-    { ...options, timeoutMs: 250, terminationGraceMs: 100 },
+  const result = await Effect.runPromise(
+    invokeAgent({ type: 'cli', command: [process.execPath, '-e', script] }, request, {
+      ...options,
+      timeoutMs: 250,
+      terminationGraceMs: 100,
+    }),
   );
 
   assert.equal(result.status, 'invocation_error');

@@ -1,4 +1,5 @@
 import type { AgentRequest, AgentResource } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { DEFAULT_REQUEST_BYTES, DEFAULT_STDERR_BYTES } from '../../internal/agent-defaults.js';
@@ -80,8 +81,15 @@ class BackgroundAgentSession {
 
     // Cancellation during spawn precedes the session's run-abort listener.
     if (options.signal?.aborted) {
-      await process.terminate(agent.transport.stop_timeout_ms);
-      throw new AgentInvocationError('cancelled', 'Background agent run was cancelled.');
+      const failure = new AgentInvocationError('cancelled', 'Background agent run was cancelled.');
+
+      try {
+        await process.terminate(agent.transport.stop_timeout_ms);
+      } catch (cleanupFailure: unknown) {
+        failure.cause = { cleanupFailure };
+      }
+
+      throw failure;
     }
 
     const session = new BackgroundAgentSession(agent, process, options);
@@ -92,10 +100,24 @@ class BackgroundAgentSession {
       return session;
     } catch (error: unknown) {
       const diagnostics = session.startupDiagnostics();
-      await session.close();
+      let cleanupFailure: unknown;
 
-      if (!(error instanceof AgentInvocationError)) throw error;
-      throw new AgentInvocationError(error.code, error.message, { cause: error, diagnostics });
+      try {
+        await session.close();
+      } catch (failure: unknown) {
+        cleanupFailure = failure;
+      }
+
+      if (!(error instanceof AgentInvocationError)) {
+        if (error instanceof Error && cleanupFailure !== undefined)
+          Object.assign(error, { cleanupFailure });
+        throw error;
+      }
+
+      throw new AgentInvocationError(error.code, error.message, {
+        cause: { primary: error, cleanupFailure },
+        diagnostics,
+      });
     }
   }
 
@@ -142,13 +164,16 @@ class BackgroundAgentSession {
     };
 
     // Session cancellation and the run deadline both end the service run, so they are timeouts.
-    const result = await invokeMappedHttpAgent(mapped, request, {
-      headers: this.options.invokeHeaders,
-      query: this.options.invokeQuery,
-      secrets: this.options.secrets,
-      signal,
-      deadlineSignal: this.runController.signal,
-    });
+    // EFFECT-BRIDGE(S4c)
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(mapped, request, {
+        headers: this.options.invokeHeaders,
+        query: this.options.invokeQuery,
+        secrets: this.options.secrets,
+        signal,
+        deadlineSignal: this.runController.signal,
+      }),
+    );
 
     const stderr = this.process.stderrExcerpt();
 

@@ -1,9 +1,12 @@
 import type { CaseExecution } from '@attest/runtime';
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../../internal/effect-exit.js';
 import { resolve } from 'node:path';
 
 import type { AgentRequest, AgentResource } from '@attest/contracts';
 import {
   AgentInvocationError,
+  CliCleanupError,
   createLoopbackCompletionReceiver,
   enforceArtifactLimits,
   invokeAgent,
@@ -185,13 +188,20 @@ const dispatch = async (
         secrets: resolved.secrets,
         signal: options.signal,
       });
-    case 'mapped_http':
-      return invokeMappedHttpAgent(resolved.agent, request, {
-        headers: resolved.headers,
-        query: resolved.query,
-        secrets: resolved.secrets,
-        signal: options.signal,
-      });
+    case 'mapped_http': {
+      // EFFECT-BRIDGE(S7b)
+      const exit = await Effect.runPromiseExit(
+        invokeMappedHttpAgent(resolved.agent, request, {
+          headers: resolved.headers,
+          query: resolved.query,
+          secrets: resolved.secrets,
+          signal: options.signal,
+        }),
+      );
+
+      return valueFromExit(exit);
+    }
+
     case 'direct': {
       const invocation: Parameters<typeof invokeAgent>[2] = {
         env: resolved.env,
@@ -206,7 +216,17 @@ const dispatch = async (
         invocation.workingDirectory = options.workerDirectory;
       }
 
-      return invokeAgent(resolved.target, request, invocation);
+      // EFFECT-BRIDGE(S7b)
+      const exit = await Effect.runPromiseExit(invokeAgent(resolved.target, request, invocation));
+
+      try {
+        return valueFromExit(exit);
+      } catch (cause: unknown) {
+        // Completed CLI evidence must reach both eval recording and the connection probe.
+        if (cause instanceof CliCleanupError && cause.attempt !== undefined)
+          return startupFailure(cause, cause.attempt.durationMs);
+        throw cause;
+      }
     }
   }
 };
@@ -223,8 +243,29 @@ const invokeResolvedAgent = async (
 ): Promise<InvocationResult> =>
   enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
 
-/** Converts a startup throw into one failed attempt so the failure is recorded like any other. */
+/** Projects operational startup or completed-attempt cleanup failures into recordable evidence. */
 const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
+  if (cause instanceof CliCleanupError && cause.attempt !== undefined) {
+    const completed = cause.attempt;
+    const primary = completed.status === 'invocation_error' ? completed.error : undefined;
+    const message = 'CLI cleanup could not be confirmed.';
+
+    const attempt = {
+      status: 'invocation_error' as const,
+      error: new AgentInvocationError(
+        primary?.code ?? 'network',
+        primary === undefined ? message : `${primary.message} ${message}`,
+        { cause, applicationStarted: true },
+      ),
+      diagnostics: completed.diagnostics,
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...attempt, attempts: [attempt] };
+  }
+
   const invocationError =
     cause instanceof AgentInvocationError
       ? cause

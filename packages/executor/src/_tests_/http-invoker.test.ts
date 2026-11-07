@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+// EFFECT-ROOT: owned HTTP fixture execution.
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ServerResponse } from 'node:http';
 import { join } from 'node:path';
@@ -6,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { invokeAgent } from '../invoke.js';
 import { invokeHttpAgent } from '../http-invoker.js';
 import type { InvokeOptions } from '../types.js';
 import { startLoopbackServer, type LoopbackServer } from './support/loopback-server.js';
@@ -102,7 +105,9 @@ const stopCanonicalAgentServer = async (server: CanonicalAgentServer): Promise<v
 };
 
 const invoke = (url: string, overrideOptions: Partial<InvokeOptions> = {}) =>
-  invokeHttpAgent({ type: 'http', url }, request, { ...options, ...overrideOptions });
+  Effect.runPromise(
+    invokeHttpAgent({ type: 'http', url }, request, { ...options, ...overrideOptions }),
+  );
 
 const canonicalUrl = (behavior: string): string => {
   if (canonicalAgentServer === undefined) {
@@ -299,5 +304,89 @@ describe('invokeHttpAgent', () => {
       status: 'ok',
       raw: { protocol: AGENT_PROTOCOL, output: 'ok:http-invoker-test' },
     });
+  });
+});
+
+it('retries a real refused connection on the host runtime', async () => {
+  const server = await startEdgeServer((response) => response.end());
+  await server.close();
+  servers.delete(server);
+
+  const result = await Effect.runPromise(
+    invokeAgent({ type: 'http', url: server.url }, request, { ...options, retries: 1 }),
+  );
+
+  expect(result.attempts).toHaveLength(2);
+
+  for (const attempt of result.attempts) {
+    expect(attempt).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'network', applicationStarted: false },
+    });
+  }
+});
+
+it('retries a confirmed 503 when its already-errored body rejects cancellation', async () => {
+  let calls = 0;
+  const reset = new Error('peer reset after status');
+
+  const result = await Effect.runPromise(
+    invokeAgent({ type: 'http', url: 'https://agent.example/run' }, request, {
+      ...options,
+      retries: 2,
+      httpFetch: () => {
+        calls += 1;
+
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(reset);
+              },
+            }),
+            { status: 503 },
+          ),
+        );
+      },
+    }),
+  );
+
+  expect(calls).toBe(3);
+  expect(result.attempts).toHaveLength(3);
+
+  for (const attempt of result.attempts) {
+    expect(attempt).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'http_status', applicationStarted: false },
+      diagnostics: { httpStatus: 503 },
+    });
+
+    if (attempt.status === 'invocation_error') expect(attempt.error.cause).toBeDefined();
+  }
+});
+
+it('does not retry a confirmed 503 whose body cancellation never acknowledges', async () => {
+  let calls = 0;
+
+  const result = await Effect.runPromise(
+    invokeAgent({ type: 'http', url: 'https://agent.example/run' }, request, {
+      ...options,
+      retries: 2,
+      httpFetch: () => {
+        calls += 1;
+
+        return Promise.resolve(
+          new Response(new ReadableStream({ cancel: () => new Promise<void>(() => {}) }), {
+            status: 503,
+          }),
+        );
+      },
+    }),
+  );
+
+  expect(calls).toBe(1);
+  expect(result).toMatchObject({
+    status: 'invocation_error',
+    error: { code: 'http_status', applicationStarted: true },
   });
 });

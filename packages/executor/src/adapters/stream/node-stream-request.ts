@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { DEFAULT_CONNECT_MS, DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
 import { openPinnedRequest } from '../http/pinned-request.js';
@@ -8,11 +9,14 @@ import type { StreamHttpTransport } from './stream-transport.js';
 const openNodeStream: StreamHttpTransport = async (agent, materialized, signal, options) => {
   const connectTimeoutMs = agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS;
 
-  const resolved = await resolveSafeHttpUrl(materialized.url, {
-    timeoutMs: connectTimeoutMs,
-    signal,
-    callerSignal: options.signal,
-  });
+  // EFFECT-BRIDGE(S4a): Promise protocol owner executes this native HTTP leaf until S4a.
+  const resolved = await Effect.runPromise(
+    resolveSafeHttpUrl(materialized.url, {
+      timeoutMs: connectTimeoutMs,
+      signal,
+      callerSignal: options.signal,
+    }),
+  );
 
   if (
     (options.secrets?.length ?? 0) > 0 &&
@@ -25,23 +29,26 @@ const openNodeStream: StreamHttpTransport = async (agent, materialized, signal, 
     );
   }
 
-  const { response } = await openPinnedRequest(resolved, {
-    method: materialized.method,
-    headers: materialized.headers,
-    body: materialized.body,
-    signal,
-    firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
-    connectTimeoutMs,
-    errors: {
-      aborted: () => abortedError(options.signal, 'Streaming invocation'),
-      firstByteTimeout: () =>
-        new AgentInvocationError('timeout', 'Streaming HTTP first byte timed out.'),
-      connectTimeout: () =>
-        new AgentInvocationError('timeout', 'Streaming HTTP connection timed out.'),
-      failed: (cause) =>
-        new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause }),
-    },
-  });
+  // EFFECT-BRIDGE(S4a): Promise protocol owner executes this native HTTP leaf until S4a.
+  const { response } = await Effect.runPromise(
+    openPinnedRequest(resolved, {
+      method: materialized.method,
+      headers: materialized.headers,
+      body: materialized.body,
+      signal,
+      firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
+      connectTimeoutMs,
+      errors: {
+        aborted: () => abortedError(options.signal, 'Streaming invocation'),
+        firstByteTimeout: () =>
+          new AgentInvocationError('timeout', 'Streaming HTTP first byte timed out.'),
+        connectTimeout: () =>
+          new AgentInvocationError('timeout', 'Streaming HTTP connection timed out.'),
+        failed: (cause) =>
+          new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause }),
+      },
+    }),
+  );
 
   const status = response.statusCode ?? 0;
 

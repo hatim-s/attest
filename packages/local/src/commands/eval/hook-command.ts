@@ -1,8 +1,9 @@
+import * as Effect from 'effect/Effect';
 import {
   killProcessTree,
   listDescendantProcesses,
   spawnInProcessGroup,
-  type ProcessIdentity,
+  type ProcessSnapshot,
 } from '@attest/executor';
 
 import { LocalError } from '../../errors/index.js';
@@ -56,9 +57,12 @@ const runHookCommand = async (options: {
   child.stdout?.resume();
   child.stderr?.resume();
 
-  const descendantSnapshots: Promise<ProcessIdentity[]>[] = [
-    child.pid === undefined ? Promise.resolve([]) : listDescendantProcesses(child.pid),
-  ];
+  const descendantSnapshots: Promise<ProcessSnapshot>[] = [];
+
+  if (child.pid !== undefined) {
+    // EFFECT-BRIDGE(S7b)
+    descendantSnapshots.push(Effect.runPromise(listDescendantProcesses(child.pid)));
+  }
 
   const close = new Promise<void>((resolve) => child.once('close', () => resolve()));
 
@@ -99,17 +103,24 @@ const runHookCommand = async (options: {
   options.signal?.removeEventListener('abort', abort);
 
   if (child.pid !== undefined && result.type !== 'close') {
-    descendantSnapshots.push(listDescendantProcesses(child.pid));
+    // EFFECT-BRIDGE(S7b)
+    descendantSnapshots.push(Effect.runPromise(listDescendantProcesses(child.pid)));
   }
 
-  const unreapedProcessIds = await killProcessTree(child, {
-    graceMs: HOOK_TERMINATION_GRACE_MS,
-    initialDescendants: (await Promise.all(descendantSnapshots)).flat(),
-    signalProcessGroup: result.type !== 'close',
-  });
+  const snapshots = await Promise.all(descendantSnapshots);
+
+  // EFFECT-BRIDGE(S7b)
+  const cleanup = await Effect.runPromise(
+    killProcessTree(child, {
+      graceMs: HOOK_TERMINATION_GRACE_MS,
+      initialDescendants: snapshots.flatMap((snapshot) => snapshot.identities),
+      initialObservationAvailable: snapshots.every((snapshot) => snapshot.available),
+      signalProcessGroup: result.type !== 'close',
+    }),
+  );
 
   await close;
-  const cleanupConfirmed = unreapedProcessIds.length === 0;
+  const cleanupConfirmed = cleanup.cleanupConfirmed;
 
   const cleanupSuffix = cleanupConfirmed ? '' : ' Process cleanup could not be confirmed.';
 

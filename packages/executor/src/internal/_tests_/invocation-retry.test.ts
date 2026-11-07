@@ -1,11 +1,18 @@
 import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import * as Exit from 'effect/Exit';
+import * as Effect from 'effect/Effect';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AgentInvocationError, type InvocationErrorCode } from '../../errors.js';
 import type { InvocationAttempt } from '../../types.js';
 import { invokeWithRetries } from '../invocation-retry.js';
 
-const failure = (code: InvocationErrorCode, httpStatus?: number): InvocationAttempt => ({
+const failure = (
+  code: InvocationErrorCode,
+  httpStatus?: number,
+): Extract<InvocationAttempt, { status: 'invocation_error' }> => ({
   status: 'invocation_error',
   error: new AgentInvocationError(code, `${code} failure`),
   diagnostics: httpStatus === undefined ? {} : { httpStatus },
@@ -24,13 +31,13 @@ const success = (raw: JsonValue): InvocationAttempt => ({
 /** Replays a fixed attempt sequence, repeating the last attempt once the sequence runs out. */
 const sequence = (...attempts: InvocationAttempt[]) =>
   vi.fn((attemptIndex: number) =>
-    Promise.resolve(attempts[Math.min(attemptIndex, attempts.length - 1)]!),
+    Effect.succeed(attempts[Math.min(attemptIndex, attempts.length - 1)]!),
   );
 
 describe('invokeWithRetries', () => {
   it('retries a 5xx status and retains every attempt', async () => {
     const invokeOnce = sequence(failure('http_status', 500));
-    const result = await invokeWithRetries(invokeOnce, 1);
+    const result = await Effect.runPromise(invokeWithRetries(invokeOnce, 1));
 
     expect(result.status).toBe('invocation_error');
     expect(result.attempts).toHaveLength(2);
@@ -38,7 +45,9 @@ describe('invokeWithRetries', () => {
   });
 
   it.each([404, 302, 307, 308])('does not retry HTTP %i', async (status) => {
-    const result = await invokeWithRetries(sequence(failure('http_status', status)), 3);
+    const result = await Effect.runPromise(
+      invokeWithRetries(sequence(failure('http_status', status)), 3),
+    );
 
     expect(result).toMatchObject({
       status: 'invocation_error',
@@ -48,16 +57,29 @@ describe('invokeWithRetries', () => {
   });
 
   it('does not retry cancellation', async () => {
-    const result = await invokeWithRetries(sequence(failure('cancelled')), 2);
+    const result = await Effect.runPromise(invokeWithRetries(sequence(failure('cancelled')), 2));
 
     expect(result).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
     expect(result.attempts).toHaveLength(1);
   });
 
+  it('does not replay work whose execution has started when cleanup is unconfirmed', async () => {
+    const error = new AgentInvocationError('network', 'HTTP cleanup was not confirmed.', {
+      applicationStarted: true,
+      cause: { success: 'remote response' },
+    });
+
+    const invokeOnce = sequence({ ...failure('network'), error });
+    const result = await Effect.runPromise(invokeWithRetries(invokeOnce, 3));
+
+    expect(result).toMatchObject({ status: 'invocation_error', error });
+    expect(result.attempts).toHaveLength(1);
+    expect(invokeOnce).toHaveBeenCalledOnce();
+  });
+
   it('retries other invocation errors and reports the final attempt', async () => {
-    const result = await invokeWithRetries(
-      sequence(failure('network'), failure('nonzero_exit')),
-      1,
+    const result = await Effect.runPromise(
+      invokeWithRetries(sequence(failure('network'), failure('nonzero_exit')), 1),
     );
 
     expect(result).toMatchObject({ status: 'invocation_error', error: { code: 'nonzero_exit' } });
@@ -69,9 +91,8 @@ describe('invokeWithRetries', () => {
   });
 
   it('retries schema-invalid envelopes as invocation errors with their warnings', async () => {
-    const result = await invokeWithRetries(
-      sequence(success({ protocol: AGENT_PROTOCOL, vendor_field: true })),
-      1,
+    const result = await Effect.runPromise(
+      invokeWithRetries(sequence(success({ protocol: AGENT_PROTOCOL, vendor_field: true })), 1),
     );
 
     expect(result).toMatchObject({
@@ -87,9 +108,11 @@ describe('invokeWithRetries', () => {
   });
 
   it('does not retry a valid agent error envelope', async () => {
-    const result = await invokeWithRetries(
-      sequence(success({ protocol: AGENT_PROTOCOL, error: { message: 'agent failed' } })),
-      2,
+    const result = await Effect.runPromise(
+      invokeWithRetries(
+        sequence(success({ protocol: AGENT_PROTOCOL, error: { message: 'agent failed' } })),
+        2,
+      ),
     );
 
     expect(result).toMatchObject({ status: 'ok', report: { ok: true } });
@@ -102,8 +125,49 @@ describe('invokeWithRetries', () => {
       diagnostics: { sandboxCompletionConfirmed: false },
     };
 
-    const result = await invokeWithRetries(sequence(unconfirmed), 2);
+    const result = await Effect.runPromise(invokeWithRetries(sequence(unconfirmed), 2));
 
     expect(result.attempts).toHaveLength(1);
+  });
+
+  it('propagates a typed infrastructure error without treating it as an attempt', async () => {
+    const error = new AgentInvocationError('network', 'Infrastructure unavailable');
+    const invokeOnce = vi.fn(() => Effect.fail(error));
+    const exit = await Effect.runPromiseExit(invokeWithRetries(invokeOnce, 3));
+
+    expect(Exit.isFailure(exit)).toBe(true);
+
+    if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(error);
+    expect(invokeOnce).toHaveBeenCalledOnce();
+  });
+
+  it('preserves defects without retrying them', async () => {
+    const defect = new Error('Broken attempt invariant');
+    const invokeOnce = vi.fn(() => Effect.die(defect));
+    const exit = await Effect.runPromiseExit(invokeWithRetries(invokeOnce, 3));
+
+    expect(Exit.isFailure(exit)).toBe(true);
+
+    if (Exit.isFailure(exit)) {
+      expect(Cause.hasDies(exit.cause)).toBe(true);
+      expect(Cause.squash(exit.cause)).toBe(defect);
+    }
+
+    expect(invokeOnce).toHaveBeenCalledOnce();
+  });
+
+  it('keeps callback service requirements until the caller supplies them', async () => {
+    const Attempt = Context.Service<InvocationAttempt>('RetryTestAttempt');
+    const operation = invokeWithRetries(() => Attempt, 0);
+
+    const result = await Effect.runPromise(
+      Effect.provideService(
+        operation,
+        Attempt,
+        success({ protocol: AGENT_PROTOCOL, output: 'provided' }),
+      ),
+    );
+
+    expect(result).toMatchObject({ status: 'ok', attempts: [{ status: 'ok' }] });
   });
 });

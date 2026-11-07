@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect';
+import { httpDelay } from './http-effects.js';
+import { requestJson } from './http-client.js';
 import { createHash } from 'node:crypto';
 
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
@@ -10,7 +13,6 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
-import { abortableWait } from '../../internal/abortable-wait.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createFailedAttempt } from '../../internal/failed-attempt.js';
 import { parseJson } from '../../internal/json-value.js';
@@ -118,7 +120,7 @@ const retryableStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
 
 const retryableTransportError = (error: AgentInvocationError): boolean =>
-  error.code === 'network' || error.code === 'timeout';
+  error.applicationStarted !== true && (error.code === 'network' || error.code === 'timeout');
 
 const attemptFromError = (error: AgentInvocationError, durationMs: number): InvocationAttempt =>
   createFailedAttempt(error, {
@@ -167,11 +169,11 @@ const isSuccessStatus = (status: number): boolean => status >= 200 && status < 3
  * Sends one request until it succeeds, retrying transient transport failures and retryable
  * statuses within the authored budget. Failed tries are kept as attempts on the context.
  */
-const requestWithRetries = async (
+const requestWithRetries = Effect.fn('http.requestWithRetries')(function* (
   request: MaterializedHttpRequest,
   context: ExchangeContext,
   rules: RetryRules,
-): Promise<ExchangeOutcome> => {
+): Effect.fn.Return<ExchangeOutcome, AgentInvocationError> {
   const { policy, retryAttempts, signal } = context;
   const retries = context.retry?.retries ?? 0;
 
@@ -179,27 +181,22 @@ const requestWithRetries = async (
     const attemptDuration = startTimer();
     let failure: RequestFailure;
 
-    try {
-      const transport = context.requestJson ?? (await import('./http-client.js')).requestJson;
-      const response = await transport(request, policy);
+    const transport = context.requestJson ?? requestJson;
+    const result = yield* Effect.result(transport(request, policy));
 
-      if (isSuccessStatus(response.status)) {
+    if (result._tag === 'Success') {
+      const response = result.success;
+
+      if (isSuccessStatus(response.status))
         return { ok: true, durationMs: attemptDuration(), response };
-      }
-
       failure = {
         error: statusError(response),
         retryable: retryableStatus(response.status),
         retryAfter: response.headers['retry-after'],
       };
-    } catch (error: unknown) {
-      const normalized = normalizeFailure(error, {
-        transport: 'Mapped HTTP',
-        signal,
-        callerSignal: policy.callerSignal,
-      });
-
-      failure = { error: normalized, retryable: retryableTransportError(normalized) };
+    } else {
+      const error = result.failure;
+      failure = { error, retryable: retryableTransportError(error) };
     }
 
     const durationMs = attemptDuration();
@@ -209,11 +206,9 @@ const requestWithRetries = async (
     }
 
     retryAttempts.push(attemptFromError(failure.error, durationMs));
-    await abortableWait(rules.delayFor(retry, failure.retryAfter), signal, () =>
-      abortedError(policy.callerSignal, 'Mapped HTTP invocation'),
-    );
+    yield* httpDelay(rules.delayFor(retry, failure.retryAfter), signal, policy.callerSignal);
   }
-};
+});
 
 /**
  * Adds the idempotency key a server uses to drop a replayed submission. The key is derived from
@@ -241,7 +236,7 @@ const setIdempotencyHeader = (
 const runDirect = (
   materialized: MaterializedHttpRequest,
   context: ExchangeContext,
-): Promise<ExchangeOutcome> =>
+): Effect.Effect<ExchangeOutcome, AgentInvocationError> =>
   requestWithRetries(materialized, context, {
     allowRetry: true,
     delayFor: (retry, retryAfter) =>
