@@ -822,3 +822,8 @@ Public stored and HTTP shapes remain unchanged; hosts implementing RunSource mus
 seven new native methods. The canonical dashboard CLI command is `attest web`, including
 `--all`, `--store`, `--port` and `--no-open`. Commander, Hono and TanStack callbacks retain their
 existing execution-root ownership. No migration bridge is added.
+Init write failures preserve the base error envelope, including the target path and staged
+content hash. Rollback or directory-removal failure reports `project_recovery_required` before
+the primary verification failure, with both Causes retained. Agent and metric command error
+channels preserve dependency failures for CLI redaction and `cause_code` classification.
+Rejected init prompts likewise reach the CLI serializer unchanged.

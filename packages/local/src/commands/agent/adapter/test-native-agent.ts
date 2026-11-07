@@ -1,5 +1,6 @@
+import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
-import { recoverOrdinary, finishWithRelease } from './lifecycle-cause.js';
+import { finishWithRelease } from './lifecycle-cause.js';
 import {
   AGENT_PROTOCOL,
   type AgentRequest,
@@ -71,11 +72,7 @@ const invocationAttempts = (attempts: InvocationResult['attempts']): JsonValue =
 
 /** Runs one supported adapter probe and returns only bounded, redacted evidence. */
 const testNativeAgentConnection = Effect.fn('testNativeAgentConnection')(function* (
-  options: Omit<NativeAgentTestOptions, 'onExecution'> & {
-    onExecution?: (
-      execution: import('@attest/core').StoredCaseExecution,
-    ) => Effect.Effect<void, Error>;
-  },
+  options: NativeAgentTestOptions,
 ) {
   try {
     assertSafeNativeAgentResource(options.agent);
@@ -105,7 +102,7 @@ const testNativeAgentConnection = Effect.fn('testNativeAgentConnection')(functio
     const startedAt = new Date().toISOString();
     const managedStartupStarted = performance.now();
 
-    const invocation = yield* recoverOrdinary(
+    const invocation = yield* Effect.catchCause(
       Effect.scoped(
         Effect.gen(function* () {
           const runtime = yield* startAgentRuntime(resolved, options.signal);
@@ -133,7 +130,18 @@ const testNativeAgentConnection = Effect.fn('testNativeAgentConnection')(functio
           );
         }),
       ),
-      (error, cause) => {
+      (cause) => {
+        // Base projected the first ordinary failure even when session close also failed.
+        const reason = cause.reasons[0];
+
+        const error =
+          !Cause.hasDies(cause) &&
+          !Cause.hasInterrupts(cause) &&
+          reason !== undefined &&
+          Cause.isFailReason(reason)
+            ? reason.error
+            : undefined;
+
         const managedSession =
           resolved.kind === 'background' ||
           resolved.kind === 'jsonl_bridge' ||

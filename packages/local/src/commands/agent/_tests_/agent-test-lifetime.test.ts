@@ -3,10 +3,15 @@ import * as Deferred from 'effect/Deferred';
 import * as Fiber from 'effect/Fiber';
 import * as Exit from 'effect/Exit';
 import { describe, expect, it, vi } from 'vitest';
+import { AgentInvocationError } from '@attest/executor';
+import type { StoredCaseExecution } from '@attest/core';
+import { testNativeAgentConnection } from '../adapter/test-native-agent.js';
+import { valueFromExit } from '../../../internal/effect-exit.js';
 import * as adapter from '../adapter/invoke-resolved-agent.js';
 import { runAgentTestCommand } from '../test.js';
 import { createAgentProject, addAgent } from './support/agent-project.js';
 import { withStoreScope, openStore } from '../../../store/index.js';
+import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COMMAND_REQUEST_SCHEMA_ID, type AgentResource } from '@attest/contracts';
 
@@ -26,6 +31,59 @@ const agent: AgentResource = {
 };
 
 describe('native probe lifetime', () => {
+  it('records startup evidence when invocation and session close both fail', async () => {
+    const root = await realpath(await createAgentProject());
+    const primary = new AgentInvocationError('network', 'Invocation failed.');
+    const recorded: StoredCaseExecution[] = [];
+
+    const startup = vi.spyOn(adapter, 'startAgentRuntime').mockImplementation((resolved) => {
+      if (resolved.kind !== 'background') throw new Error('Expected background agent');
+
+      return Effect.succeed({
+        kind: 'session' as const,
+        resolved,
+        session: {
+          invoke: () => Effect.fail(primary),
+          close: () => Effect.fail(new AgentInvocationError('network', 'Close failed.')),
+        },
+      });
+    });
+
+    const invocation = vi
+      .spyOn(adapter, 'invokeResolvedAgent')
+      .mockImplementation(() => Effect.fail(primary));
+
+    try {
+      await expect(
+        Effect.runPromise(
+          Effect.exit(
+            testNativeAgentConnection({
+              agent,
+              input: {},
+              projectRoot: root,
+              onExecution: (execution) =>
+                Effect.sync(() => {
+                  recorded.push(execution);
+                }),
+            }),
+          ),
+        ).then(valueFromExit),
+      ).rejects.toMatchObject({
+        code: 'invocation_failed',
+        message: 'Agent connection test failed: Invocation failed.',
+      });
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]).toMatchObject({
+        outcome: 'invocation_error',
+        errorCode: 'network',
+        errorMessage: 'Invocation failed.',
+      });
+    } finally {
+      startup.mockRestore();
+      invocation.mockRestore();
+    }
+  });
+
   it.each(['session', 'sandbox'] as const)(
     'joins %s release before interruption completes',
     async (kind) => {
