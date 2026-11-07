@@ -8,8 +8,11 @@ declare module 'bun:sqlite' {
       finalize(): void;
     };
     exec(sql: string): void;
+    fileControl(operation: number, argument: number): number;
     close(throwOnError: boolean): void;
   }
 
-  export { Database };
+  const constants: { readonly SQLITE_FCNTL_PERSIST_WAL: number };
+
+  export { Database, constants };
 }

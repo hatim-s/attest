@@ -128,18 +128,25 @@ describe('SQLite store database', () => {
       expect((await stat(path)).size).toBeGreaterThan(4096);
       await copyFile(path, snapshot);
 
-      const wal = await stat(`${path}-wal`).catch((cause: NodeJS.ErrnoException) => {
-        if (cause.code !== 'ENOENT') throw cause;
-      });
-
-      if (wal) {
-        expect(wal.size).toBe(0);
-        // Bun's SQLite requires the WAL sidecar when opening a copied WAL-mode file readonly.
-        await copyFile(`${path}-wal`, `${snapshot}-wal`);
-      }
+      expect((await readdir(dirname(path))).sort()).toEqual([
+        'runs.db',
+        `runs.db.snapshot-${iteration}`,
+      ]);
 
       await runEffect(withStoreScope((owner) => openReadonlyRunStore(snapshot, owner)));
     }
+  });
+
+  it('keeps live readers usable when a writer closes before the last connection', async () => {
+    const path = await temporaryDatabasePath();
+    const writer = await openFixture(path);
+    stores.push(writer);
+    const readerFixture = await openReadonlyFixture(path);
+    stores.push(readerFixture);
+    await runEffect(readerFixture.store.listRuns());
+    await writer.close();
+    expect((await runEffect(readerFixture.store.listRuns())).items).toEqual([]);
+    await readerFixture.close();
   });
 
   it('applies migrations idempotently across reopen', async () => {
