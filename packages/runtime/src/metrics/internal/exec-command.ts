@@ -14,6 +14,7 @@ import {
   type MetricTransportOptions,
   type MetricTransportOutcome,
 } from './metric-transport.js';
+import { MetricOperationError } from '../errors.js';
 import { foreign, ownOperation, withRelease, releaseAll } from './operation.js';
 
 /** Observes process events without running cleanup from detached Promise callbacks. */
@@ -143,7 +144,7 @@ const runCommand = (
             const cleanup = yield* stop;
 
             if (!cleanup.cleanupConfirmed)
-              return yield* Effect.fail(new Error('Metric process cleanup is unconfirmed.'));
+              return yield* new MetricOperationError({ reason: 'process_cleanup_unconfirmed' });
           }),
           Effect.sync(() => signal.removeEventListener('abort', abort)),
           Effect.sync(() => child.stdin?.removeListener('error', onError)),

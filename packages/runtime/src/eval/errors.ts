@@ -1,3 +1,6 @@
+import * as Data from 'effect/Data';
+
+import { foreignMessage } from '@attest/contracts';
 import type { StoredMetricEvaluation } from '@attest/core';
 import type { CaseExecution } from './types.js';
 
@@ -5,6 +8,28 @@ const MAXIMUM_ERROR_MESSAGE_LENGTH = 512;
 
 /** Names the awaited stage hook that stopped a case after the agent ran. */
 type EvalCaseStage = 'after_agent' | 'after_evaluation';
+
+type EvalEngineReason =
+  | 'event_count_cap'
+  | 'event_byte_cap'
+  | 'cancelled_before_admission'
+  | 'owner_interrupted'
+  | 'deadline_exceeded';
+
+const EVAL_ENGINE_MESSAGES = {
+  event_count_cap: 'Eval event count cap was exceeded.',
+  event_byte_cap: 'Eval event byte cap was exceeded.',
+  cancelled_before_admission: 'Eval case cancelled before admission.',
+  owner_interrupted: 'Eval owner interrupted.',
+  deadline_exceeded: 'Eval run deadline exceeded.',
+} as const satisfies Record<EvalEngineReason, string>;
+
+/** A failure the eval engine raises itself; also the abort reason passed to case signals. */
+class EvalEngineError extends Data.TaggedError('EvalEngineError')<{
+  readonly reason: EvalEngineReason;
+}> {
+  override readonly message = EVAL_ENGINE_MESSAGES[this.reason];
+}
 
 /** Retains completed stage evidence when a lifecycle hook stops the remaining case work. */
 class EvalCaseStageError extends Error {
@@ -14,7 +39,7 @@ class EvalCaseStageError extends Error {
     readonly metrics: readonly StoredMetricEvaluation[],
     cause: unknown,
   ) {
-    super(cause instanceof Error ? cause.message : `Eval ${stage} hook failed.`, { cause });
+    super(foreignMessage(cause, `Eval ${stage} hook failed.`), { cause });
     this.name = 'EvalCaseStageError';
   }
 }
@@ -42,7 +67,7 @@ const isCleanupUncertain = (cause: unknown): boolean => {
 
 /** Bounds thrown values to short messages so infrastructure diagnostics never carry raw evidence. */
 const safeErrorMessage = (cause: unknown, fallback: string): string => {
-  const message = cause instanceof Error ? cause.message : fallback;
+  const message = foreignMessage(cause, fallback);
 
   if (message.length <= MAXIMUM_ERROR_MESSAGE_LENGTH) {
     return message;
@@ -51,4 +76,10 @@ const safeErrorMessage = (cause: unknown, fallback: string): string => {
   return `${message.slice(0, MAXIMUM_ERROR_MESSAGE_LENGTH - 3)}...`;
 };
 
-export { EvalCaseStageError, isCleanupUncertain, safeErrorMessage, type EvalCaseStage };
+export {
+  EvalCaseStageError,
+  EvalEngineError,
+  isCleanupUncertain,
+  safeErrorMessage,
+  type EvalCaseStage,
+};

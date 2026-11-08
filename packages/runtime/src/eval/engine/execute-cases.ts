@@ -5,7 +5,7 @@ import * as Queue from 'effect/Queue';
 import { observe, ordinaryError, retainedCauses } from '../lifecycle.js';
 import type { EvalRun } from '@attest/contracts';
 
-import { safeErrorMessage } from '../errors.js';
+import { EvalEngineError, safeErrorMessage } from '../errors.js';
 import { normalizeCaseResult, normalizeInfrastructureFailure } from '../normalization.js';
 import type {
   EvalCaseRecord,
@@ -49,7 +49,7 @@ const startCase = <Payload>(
   Effect.gen(function* () {
     const exit = yield* observe(() =>
       task.signal.aborted
-        ? Effect.fail(new Error('Eval case cancelled before admission.'))
+        ? Effect.fail(new EvalEngineError({ reason: 'cancelled_before_admission' }))
         : task.runner.executeCase(task.run.run_id, resolvedCase, task.signal, { workerIndex }),
     );
 

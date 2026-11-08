@@ -14,6 +14,7 @@ import {
   passingMetric,
   RUN_ID,
 } from './support/eval-fixtures.js';
+import { TestFailure } from '../../_tests_/support/test-failure.js';
 
 type Stage = {
   resolvedCase: ResolvedEvalCase<string>;
@@ -138,11 +139,11 @@ describe('eval hooks and case environments', () => {
           {
             before_case: () =>
               Effect.gen(function* () {
-                return yield* Effect.fail(new Error('setup failed'));
+                return yield* Effect.fail(new TestFailure({ message: 'setup failed' }));
               }),
             after_case: () =>
               Effect.gen(function* () {
-                return yield* Effect.fail(new Error('teardown failed'));
+                return yield* Effect.fail(new TestFailure({ message: 'teardown failed' }));
               }),
           },
           { after_case: after },
@@ -185,7 +186,7 @@ describe('eval hooks and case environments', () => {
   it.each([
     {
       disposal: 'fails',
-      disposeResult: () => Effect.fail(new Error('environment disposal failed')),
+      disposeResult: () => Effect.fail(new TestFailure({ message: 'environment disposal failed' })),
       canRelease: false,
     },
     { disposal: 'succeeds', disposeResult: () => Effect.void, canRelease: true },
@@ -209,7 +210,9 @@ describe('eval hooks and case environments', () => {
                   beginFinalization: () => {
                     finalization.push('begin');
 
-                    return Effect.fail(new Error('finalization transition failed'));
+                    return Effect.fail(
+                      new TestFailure({ message: 'finalization transition failed' }),
+                    );
                   },
                   dispose: () => {
                     finalization.push('dispose');
@@ -224,7 +227,9 @@ describe('eval hooks and case environments', () => {
                   Effect.gen(function* () {
                     finalization.push('after_case_one');
 
-                    return yield* Effect.fail(new Error('first after_case failed'));
+                    return yield* Effect.fail(
+                      new TestFailure({ message: 'first after_case failed' }),
+                    );
                   }),
               },
               {
@@ -263,7 +268,14 @@ describe('eval hooks and case environments', () => {
         plan,
         { executeCase: (_runId, resolvedCase) => Effect.succeed(completedExecution(resolvedCase)) },
         createPersistence().adapter,
-        { hooks: [{ after_case: () => Effect.fail(new Error(`long ${'x'.repeat(5000)}`)) }] },
+        {
+          hooks: [
+            {
+              after_case: () =>
+                Effect.fail(new TestFailure({ message: `long ${'x'.repeat(5000)}` })),
+            },
+          ],
+        },
       ),
     );
 
@@ -289,7 +301,7 @@ describe('eval hooks and case environments', () => {
       executeResolvedEvalPlan(createPlan(['one']), runner, persistence.adapter, {
         hooks: [
           {
-            [stage]: () => Effect.fail(new Error(`${stage} failed`)),
+            [stage]: () => Effect.fail(new TestFailure({ message: `${stage} failed` })),
           },
         ],
       }),

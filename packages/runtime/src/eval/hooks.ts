@@ -1,7 +1,7 @@
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
-import type { EvalRun } from '@attest/contracts';
+import { foreignMessage, type EvalRun } from '@attest/contracts';
 import { EvalCaseStageError, isCleanupUncertain } from './errors.js';
 import { observe, ordinaryError, withEvidence, exitError, retainCauses } from './lifecycle.js';
 import type {
@@ -23,7 +23,7 @@ const lifecycleErrorMessages = (cause: unknown): string[] => {
     return cause.errors.flatMap(lifecycleErrorMessages);
   }
 
-  return [cause instanceof Error ? cause.message : 'Eval case lifecycle failed.'];
+  return [foreignMessage(cause, 'Eval case lifecycle failed.')];
 };
 
 /** Joins distinct lifecycle messages within the persisted diagnostics limit. */

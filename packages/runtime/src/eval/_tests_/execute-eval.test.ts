@@ -17,6 +17,7 @@ import {
   RUN_ID,
   waitForAbort,
 } from './support/eval-fixtures.js';
+import { TestFailure, toTestFailure } from '../../_tests_/support/test-failure.js';
 
 type Persistence = ReturnType<typeof createPersistence>;
 
@@ -44,7 +45,9 @@ describe('executeResolvedEvalPlan', () => {
       const persistence = createPersistence();
 
       if (finalizationFails) {
-        persistence.finalizeRun.mockReturnValue(Effect.fail(new Error('row remains running')));
+        persistence.finalizeRun.mockReturnValue(
+          Effect.fail(new TestFailure({ message: 'row remains running' })),
+        );
       }
 
       const beforeRun = vi.fn(() => Effect.void);
@@ -91,7 +94,7 @@ describe('executeResolvedEvalPlan', () => {
     persistence.createRun.mockReturnValueOnce(
       Effect.tryPromise({
         try: () => creation.promise,
-        catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+        catch: toTestFailure,
       }),
     );
     const controller = new AbortController();
@@ -147,7 +150,7 @@ describe('executeResolvedEvalPlan', () => {
   it.each([
     {
       failure: 'runner cleanup rejects',
-      runner: { cleanup: () => Effect.fail(new Error('child still live')) },
+      runner: { cleanup: () => Effect.fail(new TestFailure({ message: 'child still live' })) },
       arrange: (): void => undefined,
     },
     {
@@ -164,7 +167,9 @@ describe('executeResolvedEvalPlan', () => {
       failure: 'finalization keeps failing',
       runner: {},
       arrange: (persistence: Persistence): void =>
-        void persistence.finalizeRun.mockReturnValue(Effect.fail(new Error('row remains running'))),
+        void persistence.finalizeRun.mockReturnValue(
+          Effect.fail(new TestFailure({ message: 'row remains running' })),
+        ),
     },
   ])('fails and retains cancellation ownership when $failure', async (scenario) => {
     const controller = new AbortController();
@@ -194,7 +199,9 @@ describe('executeResolvedEvalPlan', () => {
   it('fails and retains cancellation ownership when any case record is not durable', async () => {
     const controller = new AbortController();
     const persistence = createPersistence();
-    persistence.recordCase.mockReturnValue(Effect.fail(new Error('case row unavailable')));
+    persistence.recordCase.mockReturnValue(
+      Effect.fail(new TestFailure({ message: 'case row unavailable' })),
+    );
     const executeCase = vi.fn(waitForAbort);
 
     const execution = Effect.runPromise(
@@ -245,7 +252,7 @@ describe('executeResolvedEvalPlan', () => {
       executeCase: (_runId, resolvedCase) =>
         Effect.gen(function* () {
           if (resolvedCase.case_id === 'runner-rejects')
-            return yield* Effect.fail(new Error('synchronous throw'));
+            return yield* Effect.fail(new TestFailure({ message: 'synchronous throw' }));
 
           return yield* Effect.succeed(
             resolvedCase.case_id === 'invocation-fails'
@@ -283,7 +290,7 @@ describe('executeResolvedEvalPlan', () => {
     const result = await Effect.runPromise(
       executeResolvedEvalPlan(
         createPlan(['case-zero']),
-        { executeCase: () => Effect.fail(new Error(sensitiveMessage)) },
+        { executeCase: () => Effect.fail(new TestFailure({ message: sensitiveMessage })) },
         createPersistence().adapter,
         { now: createClock() },
       ),
@@ -371,7 +378,9 @@ describe('executeResolvedEvalPlan', () => {
         {
           now: createClock(),
           baseline: { diffRuns: () => Effect.succeed({ stable: true }) },
-          artifacts: { writeJUnitAtomically: () => Effect.fail(new Error('rename failed')) },
+          artifacts: {
+            writeJUnitAtomically: () => Effect.fail(new TestFailure({ message: 'rename failed' })),
+          },
         },
       ),
     );

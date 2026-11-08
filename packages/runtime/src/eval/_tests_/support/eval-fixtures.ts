@@ -13,6 +13,7 @@ import type {
   ResolvedEvalCase,
   ResolvedEvalPlan,
 } from '../../types.js';
+import { toTestFailure } from '../../../_tests_/support/test-failure.js';
 
 const RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 
@@ -233,7 +234,7 @@ const waitForAbort: EvalCaseRunner<string>['executeCase'] = (_runId, resolvedCas
           new Promise<void>((resolve) =>
             signal.addEventListener('abort', () => resolve(), { once: true }),
           ),
-        catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+        catch: toTestFailure,
       });
     }
 

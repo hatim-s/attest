@@ -5,7 +5,7 @@ import * as Fiber from 'effect/Fiber';
 import { observe, ordinaryError, withEvidence } from '../lifecycle.js';
 import type { EvalEvent, EvalFinalResultData } from '@attest/contracts';
 
-import { isCleanupUncertain, safeErrorMessage } from '../errors.js';
+import { EvalEngineError, isCleanupUncertain, safeErrorMessage } from '../errors.js';
 import { withEvalHooks } from '../hooks.js';
 import { createEvalJUnitPayload } from '../junit.js';
 import { summarizeEvalCases } from '../normalization.js';
@@ -83,7 +83,7 @@ const executeResolvedEvalPlan = <Payload, BaselineDiff = unknown>(
       if (Exit.isSuccess(waiting)) return waiting.value;
 
       if (!Cause.hasInterrupts(waiting.cause)) return yield* Effect.failCause(waiting.cause);
-      controller.abort(new Error('Eval owner interrupted.'));
+      controller.abort(new EvalEngineError({ reason: 'owner_interrupted' }));
       const completed = yield* Fiber.await(child);
 
       return yield* Effect.failCause(
@@ -199,7 +199,7 @@ const executeOwned = <Payload, BaselineDiff>(
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      deadline.abort(new Error('Eval run deadline exceeded.'));
+      deadline.abort(new EvalEngineError({ reason: 'deadline_exceeded' }));
     }, run.effective_command.resolved.timeout_ms);
 
     const signal = options.signal

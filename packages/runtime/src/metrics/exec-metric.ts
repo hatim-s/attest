@@ -1,7 +1,12 @@
 import * as Effect from 'effect/Effect';
 import { performance } from 'node:perf_hooks';
 
-import { parseMetricResult, type ContractIssue, type MetricResult } from '@attest/contracts';
+import {
+  foreignMessage,
+  parseMetricResult,
+  type ContractIssue,
+  type MetricResult,
+} from '@attest/contracts';
 
 import type { StoredMetricEvaluation } from '@attest/core';
 
@@ -49,7 +54,7 @@ const parseInvocationResult = (
       ok: false,
       error: {
         code: 'exec_malformed_output',
-        message: `Metric output was not valid JSON: ${error instanceof Error ? error.message : 'unknown error'}`,
+        message: `Metric output was not valid JSON: ${foreignMessage(error, 'unknown error')}`,
       },
     };
   }
