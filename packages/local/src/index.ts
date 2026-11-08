@@ -5,6 +5,11 @@ export {
   type ResourceListResult,
 } from './commands/shared/command-result.js';
 
-export { LocalError, type LocalErrorCode } from './errors/index.js';
+export {
+  LocalError,
+  type AnchoredCleanupFailure,
+  type AnchoredFileFailure,
+  type LocalErrorCode,
+} from './errors/index.js';
 
 export { valueFromExit } from './internal/effect-exit.js';

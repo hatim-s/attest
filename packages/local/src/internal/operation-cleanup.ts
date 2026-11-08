@@ -62,16 +62,16 @@ class OperationCompletion extends Context.Service<
 >()('attest/OperationCompletion') {}
 
 /** Applies primary precedence after the owner has attempted every release. */
-const finishOperation = <A, E extends Error>(
+const finishOperation = <A, E, E2 extends Error>(
   primary: Exit.Exit<A, E>,
-  releases: readonly Exit.Exit<unknown, Error>[],
-): Effect.Effect<A, E | Error> => {
+  releases: readonly Exit.Exit<unknown, E2>[],
+): Effect.Effect<A, E | E2> => {
   const failed = releases.filter(Exit.isFailure);
 
   if (failed.length === 0) return primary;
 
   if (Exit.isSuccess(primary)) {
-    const cause: Cause.Cause<Error> = failed.reduce<Cause.Cause<Error>>(
+    const cause = failed.reduce<Cause.Cause<E2>>(
       (left, exit) => Cause.combine(left, exit.cause),
       Cause.empty,
     );
