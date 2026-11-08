@@ -1,5 +1,6 @@
-import { Effect, Exit, Fiber, FiberSet, Scope } from 'effect';
+import { Cause, Effect, Exit, Fiber, FiberSet, Scope } from 'effect';
 import {
+  foreignMessage,
   parseWithSchema,
   AGENT_COMPLETION_PROTOCOL,
   agentCompletionSchema,
@@ -15,6 +16,7 @@ import {
 import { ClientCleanup, ClientCleanupError, withCleanup } from './lifetime.js';
 import { deliverCompletion, type DeliveryOutcome } from './deliver-completion.js';
 import { readBoundedText } from './read-bounded-text.js';
+import { AgentHandlerError, AgentRunnerError, RunnerIoError } from './runner-errors.js';
 import { tokensMatch } from './tokens-match.js';
 
 // Matches the executor's default request_bytes limit, the largest envelope attest sends.
@@ -43,7 +45,7 @@ type HandlerContext = {
 type AgentHandler = (
   invocation: AgentInvocation,
   context: HandlerContext,
-) => Effect.Effect<HandlerResult, Error>;
+) => Effect.Effect<HandlerResult, AgentHandlerError>;
 
 /** A background failure the trigger response could not report, because it was already sent. */
 type RunnerFailure = {
@@ -66,21 +68,30 @@ type AgentRunnerOptions = {
   triggerToken: string;
 };
 
+/**
+ * Failures while reading a trigger body; every other trigger problem is an HTTP response.
+ * `RunnerIoError` is a failed body read or cancel, `Cause.TimeoutError` a read that stalled.
+ * `ClientCleanupError` means the body was read in full but cancelling the reader failed afterwards;
+ * the error keeps the read text in `success`, and `/node` still answers 500.
+ */
+type RunnerFetchError = RunnerIoError | Cause.TimeoutError | ClientCleanupError;
+
 type InvocationReceipt = {
-  handlerExit?: Exit.Exit<HandlerResult, Error>;
-  exit?: Exit.Exit<void, Error>;
+  handlerExit?: Exit.Exit<HandlerResult, AgentHandlerError>;
+  /** Accepted work reports handler failures as completions, so only defects and interruption remain. */
+  exit?: Exit.Exit<void>;
   delivery?: DeliveryOutcome;
 };
 
 type AgentRunner = {
-  fetch: (request: Request) => Effect.Effect<Response, Error>;
+  fetch: (request: Request) => Effect.Effect<Response, RunnerFetchError>;
   pending: () => number;
-  drain: () => Effect.Effect<void, Error>;
-  close: () => Effect.Effect<void, Error>;
+  drain: () => Effect.Effect<void, AgentRunnerError>;
+  close: () => Effect.Effect<void, AgentRunnerError>;
   /** Internal terminal evidence. Tokens and Causes must never be serialized. */
   receipts: ReadonlyMap<string, InvocationReceipt>;
   /** Scope release evidence is separate from caller-controlled registration tokens. */
-  shutdown: { exit?: Exit.Exit<void, Error> };
+  shutdown: { exit?: Exit.Exit<void, AgentRunnerError> };
 };
 
 const reportToStderr = (failure: RunnerFailure): void => {
@@ -110,12 +121,17 @@ const createAgentRunner = ({
   fetch: fetchImpl = globalThis.fetch,
   onError = reportToStderr,
   triggerToken,
-}: AgentRunnerOptions): Effect.Effect<AgentRunner, Error, Scope.Scope> =>
+}: AgentRunnerOptions): Effect.Effect<AgentRunner, AgentRunnerError, Scope.Scope> =>
   Effect.gen(function* () {
-    if (triggerToken === '')
-      return yield* Effect.fail(new Error('createAgentRunner needs a non-empty triggerToken.'));
-    const fibers = yield* FiberSet.make<void, Error>();
-    const inFlight = new Map<string, Fiber.Fiber<void, Error>>();
+    /**
+     * BOUNDARY: untyped JavaScript callers can omit the token, and `Bearer undefined` must never
+     * authenticate a trigger.
+     */
+    const tokenMissing = typeof triggerToken !== 'string' || triggerToken === '';
+
+    if (tokenMissing) return yield* new AgentRunnerError({ reason: 'missing_trigger_token' });
+    const fibers = yield* FiberSet.make<void>();
+    const inFlight = new Map<string, Fiber.Fiber<void>>();
     const receipts = new Map<string, InvocationReceipt>();
     const shutdown: AgentRunner['shutdown'] = {};
     const closing = new AbortController();
@@ -197,9 +213,7 @@ const createAgentRunner = ({
       try {
         return JSON.stringify(checked.value);
       } catch (error) {
-        return invalid(
-          `completion is not serializable: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        return invalid(`completion is not serializable: ${foreignMessage(error, String(error))}`);
       }
     };
 
@@ -282,9 +296,7 @@ const createAgentRunner = ({
         }).pipe(Effect.timeoutOption(35_000));
 
         if (joined._tag === 'None')
-          return yield* Effect.fail(
-            new Error('Runner drain timed out; accepted work remains owned.'),
-          );
+          return yield* new AgentRunnerError({ reason: 'drain_timed_out' });
 
         for (const receipt of receipts.values()) {
           if (receipt.exit !== undefined && Exit.isFailure(receipt.exit))
@@ -329,10 +341,7 @@ const createAgentRunner = ({
 
           if (closing.signal.aborted) return Response.json({ error: 'closing' }, { status: 503 });
 
-          if (
-            triggerToken !== undefined &&
-            !tokensMatch(request.headers.get('authorization') ?? '', `Bearer ${triggerToken}`)
-          ) {
+          if (!tokensMatch(request.headers.get('authorization') ?? '', `Bearer ${triggerToken}`)) {
             return Response.json({ error: 'unauthorized' }, { status: 401 });
           }
 
@@ -399,7 +408,11 @@ export {
   withAgentRunner,
   ClientCleanup,
   ClientCleanupError,
+  AgentHandlerError,
+  AgentRunnerError,
+  RunnerIoError,
   type InvocationReceipt,
+  type RunnerFetchError,
   type AgentHandler,
   type AgentInvocation,
   type AgentRunner,

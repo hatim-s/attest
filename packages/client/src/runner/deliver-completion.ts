@@ -1,5 +1,6 @@
 import type { AgentCallback } from '@attest/contracts';
 import { Cause, Effect, Exit } from 'effect';
+import { RunnerIoError } from './runner-errors.js';
 
 const RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
@@ -52,14 +53,16 @@ const deliverCompletion = (
                     late.cleanupConfirmed = true;
                   },
                   (cause) => {
-                    cleanup.push(Cause.fail(cause));
+                    cleanup.push(
+                      Cause.fail(new RunnerIoError({ operation: 'discard_completion', cause })),
+                    );
                   },
                 );
               }
 
               return response;
             }),
-          catch: (cause) => cause,
+          catch: (cause) => new RunnerIoError({ operation: 'post_completion', cause }),
         }).pipe(Effect.timeout(30_000)),
       );
 
@@ -80,7 +83,7 @@ const deliverCompletion = (
       const discarded = yield* Effect.exit(
         Effect.tryPromise({
           try: () => response.body?.cancel() ?? Promise.resolve(),
-          catch: (cause) => cause,
+          catch: (cause) => new RunnerIoError({ operation: 'discard_completion', cause }),
         }).pipe(Effect.timeout(1_000)),
       );
 

@@ -9,7 +9,12 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { type AgentHandler, type HandlerResult, type RunnerFailure } from '../index.js';
+import {
+  AgentHandlerError,
+  type AgentHandler,
+  type HandlerResult,
+  type RunnerFailure,
+} from '../index.js';
 import { startCompletionReceiver, type CompletionReceiver } from './support/completion-receiver.js';
 
 const RUN_ID = '01J9Z3K4X5Y6Z7A8B9C0D1E2F3';
@@ -97,7 +102,7 @@ describe('createAgentRunner', () => {
 
     const runner = await createRunner({
       triggerToken: TRIGGER_TOKEN,
-      handler: () => Effect.fail(new Error('model offline')),
+      handler: () => Effect.fail(new AgentHandlerError({ message: 'model offline' })),
       onError: (failure) => failures.push(failure),
     });
 
@@ -201,7 +206,7 @@ describe('createAgentRunner', () => {
             new Promise<HandlerResult>((_resolve, reject) => {
               signal.addEventListener('abort', () => reject(new Error('aborted')));
             }),
-          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+          catch: (cause) => new AgentHandlerError({ message: 'aborted', cause }),
         }),
     });
 
@@ -270,5 +275,12 @@ describe('createAgentRunner', () => {
     );
     expect(runner.pending()).toBe(0);
     expect(completions.received).toEqual([]);
+  });
+
+  it('refuses to start when an untyped caller omits the trigger token', async () => {
+    // @ts-expect-error JavaScript callers can omit the token; `Bearer undefined` must not authenticate.
+    await expect(createRunner({ handler: echo })).rejects.toMatchObject({
+      reason: 'missing_trigger_token',
+    });
   });
 });

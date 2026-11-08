@@ -1,9 +1,12 @@
 import { AGENT_PROTOCOL } from '@attest/contracts';
-import { Cause, Context, Deferred, Effect, Exit } from 'effect';
+import { Cause, Context, Data, Deferred, Effect, Exit } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { ClientCleanup, ClientCleanupError, withCleanup } from '../runner/lifetime.js';
 import { createAgentRunner, withAgentRunner } from '../runner/agent-runner.js';
 import { createRunner } from './support/native-owner.js';
+
+/** A typed primary failure for brackets whose release behaviour is under test. */
+class PrimaryFailure extends Data.TaggedError('PrimaryFailure') {}
 
 /** Builds an authenticated callback trigger with a stable registration identity. */
 const request = (token = 'registration') =>
@@ -337,7 +340,7 @@ describe('native client lifetime invariants', () => {
     const exit = await Effect.runPromise(
       Effect.exit(
         withCleanup(
-          withCleanup(Effect.fail(new Error('primary')), release, undefined),
+          withCleanup(Effect.fail(new PrimaryFailure()), release, undefined),
           release,
           undefined,
         ),

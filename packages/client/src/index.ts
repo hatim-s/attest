@@ -3,6 +3,9 @@ export {
   withAgentRunner,
   ClientCleanup,
   ClientCleanupError,
+  AgentHandlerError,
+  AgentRunnerError,
+  RunnerIoError,
   type AgentHandler,
   type AgentInvocation,
   type AgentRunner,
@@ -12,4 +15,5 @@ export {
   type HandlerOutcome,
   type HandlerResult,
   type RunnerFailure,
+  type RunnerFetchError,
 } from './runner/agent-runner.js';
