@@ -13,11 +13,11 @@ import {
 import { LocalError } from '../../../errors/index.js';
 import { withAnchored, anchoredCall } from '../../../internal/open-anchored.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
+import { parseJsonTextEffect, readSourceText } from '../../../internal/source-text.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import { findCurlBodyFilePath, parseCurlCommand, type CurlImportPreview } from '../curl-parser.js';
 import { CurlImportError } from '../curl-tokenizer.js';
-import { assertSafeNativeAgentResource } from './resource-validation.js';
+import { validateNativeAgentResource } from './resource-validation.js';
 import type { ReadInput } from './types.js';
 
 const MAX_CURL_BYTES = 1024 * 1024;
@@ -51,12 +51,10 @@ const readRemoteJson = Effect.fn('readRemoteJson')(function* (source: string, pa
 
       if (response.body === null) {
         if (!response.ok)
-          return yield* Effect.fail(
-            new LocalError('cli_usage', 'The remote JSON source returned an error.', {
-              path,
-              details: { http_status: response.status },
-            }),
-          );
+          return yield* new LocalError('cli_usage', 'The remote JSON source returned an error.', {
+            path,
+            details: { http_status: response.status },
+          });
 
         return '';
       }
@@ -66,12 +64,10 @@ const readRemoteJson = Effect.fn('readRemoteJson')(function* (source: string, pa
       return yield* withCommandCleanup(
         Effect.gen(function* () {
           if (!response.ok)
-            return yield* Effect.fail(
-              new LocalError('cli_usage', 'The remote JSON source returned an error.', {
-                path,
-                details: { http_status: response.status },
-              }),
-            );
+            return yield* new LocalError('cli_usage', 'The remote JSON source returned an error.', {
+              path,
+              details: { http_status: response.status },
+            });
           const chunks: Uint8Array[] = [];
           let bytes = 0;
 
@@ -89,11 +85,13 @@ const readRemoteJson = Effect.fn('readRemoteJson')(function* (source: string, pa
             bytes += chunk.value.byteLength;
 
             if (bytes > MAX_REMOTE_JSON_BYTES)
-              return yield* Effect.fail(
-                new LocalError('cli_usage', 'The remote JSON source exceeds the size limit.', {
+              return yield* new LocalError(
+                'cli_usage',
+                'The remote JSON source exceeds the size limit.',
+                {
                   path,
                   details: { maximum_bytes: MAX_REMOTE_JSON_BYTES },
-                }),
+                },
               );
             chunks.push(chunk.value);
           }
@@ -134,29 +132,24 @@ const readImportedAgentResource = Effect.fn('readImportedAgentResource')(functio
   workingDirectory: string,
   readStdin: ReadInput,
 ) {
-  try {
-    const text = REMOTE_SOURCE.test(source)
-      ? yield* readRemoteJson(source, 'source')
-      : yield* readSourceText(source, { path: 'source', readStdin, workingDirectory });
+  const text = REMOTE_SOURCE.test(source)
+    ? yield* readRemoteJson(source, 'source')
+    : yield* readSourceText(source, { path: 'source', readStdin, workingDirectory });
 
-    const value = parseJsonText(text, { path: 'source' });
-    const parsed = parseWithSchema(agentResourceSchema, value);
+  const value = yield* parseJsonTextEffect(text, { path: 'source' });
+  const parsed = parseWithSchema(agentResourceSchema, value);
 
-    if (!parsed.ok) {
-      throw new LocalError('cli_usage', 'Imported agent JSON does not match its schema.', {
-        path: 'source',
-        details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
-      });
-    }
-
-    const resource = { ...parsed.value, id: agentId, name: name?.trim() || parsed.value.name };
-    assertSafeNativeAgentResource(resource);
-
-    return resource;
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
+  if (!parsed.ok) {
+    return yield* new LocalError('cli_usage', 'Imported agent JSON does not match its schema.', {
+      path: 'source',
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
+    });
   }
+
+  const resource = { ...parsed.value, id: agentId, name: name?.trim() || parsed.value.name };
+  yield* validateNativeAgentResource(resource);
+
+  return resource;
 });
 
 type CurlAgentImportRequest = Extract<
@@ -170,28 +163,23 @@ const readCurlDocument = Effect.fn('readCurlDocument')(function* (
   workingDirectory: string,
   readStdin: ReadInput,
 ) {
-  try {
-    if (REMOTE_SOURCE.test(source)) {
-      throw new LocalError('cli_usage', 'Remote cURL sources are not supported.', {
-        path: 'source',
-        hint: 'Pass a local cURL file or `-` for stdin.',
-      });
-    }
-
-    const text = yield* readSourceText(source, { path: 'source', readStdin, workingDirectory });
-
-    if (Buffer.byteLength(text) > MAX_CURL_BYTES) {
-      throw new LocalError('cli_usage', 'The cURL source exceeds the size limit.', {
-        path: 'source',
-        details: { maximum_bytes: MAX_CURL_BYTES },
-      });
-    }
-
-    return text;
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
+  if (REMOTE_SOURCE.test(source)) {
+    return yield* new LocalError('cli_usage', 'Remote cURL sources are not supported.', {
+      path: 'source',
+      hint: 'Pass a local cURL file or `-` for stdin.',
+    });
   }
+
+  const text = yield* readSourceText(source, { path: 'source', readStdin, workingDirectory });
+
+  if (Buffer.byteLength(text) > MAX_CURL_BYTES) {
+    return yield* new LocalError('cli_usage', 'The cURL source exceeds the size limit.', {
+      path: 'source',
+      details: { maximum_bytes: MAX_CURL_BYTES },
+    });
+  }
+
+  return text;
 });
 
 /** Reads one project-contained cURL data file through a no-follow bounded descriptor. */
@@ -203,22 +191,18 @@ const readCurlBodyFile = Effect.fn('readCurlBodyFile')(function* (
   const candidate = resolve(projectRoot, path);
 
   if (path.length === 0 || isAbsolute(path) || !isProjectPath(projectRoot, candidate))
-    return yield* Effect.fail(
-      new LocalError('cli_usage', 'The cURL body file must be inside the project.', {
-        path: 'source',
-        details: { diagnostic: 'file_body_outside_project' },
-      }),
-    );
+    return yield* new LocalError('cli_usage', 'The cURL body file must be inside the project.', {
+      path: 'source',
+      details: { diagnostic: 'file_body_outside_project' },
+    });
 
   return yield* withAnchored(candidate, { kind: 'file' as const, root: projectRoot }, (opened) =>
     Effect.gen(function* () {
       if (opened.identity.size > BigInt(maximumBytes))
-        return yield* Effect.fail(
-          new LocalError('cli_usage', 'Could not safely read the cURL body file.', {
-            path: 'source',
-            details: { diagnostic: 'unsafe_file_body' },
-          }),
-        );
+        return yield* new LocalError('cli_usage', 'Could not safely read the cURL body file.', {
+          path: 'source',
+          details: { diagnostic: 'unsafe_file_body' },
+        });
       const chunks: Buffer[] = [];
       let bytes = 0;
 
@@ -233,12 +217,10 @@ const readCurlBodyFile = Effect.fn('readCurlBodyFile')(function* (
         bytes += read.bytesRead;
 
         if (bytes > maximumBytes)
-          return yield* Effect.fail(
-            new LocalError('cli_usage', 'Could not safely read the cURL body file.', {
-              path: 'source',
-              details: { diagnostic: 'unsafe_file_body' },
-            }),
-          );
+          return yield* new LocalError('cli_usage', 'Could not safely read the cURL body file.', {
+            path: 'source',
+            details: { diagnostic: 'unsafe_file_body' },
+          });
         chunks.push(chunk.subarray(0, read.bytesRead));
       }
 
@@ -265,118 +247,117 @@ const readCurlBodyFile = Effect.fn('readCurlBodyFile')(function* (
   );
 });
 
+/** Maps known cURL parse failures while leaving unexpected exceptions as defects. */
+const parseCurlInput = <A>(parse: () => A) =>
+  Effect.try({ try: parse, catch: (cause) => cause }).pipe(
+    Effect.catch((cause) =>
+      cause instanceof CurlImportError
+        ? Effect.fail(
+            new LocalError('cli_usage', cause.message, {
+              path: 'source',
+              hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
+              details: { diagnostics: cause.diagnostics },
+            }),
+          )
+        : Effect.die(cause),
+    ),
+  );
+
 /** Converts one inert cURL request into a canonical direct or polling agent resource. */
 const createImportedCurlAgentResource = Effect.fn('createImportedCurlAgentResource')(function* (
   request: CurlAgentImportRequest,
   source: string,
   projectRoot: string,
 ) {
-  try {
-    let parsedCurl: ReturnType<typeof parseCurlCommand>;
+  const bodyFilePath = yield* parseCurlInput(() => findCurlBodyFilePath(source));
 
-    try {
-      const bodyFilePath = findCurlBodyFilePath(source);
+  const bodyFile =
+    bodyFilePath === undefined
+      ? undefined
+      : {
+          path: bodyFilePath,
+          text: yield* readCurlBodyFile(
+            bodyFilePath,
+            projectRoot,
+            Math.min(request.limits?.request_bytes ?? MAX_CURL_BYTES, MAX_CURL_BYTES),
+          ),
+        };
 
-      const bodyFile =
-        bodyFilePath === undefined
-          ? undefined
-          : {
-              path: bodyFilePath,
-              text: yield* readCurlBodyFile(
-                bodyFilePath,
-                projectRoot,
-                Math.min(request.limits?.request_bytes ?? MAX_CURL_BYTES, MAX_CURL_BYTES),
-              ),
-            };
+  const curl = yield* parseCurlInput(() =>
+    parseCurlCommand(source, {
+      bodyFile,
+      headerSecrets: request.header_env,
+      querySecrets: request.query_env,
+      placeholders: request.placeholders?.map((mapping) => ({
+        targetPointer: mapping.target_pointer,
+        inputPointer: mapping.input_pointer,
+      })),
+    }),
+  );
 
-      parsedCurl = parseCurlCommand(source, {
-        bodyFile,
-        headerSecrets: request.header_env,
-        querySecrets: request.query_env,
-        placeholders: request.placeholders?.map((mapping) => ({
-          targetPointer: mapping.target_pointer,
-          inputPointer: mapping.input_pointer,
-        })),
-      });
-    } catch (error: unknown) {
-      if (error instanceof CurlImportError) {
-        throw new LocalError('cli_usage', error.message, {
-          path: 'source',
-          hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
-          details: { diagnostics: error.diagnostics },
-        });
-      }
+  const transport =
+    request.polling === undefined
+      ? {
+          kind: 'http' as const,
+          lifecycle: 'external' as const,
+          response_mode: 'mapped' as const,
+          request: curl.request,
+          extraction: request.extraction,
+        }
+      : {
+          kind: 'polling' as const,
+          lifecycle: 'external' as const,
+          submit: curl.request,
+          extraction: request.extraction,
+          ...request.polling,
+        };
 
-      throw error;
-    }
+  let candidate: AgentResource = {
+    schema: AGENT_RESOURCE_SCHEMA_ID,
+    id: request.as,
+    name: request.name?.trim() || request.as,
+    transport,
+  };
 
-    const transport =
-      request.polling === undefined
-        ? {
-            kind: 'http' as const,
-            lifecycle: 'external' as const,
-            response_mode: 'mapped' as const,
-            request: parsedCurl.request,
-            extraction: request.extraction,
-          }
-        : {
-            kind: 'polling' as const,
-            lifecycle: 'external' as const,
-            submit: parsedCurl.request,
-            extraction: request.extraction,
-            ...request.polling,
-          };
-
-    let candidate: AgentResource = {
-      schema: AGENT_RESOURCE_SCHEMA_ID,
-      id: request.as,
-      name: request.name?.trim() || request.as,
-      transport,
-    };
-
-    if (request.timeouts !== undefined) {
-      candidate = { ...candidate, timeouts: request.timeouts };
-    }
-
-    if (request.retry !== undefined) {
-      candidate = { ...candidate, retry: request.retry };
-    }
-
-    if (request.limits !== undefined) {
-      candidate = { ...candidate, limits: request.limits };
-    }
-
-    const headerNames = Object.keys(request.header_env ?? {});
-    const queryNames = Object.keys(request.query_env ?? {});
-
-    if (headerNames.length + queryNames.length > 0) {
-      let redaction: NonNullable<AgentResource['redaction']> = {};
-
-      if (request.header_env !== undefined) redaction = { ...redaction, headers: headerNames };
-
-      if (request.query_env !== undefined) redaction = { ...redaction, query: queryNames };
-      candidate = { ...candidate, redaction: redaction };
-    }
-
-    const parsed = parseWithSchema(agentResourceSchema, candidate);
-
-    if (!parsed.ok) {
-      throw new LocalError('cli_usage', 'The cURL mapping does not match the agent schema.', {
-        path: 'source',
-        details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
-      });
-    }
-
-    assertSafeNativeAgentResource(parsed.value);
-
-    return { agent: parsed.value, preview: parsedCurl.preview } satisfies {
-      agent: AgentResource;
-      preview: CurlImportPreview;
-    };
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
+  if (request.timeouts !== undefined) {
+    candidate = { ...candidate, timeouts: request.timeouts };
   }
+
+  if (request.retry !== undefined) {
+    candidate = { ...candidate, retry: request.retry };
+  }
+
+  if (request.limits !== undefined) {
+    candidate = { ...candidate, limits: request.limits };
+  }
+
+  const headerNames = Object.keys(request.header_env ?? {});
+  const queryNames = Object.keys(request.query_env ?? {});
+
+  if (headerNames.length + queryNames.length > 0) {
+    let redaction: NonNullable<AgentResource['redaction']> = {};
+
+    if (request.header_env !== undefined) redaction = { ...redaction, headers: headerNames };
+
+    if (request.query_env !== undefined) redaction = { ...redaction, query: queryNames };
+    candidate = { ...candidate, redaction: redaction };
+  }
+
+  const parsed = parseWithSchema(agentResourceSchema, candidate);
+
+  if (!parsed.ok) {
+    return yield* new LocalError('cli_usage', 'The cURL mapping does not match the agent schema.', {
+      path: 'source',
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
+    });
+  }
+
+  yield* validateNativeAgentResource(parsed.value);
+
+  return { agent: parsed.value, preview: curl.preview } satisfies {
+    agent: AgentResource;
+    preview: CurlImportPreview;
+  };
 });
 
 export { createImportedCurlAgentResource, readCurlDocument, readImportedAgentResource };

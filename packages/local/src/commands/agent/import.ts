@@ -1,4 +1,3 @@
-import { LocalError } from '../../errors/index.js';
 import * as Effect from 'effect/Effect';
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
@@ -27,89 +26,79 @@ const importAgentResource = Effect.fn('importAgentResource')(function* (
   request: AgentRequest<'agent.import'>,
   options: AgentImportCommandOptions,
 ) {
-  try {
-    if (request.source_type === 'json') {
-      const agent = yield* readImportedAgentResource(
-        request.source,
-        request.as,
-        request.name,
-        options.workingDirectory,
-        options.readStdin,
-      );
-
-      return {
-        agent,
-        preview: agent.transport.kind === 'websocket' ? redactAgentResource(agent) : undefined,
-      } satisfies { agent: AgentResource; preview?: JsonValue };
-    }
-
-    const curlSource =
-      options.sourceText ??
-      (yield* readCurlDocument(request.source, options.workingDirectory, options.readStdin));
-
-    const { root } = yield* discoverProject({
-      project: options.project,
-      workingDirectory: options.workingDirectory,
-    });
-
-    const imported = yield* createImportedCurlAgentResource(request, curlSource, root);
-
-    const preview: ImportedCurlPreview = {
-      request: imported.preview,
-      extraction: request.extraction,
-    };
-
-    if (request.polling !== undefined) {
-      preview.polling = request.polling;
-    }
+  if (request.source_type === 'json') {
+    const agent = yield* readImportedAgentResource(
+      request.source,
+      request.as,
+      request.name,
+      options.workingDirectory,
+      options.readStdin,
+    );
 
     return {
-      agent: imported.agent,
-      preview,
+      agent,
+      preview: agent.transport.kind === 'websocket' ? redactAgentResource(agent) : undefined,
     } satisfies { agent: AgentResource; preview?: JsonValue };
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
   }
+
+  const curlSource =
+    options.sourceText ??
+    (yield* readCurlDocument(request.source, options.workingDirectory, options.readStdin));
+
+  const { root } = yield* discoverProject({
+    project: options.project,
+    workingDirectory: options.workingDirectory,
+  });
+
+  const imported = yield* createImportedCurlAgentResource(request, curlSource, root);
+
+  const preview: ImportedCurlPreview = {
+    request: imported.preview,
+    extraction: request.extraction,
+  };
+
+  if (request.polling !== undefined) {
+    preview.polling = request.polling;
+  }
+
+  return {
+    agent: imported.agent,
+    preview,
+  } satisfies { agent: AgentResource; preview?: JsonValue };
 });
 
 /** Imports one canonical JSON resource or inert cURL mapping without retaining source contents. */
 const runAgentImportCommand = Effect.fn('runAgentImportCommand')(function* (
   options: AgentImportCommandOptions,
 ) {
-  try {
-    const { request } = options;
-    const { agent, preview } = yield* importAgentResource(request, options);
+  const { request } = options;
+  const { agent, preview } = yield* importAgentResource(request, options);
 
-    const loaded = yield* loadCommandProject({
-      project: options.project,
-      recover: request.dry_run !== true,
-      workingDirectory: options.workingDirectory,
-    });
+  const loaded = yield* loadCommandProject({
+    project: options.project,
+    recover: request.dry_run !== true,
+    workingDirectory: options.workingDirectory,
+  });
 
-    assertNewId('agent', loaded.agents, agent.id);
+  yield* assertNewId('agent', loaded.agents, agent.id);
 
-    let candidate = candidateFromLoadedProject(loaded);
-    candidate = { ...candidate, agents: [...candidate.agents, agent] };
+  let candidate = candidateFromLoadedProject(loaded);
+  candidate = { ...candidate, agents: [...candidate.agents, agent] };
 
-    return yield* mutationResult({
-      command: 'agent.import',
-      loaded,
-      candidate,
-      request,
-      confirmation: {
-        definitionPreview: preview,
-        interactive: options.interactive,
-        nextCommand: `attest agent test ${agent.id}`,
-        prompt: options.prompt,
-        requireExplicit: false,
-        yes: request.yes,
-      },
-    });
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
-  }
+  return yield* mutationResult({
+    command: 'agent.import',
+    loaded,
+    candidate,
+    request,
+    confirmation: {
+      definitionPreview: preview,
+      interactive: options.interactive,
+      nextCommand: `attest agent test ${agent.id}`,
+      prompt: options.prompt,
+      requireExplicit: false,
+      yes: request.yes,
+    },
+  });
 });
 
 export { runAgentImportCommand };

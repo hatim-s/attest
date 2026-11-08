@@ -7,6 +7,7 @@ import {
 } from '@attest/contracts';
 
 import * as Schema from 'effect/Schema';
+import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
@@ -136,9 +137,28 @@ const parseTcpReadiness = (value: string) => {
   return { host: match[1].replace(/^\[|\]$/gu, ''), port };
 };
 
+/** Parses argv JSON in the typed channel for local Effect authoring commands. */
+const parseArgvJsonEffect = Effect.fn('parseArgvJsonEffect')(function* (value: string) {
+  return yield* Effect.try({ try: () => parseArgvJson(value), catch: (cause) => cause }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
+});
+
+/** Parses a duration in the typed channel while the public CLI parser remains synchronous. */
+const parseDurationEffect = Effect.fn('parseDurationEffect')(function* (
+  value: string,
+  path: string = '--timeout',
+) {
+  return yield* Effect.try({ try: () => parseDuration(value, path), catch: (cause) => cause }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
+});
+
 export {
   parseArgvJson,
+  parseArgvJsonEffect,
   parseDuration,
+  parseDurationEffect,
   parseJsonValues,
   parseRequestTemplate,
   parseSandboxJson,

@@ -59,6 +59,11 @@ needs a schema. Keep expected operational errors separate from defects and
 interruption. Persisted failed cases, agent-reported failures, metric scores and
 requested cancellation responses are domain outcomes, not automatically failures.
 
+AttestError subclasses are yieldable. Use `return yield* error` in generators.
+Synchronous pure parsers may throw their own error class. The Effect caller maps
+that class once with `Effect.try`. Synchronous twins of Effect validators exist
+only while a synchronous caller remains.
+
 Preserve original causes and safe context. Map public codes exhaustively at the
 edge. Never classify errors by message text, use blanket `orDie`, or turn failed
 reads into missing records or empty lists. A disconnect, user cancellation and a

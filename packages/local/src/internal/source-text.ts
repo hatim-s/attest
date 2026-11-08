@@ -56,4 +56,17 @@ const parseJsonText = (text: string, options: ParseJsonTextOptions): JsonValue =
   }
 };
 
-export { parseJsonText, readSourceText };
+/** Parses JSON in the typed channel while preserving unexpected parser failures as defects. */
+const parseJsonTextEffect = Effect.fn('parseJsonTextEffect')(function* (
+  text: string,
+  options: ParseJsonTextOptions,
+) {
+  return yield* Effect.try({
+    try: () => parseJsonText(text, options),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
+});
+
+export { parseJsonText, parseJsonTextEffect, readSourceText };

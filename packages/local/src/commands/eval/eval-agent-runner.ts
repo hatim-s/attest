@@ -31,7 +31,7 @@ import {
 import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../errors/index.js';
-import { assertSafeNativeAgentResource } from '../agent/authoring/resource-validation.js';
+import { validateNativeAgentResource } from '../agent/authoring/resource-validation.js';
 import {
   invocationOutcome,
   invokeResolvedAgent,
@@ -85,10 +85,10 @@ const appendLifecycleFailure = (
 };
 
 /** Builds the case shape runtime consumes from one invocation, original or redacted. */
-const caseExecutionFrom = (
+const caseExecutionFrom = Effect.fn('caseExecutionFrom')(function* (
   invocation: InvocationResult,
   base: Omit<CaseExecutionBase, 'attempts' | 'diagnostics' | 'warnings'>,
-): CaseExecution => {
+): Effect.fn.Return<CaseExecution, LocalError> {
   const common = {
     ...base,
     attempts: invocation.attempts,
@@ -101,9 +101,12 @@ const caseExecutionFrom = (
   }
 
   if (invocation.report?.ok !== true) {
-    throw new LocalError(
-      'internal_error',
-      'Agent adapter returned an unvalidated successful response.',
+    // A successful adapter result must already contain a validated report.
+    return yield* Effect.die(
+      new LocalError(
+        'internal_error',
+        'Agent adapter returned an unvalidated successful response.',
+      ),
     );
   }
 
@@ -114,7 +117,7 @@ const caseExecutionFrom = (
     trace: invocation.report.value.trace,
     warnings: invocation.report.warnings,
   };
-};
+});
 
 /** Resolves and starts one agent runtime; session transports are reused across cases. */
 const startRuntime = Effect.fn('startRuntime')(function* (
@@ -122,7 +125,7 @@ const startRuntime = Effect.fn('startRuntime')(function* (
   projectRoot: string,
   signal: AbortSignal,
 ): Effect.fn.Return<AgentRuntime, Error, Scope.Scope> {
-  assertSafeNativeAgentResource(payload.agent);
+  yield* validateNativeAgentResource(payload.agent);
 
   return yield* startAgentRuntime(yield* resolveNativeAgent(payload.agent, projectRoot), signal);
 });
@@ -145,9 +148,7 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         if (sandboxCleanupUncertain)
-          return yield* Effect.fail(
-            new LocalError('run_failed', 'Sandbox cleanup was not confirmed.'),
-          );
+          return yield* new LocalError('run_failed', 'Sandbox cleanup was not confirmed.');
         let fiber = runtimes.get(payload.agent.id);
 
         if (fiber === undefined) {
@@ -258,7 +259,7 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
 
               // Metrics score what the agent returned. Sensitive-name redaction would turn
               // `{ token: "ok" }` into `[REDACTED]`, so only the redacted copy leaves this function.
-              const original = caseExecutionFrom(invocation, { ...base, request });
+              const original = yield* caseExecutionFrom(invocation, { ...base, request });
 
               // Field-name redaction hides these values in structured evidence. Raw excerpts, stderr and
               // metric text quote the original, so they are redacted as secrets everywhere.
@@ -274,7 +275,7 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
                 ),
               ];
 
-              let execution = caseExecutionFrom(redactInvocation(invocation, secrets), {
+              let execution = yield* caseExecutionFrom(redactInvocation(invocation, secrets), {
                 ...base,
                 request: redactAgentRequest(request, secrets),
               });
@@ -376,13 +377,7 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
             : Effect.succeed(Exit.void),
         );
 
-        const hooks = yield* Effect.exit(
-          Effect.try({
-            try: () => lifecycle.assertCleanup(),
-            catch: (error) =>
-              error instanceof Error ? error : new Error('Hook cleanup failed.', { cause: error }),
-          }),
-        );
+        const hooks = yield* Effect.exit(lifecycle.assertCleanup());
 
         const sandbox = sandboxCleanupUncertain
           ? Exit.fail(

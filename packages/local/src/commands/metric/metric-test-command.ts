@@ -33,86 +33,16 @@ const withoutDuration = (evaluation: StoredMetricEvaluation) => {
 const runMetricTestCommand = Effect.fn('runMetricTestCommand')(function* (
   options: MetricTestCommandOptions,
 ) {
-  try {
-    const loaded = yield* loadCommandProject(options);
-    const metric = findResource('metric', loaded.metrics, options.metricId ?? '');
+  const loaded = yield* loadCommandProject(options);
+  const metric = yield* findResource('metric', loaded.metrics, options.metricId ?? '');
 
-    const fixture = yield* readMetricTestFixture(
-      options.fixture,
-      options.workingDirectory,
-      options.readStdin,
-    );
+  const fixture = yield* readMetricTestFixture(
+    options.fixture,
+    options.workingDirectory,
+    options.readStdin,
+  );
 
-    if (metric.definition.kind === 'judge' || metric.definition.kind === 'http') {
-      return {
-        operation: 'metric-test' as const,
-        projectHashBefore: loaded.projectHash,
-        projectHashAfter: loaded.projectHash,
-        result: {
-          metric_id: metric.id,
-          kind: metric.definition.kind,
-          fixture_valid: true as const,
-          executed: false as const,
-          reason: 'external_execution_not_supported' as const,
-        },
-      };
-    }
-
-    let caseDefinition: MetricContext['caseDefinition'] = {
-      id: fixture.case.id,
-      input: fixture.case.input,
-    };
-
-    if (fixture.case.expected !== undefined) {
-      caseDefinition = { ...caseDefinition, expected: fixture.case.expected };
-    }
-
-    if (fixture.case.params !== undefined) {
-      caseDefinition = { ...caseDefinition, params: fixture.case.params };
-    }
-
-    const context: MetricContext = {
-      caseDefinition,
-      execution: {
-        outcome: 'completed',
-        output: fixture.output,
-        trace: fixture.trace,
-        artifacts: [...(fixture.artifacts ?? [])],
-      },
-    };
-
-    const { evaluation, secrets } = yield* evaluateMetricResource({
-      context,
-      definition: metric.definition,
-      id: metric.id,
-      projectRoot: loaded.root,
-      signal: options.signal,
-    });
-
-    const redacted = redactProbeValue(withoutDuration(evaluation), secrets);
-
-    if (evaluation.status === 'error') {
-      throw new LocalError('metric_infrastructure_failed', 'Metric fixture execution failed.', {
-        path: metric.id,
-        hint: 'Inspect the redacted local evaluation details and repair the executable fixture.',
-        details: { evaluation: redacted },
-      });
-    }
-
-    const passed = evaluation.status === 'evaluated' ? evaluation.pass : false;
-
-    if (passed !== fixture.expected_pass) {
-      throw new LocalError('metric_fixture_mismatch', 'Metric result did not match the fixture.', {
-        path: metric.id,
-        hint: 'Inspect the deterministic evaluation and repair the metric or expected_pass value.',
-        details: {
-          actual_pass: passed,
-          expected_pass: fixture.expected_pass,
-          evaluation: redacted,
-        },
-      });
-    }
-
+  if (metric.definition.kind === 'judge' || metric.definition.kind === 'http') {
     return {
       operation: 'metric-test' as const,
       projectHashBefore: loaded.projectHash,
@@ -121,15 +51,88 @@ const runMetricTestCommand = Effect.fn('runMetricTestCommand')(function* (
         metric_id: metric.id,
         kind: metric.definition.kind,
         fixture_valid: true as const,
-        executed: true as const,
-        expected_pass: fixture.expected_pass,
-        evaluation: redacted,
+        executed: false as const,
+        reason: 'external_execution_not_supported' as const,
       },
     };
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
   }
+
+  let caseDefinition: MetricContext['caseDefinition'] = {
+    id: fixture.case.id,
+    input: fixture.case.input,
+  };
+
+  if (fixture.case.expected !== undefined) {
+    caseDefinition = { ...caseDefinition, expected: fixture.case.expected };
+  }
+
+  if (fixture.case.params !== undefined) {
+    caseDefinition = { ...caseDefinition, params: fixture.case.params };
+  }
+
+  const context: MetricContext = {
+    caseDefinition,
+    execution: {
+      outcome: 'completed',
+      output: fixture.output,
+      trace: fixture.trace,
+      artifacts: [...(fixture.artifacts ?? [])],
+    },
+  };
+
+  const { evaluation, secrets } = yield* evaluateMetricResource({
+    context,
+    definition: metric.definition,
+    id: metric.id,
+    projectRoot: loaded.root,
+    signal: options.signal,
+  });
+
+  const redacted = redactProbeValue(withoutDuration(evaluation), secrets);
+
+  if (evaluation.status === 'error') {
+    return yield* new LocalError(
+      'metric_infrastructure_failed',
+      'Metric fixture execution failed.',
+      {
+        path: metric.id,
+        hint: 'Inspect the redacted local evaluation details and repair the executable fixture.',
+        details: { evaluation: redacted },
+      },
+    );
+  }
+
+  const passed = evaluation.status === 'evaluated' ? evaluation.pass : false;
+
+  if (passed !== fixture.expected_pass) {
+    return yield* new LocalError(
+      'metric_fixture_mismatch',
+      'Metric result did not match the fixture.',
+      {
+        path: metric.id,
+        hint: 'Inspect the deterministic evaluation and repair the metric or expected_pass value.',
+        details: {
+          actual_pass: passed,
+          expected_pass: fixture.expected_pass,
+          evaluation: redacted,
+        },
+      },
+    );
+  }
+
+  return {
+    operation: 'metric-test' as const,
+    projectHashBefore: loaded.projectHash,
+    projectHashAfter: loaded.projectHash,
+    result: {
+      metric_id: metric.id,
+      kind: metric.definition.kind,
+      fixture_valid: true as const,
+      executed: true as const,
+      expected_pass: fixture.expected_pass,
+      evaluation: redacted,
+    },
+  };
 });
 
 export { runMetricTestCommand, type MetricTestCommandOptions };

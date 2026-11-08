@@ -41,11 +41,13 @@ describe('cloud trust boundaries', () => {
       .fn<typeof fetch>()
       .mockResolvedValue(Response.json({ email: 'user@example.test' }));
 
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example.test',
-      accessToken: 'private-token',
-      fetch: fetcher,
-    });
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example.test',
+        accessToken: 'private-token',
+        fetch: fetcher,
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(
@@ -68,20 +70,26 @@ describe('cloud trust boundaries', () => {
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       redirect: 'error',
     });
-    expect(() => createCloudClient({ baseUrl: 'http://remote.example.test' })).toThrow();
+    await expect(
+      Effect.runPromiseExit(createCloudClient({ baseUrl: 'http://remote.example.test' })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({ code: 'cli_usage' });
   });
   it('sanitizes server errors rather than printing their messages or tokens', async () => {
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example.test',
-      fetch: vi
-        .fn<typeof fetch>()
-        .mockResolvedValue(
-          Response.json(
-            { error: { code: 'quota_exceeded', message: 'private-token and secret data' } },
-            { status: 403 },
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example.test',
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(
+            Response.json(
+              { error: { code: 'quota_exceeded', message: 'private-token and secret data' } },
+              { status: 403 },
+            ),
           ),
-        ),
-    });
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(client.request('GET', '/v1/session', { schema: Schema.Unknown })).then(
@@ -94,10 +102,12 @@ describe('cloud trust boundaries', () => {
     });
   });
   it('wraps invalid successful JSON in the cloud error contract', async () => {
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example.test',
-      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response('invalid-json')),
-    });
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example.test',
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response('invalid-json')),
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(client.request('GET', '/v1/session', { schema: Schema.Unknown })).then(
@@ -282,10 +292,12 @@ describe('cloud trust boundaries', () => {
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
   it('distinguishes schema mismatches from invalid JSON', async () => {
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example.test',
-      fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ wrong: true })),
-    });
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example.test',
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ wrong: true })),
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(
@@ -322,7 +334,9 @@ describe('cloud trust boundaries', () => {
       }),
     );
 
-    const client = createCloudClient({ baseUrl: 'https://cloud.example.test', fetch: fetcher });
+    const client = await Effect.runPromiseExit(
+      createCloudClient({ baseUrl: 'https://cloud.example.test', fetch: fetcher }),
+    ).then(valueFromExit);
 
     const page = await Effect.runPromiseExit(
       cloudEvents({ client, projectId: 'p', runId: 'r', after: 7 }),
@@ -386,10 +400,14 @@ describe('cloud trust boundaries', () => {
       ).then(valueFromExit),
     ).rejects.toMatchObject({ code: 'cloud_credentials_failed' });
 
-    const client = createCloudClient({
-      baseUrl: credentials.baseUrl,
-      fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ events: [], next_cursor: 2 })),
-    });
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: credentials.baseUrl,
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(Response.json({ events: [], next_cursor: 2 })),
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(cloudEvents({ client, projectId: 'p', runId: 'r', after: 7 })).then(
@@ -406,17 +424,19 @@ it.each([
 ] as const)(
   'preserves upload failure %s as a closed local error',
   async (status, code, accessToken) => {
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.test',
-      accessToken,
-      fetch: () =>
-        Promise.resolve(
-          Response.json(
-            { error: { code, message: `Upload rejected for Bearer ${accessToken}.` } },
-            { status },
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.test',
+        accessToken,
+        fetch: () =>
+          Promise.resolve(
+            Response.json(
+              { error: { code, message: `Upload rejected for Bearer ${accessToken}.` } },
+              { status },
+            ),
           ),
-        ),
-    });
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(
@@ -434,16 +454,18 @@ it.each([
 );
 
 it('retains a known error code when its message exceeds the display limit', async () => {
-  const client = createCloudClient({
-    baseUrl: 'https://cloud.test',
-    fetch: () =>
-      Promise.resolve(
-        Response.json(
-          { error: { code: 'run_conflict', message: 'x'.repeat(5000) } },
-          { status: 409 },
+  const client = await Effect.runPromiseExit(
+    createCloudClient({
+      baseUrl: 'https://cloud.test',
+      fetch: () =>
+        Promise.resolve(
+          Response.json(
+            { error: { code: 'run_conflict', message: 'x'.repeat(5000) } },
+            { status: 409 },
+          ),
         ),
-      ),
-  });
+    }),
+  ).then(valueFromExit);
 
   await expect(
     Effect.runPromiseExit(
@@ -476,7 +498,10 @@ it('joins an accepted fetch that ignores cancellation without replaying dispatch
     return response;
   });
 
-  const client = createCloudClient({ baseUrl: 'https://cloud.test', fetch: fetcher });
+  const client = await Effect.runPromiseExit(
+    createCloudClient({ baseUrl: 'https://cloud.test', fetch: fetcher }),
+  ).then(valueFromExit);
+
   let settled = false;
 
   const pending = Effect.runPromiseExit(
@@ -510,10 +535,12 @@ it('preserves a caller schema refinement defect through the HTTP boundary', asyn
     }),
   );
 
-  const client = createCloudClient({
-    baseUrl: 'https://cloud.test',
-    fetch: () => Promise.resolve(Response.json('fixture')),
-  });
+  const client = await Effect.runPromiseExit(
+    createCloudClient({
+      baseUrl: 'https://cloud.test',
+      fetch: () => Promise.resolve(Response.json('fixture')),
+    }),
+  ).then(valueFromExit);
 
   const exit = await Effect.runPromiseExit(client.request('GET', '/v1/fixture', { schema }));
 

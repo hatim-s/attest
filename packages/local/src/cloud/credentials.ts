@@ -36,12 +36,7 @@ const readCloudCredentials = Effect.fn('readCloudCredentials')(function* (
     if (text.length > 16384) return yield* Effect.fail(new Error('Unsafe credentials'));
 
     const credentials = yield* Effect.try({
-      try: () => {
-        const parsed = parseWithSchemaSync(credentialSchema, JSON.parse(text));
-        normalizeCloudUrl(parsed.baseUrl);
-
-        return parsed;
-      },
+      try: () => parseWithSchemaSync(credentialSchema, JSON.parse(text)),
       catch: (cause) =>
         new LocalError(
           'cloud_auth_required',
@@ -50,6 +45,8 @@ const readCloudCredentials = Effect.fn('readCloudCredentials')(function* (
         ),
     });
 
+    yield* normalizeCloudUrl(credentials.baseUrl);
+
     if (!options.allowExpired && Date.parse(credentials.expiresAt) <= Date.now())
       return yield* Effect.fail(new Error('Expired credentials'));
 
@@ -57,12 +54,10 @@ const readCloudCredentials = Effect.fn('readCloudCredentials')(function* (
   }).pipe(
     Effect.catch(() =>
       Effect.gen(function* () {
-        return yield* Effect.fail(
-          new LocalError(
-            'cloud_auth_required',
-            'Cloud credentials are missing, expired, or unsafe.',
-            { hint: 'Run attest cloud login --url <cloud-origin>.' },
-          ),
+        return yield* new LocalError(
+          'cloud_auth_required',
+          'Cloud credentials are missing, expired, or unsafe.',
+          { hint: 'Run attest cloud login --url <cloud-origin>.' },
         );
       }),
     ),
@@ -74,22 +69,19 @@ const writeCloudCredentials = Effect.fn('writeCloudCredentials')(function* (
   credentials: CloudCredentials,
   path: string,
 ) {
-  yield* Effect.try({
-    try: () => normalizeCloudUrl(credentials.baseUrl),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
+  yield* normalizeCloudUrl(credentials.baseUrl);
 
   return yield* Effect.gen(function* () {
     yield* writePrivateFile(path, JSON.stringify(credentials));
   }).pipe(
     Effect.catch((cause) =>
       Effect.gen(function* () {
-        return yield* Effect.fail(
-          new LocalError('cloud_credentials_failed', 'Could not save private cloud credentials.', {
+        return yield* new LocalError(
+          'cloud_credentials_failed',
+          'Could not save private cloud credentials.',
+          {
             cause,
-          }),
+          },
         );
       }),
     ),
@@ -112,28 +104,27 @@ const resolveCloudCredentials = Effect.fn('resolveCloudCredentials')(function* (
     accessToken === undefined ||
     !parseWithSchema(bearerTokenSchema, accessToken).ok
   ) {
-    return yield* Effect.fail(
-      new LocalError(
-        'cloud_credentials_invalid',
-        'Set ATTEST_CLOUD_URL and ATTEST_CLOUD_TOKEN together with valid values.',
-      ),
+    return yield* new LocalError(
+      'cloud_credentials_invalid',
+      'Set ATTEST_CLOUD_URL and ATTEST_CLOUD_TOKEN together with valid values.',
     );
   }
 
-  try {
-    return {
-      baseUrl: normalizeCloudUrl(baseUrl),
-      accessToken,
-      credentialSource: 'project_token' as const,
-    };
-  } catch {
-    return yield* Effect.fail(
-      new LocalError(
-        'cloud_credentials_invalid',
-        'ATTEST_CLOUD_URL must be a cloud HTTPS origin or HTTP loopback origin.',
-      ),
-    );
-  }
+  const normalizedBaseUrl = yield* normalizeCloudUrl(baseUrl).pipe(
+    Effect.mapError(
+      () =>
+        new LocalError(
+          'cloud_credentials_invalid',
+          'ATTEST_CLOUD_URL must be a cloud HTTPS origin or HTTP loopback origin.',
+        ),
+    ),
+  );
+
+  return {
+    baseUrl: normalizedBaseUrl,
+    accessToken,
+    credentialSource: 'project_token' as const,
+  };
 });
 
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
@@ -144,12 +135,10 @@ const removeCloudCredentials = Effect.fn('removeCloudCredentials')(function* (pa
   }).pipe(
     Effect.catch((cause) =>
       Effect.gen(function* () {
-        return yield* Effect.fail(
-          new LocalError(
-            'cloud_credentials_failed',
-            'Could not remove private cloud credentials.',
-            { cause },
-          ),
+        return yield* new LocalError(
+          'cloud_credentials_failed',
+          'Could not remove private cloud credentials.',
+          { cause },
         );
       }),
     ),

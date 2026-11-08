@@ -52,8 +52,9 @@ const projectFilePaths = Effect.fn('projectFilePaths')(function* (project: Loade
     const script = metric.definition.argv[1];
 
     if (script === undefined) {
-      return yield* Effect.fail(
-        new LocalError('project_invalid', `Metric ${metric.id} needs a script entrypoint.`),
+      return yield* new LocalError(
+        'project_invalid',
+        `Metric ${metric.id} needs a script entrypoint.`,
       );
     }
 
@@ -71,17 +72,23 @@ const createCloudBundle = Effect.fn('createCloudBundle')(function* (project: Loa
     const destination = yield* resolveSafeProjectPath(project.root, path);
     const bytes = yield* anchoredCall('readFile', destination, () => readFile(destination));
 
-    try {
-      files[path] = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-
-      if (files[path].includes('\0')) throw new Error('Binary content');
-    } catch {
-      return yield* Effect.fail(
+    const contents = yield* Effect.try({
+      try: () => new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      catch: () =>
         new LocalError('project_invalid', 'Cloud revisions support UTF-8 text files only.', {
           path,
         }),
+    });
+
+    if (contents.includes('\0')) {
+      return yield* new LocalError(
+        'project_invalid',
+        'Cloud revisions support UTF-8 text files only.',
+        { path },
       );
     }
+
+    files[path] = contents;
   }
 
   const { agents, datasets, metrics, tests } = project;
@@ -93,11 +100,13 @@ const createCloudBundle = Effect.fn('createCloudBundle')(function* (project: Loa
   });
 
   if (!parsed.ok) {
-    return yield* Effect.fail(
-      new LocalError('project_invalid', 'Project cannot be uploaded as a cloud revision.', {
+    return yield* new LocalError(
+      'project_invalid',
+      'Project cannot be uploaded as a cloud revision.',
+      {
         details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
         hint: 'Keep custom metric code under attest/metrics/code and remove secrets from authored files.',
-      }),
+      },
     );
   }
 
@@ -134,28 +143,24 @@ const pushCloudProject = Effect.fn('pushCloudProject')(function* (
         JSON.stringify(Object.entries(link.file_hashes).sort());
 
       if (options.acknowledgeNoSecrets !== true && !unchanged) {
-        return yield* Effect.fail(
-          new LocalError(
-            'cli_usage',
-            'Cloud push requires confirmation that changed authored files contain no secrets.',
-            {
-              hint: 'Inspect project resources, case data, and metric code, then pass --no-secrets.',
-            },
-          ),
+        return yield* new LocalError(
+          'cli_usage',
+          'Cloud push requires confirmation that changed authored files contain no secrets.',
+          {
+            hint: 'Inspect project resources, case data, and metric code, then pass --no-secrets.',
+          },
         );
       }
 
       const payload = { bundle, parent_revision_id: link.revision_id ?? null };
 
       if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > PORTABLE_MAX_UPLOAD_BYTES) {
-        return yield* Effect.fail(
-          new LocalError(
-            'project_invalid',
-            `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
-            {
-              hint: 'Reduce authored dataset or metric source size before pushing.',
-            },
-          ),
+        return yield* new LocalError(
+          'project_invalid',
+          `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
+          {
+            hint: 'Reduce authored dataset or metric source size before pushing.',
+          },
         );
       }
 
@@ -166,8 +171,9 @@ const pushCloudProject = Effect.fn('pushCloudProject')(function* (
       );
 
       if (response.revision.project_id !== projectId) {
-        return yield* Effect.fail(
-          new LocalError('project_invalid', 'Cloud returned a revision for another project.'),
+        return yield* new LocalError(
+          'project_invalid',
+          'Cloud returned a revision for another project.',
         );
       }
 
@@ -218,12 +224,10 @@ const planPullChanges = Effect.fn('planPullChanges')(function* (
   }
 
   if (conflicts.length > 0) {
-    return yield* Effect.fail(
-      new LocalError('project_changed', 'Cloud pull would overwrite local changes.', {
-        details: { conflicts },
-        hint: 'Preserve or reconcile these files before pulling. Pull never discards local changes.',
-      }),
-    );
+    return yield* new LocalError('project_changed', 'Cloud pull would overwrite local changes.', {
+      details: { conflicts },
+      hint: 'Preserve or reconcile these files before pulling. Pull never discards local changes.',
+    });
   }
 
   return changes.sort((left, right) =>
@@ -262,8 +266,9 @@ const pullCloudProject = Effect.fn('pullCloudProject')(function* (
         response.revision.project_id !== projectId ||
         (options.revisionId !== undefined && response.revision.id !== options.revisionId)
       ) {
-        return yield* Effect.fail(
-          new LocalError('project_invalid', 'Cloud returned a different project or revision.'),
+        return yield* new LocalError(
+          'project_invalid',
+          'Cloud returned a different project or revision.',
         );
       }
 
@@ -302,12 +307,10 @@ const pullCloudProject = Effect.fn('pullCloudProject')(function* (
                 entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
                 entry.original_hash !== nextHash
               ) {
-                return yield* Effect.fail(
-                  new LocalError(
-                    'project_changed',
-                    'A local file changed while cloud pull was staging.',
-                    { path: entry.path },
-                  ),
+                return yield* new LocalError(
+                  'project_changed',
+                  'A local file changed while cloud pull was staging.',
+                  { path: entry.path },
                 );
               }
             }

@@ -1,5 +1,12 @@
 import { isJsonArray } from '../../../internal/json-array.js';
-import type { JsonValue, MetricResource } from '@attest/contracts';
+import {
+  isJsonObject,
+  parseWithSchema,
+  type JsonValue,
+  type MetricResource,
+} from '@attest/contracts';
+import * as Effect from 'effect/Effect';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
@@ -28,12 +35,14 @@ const credentialArgumentPosition = (argv: readonly string[]): number => {
 
 /** Rejects credential-like literals while preserving secret references for runtime resolution. */
 // BOUNDARY: Authored executable and HTTP metric definitions are checked for embedded credentials before execution.
-const assertSafeMetricResource = (metric: MetricResource): void => {
+const assertSafeMetricResource = Effect.fn('assertSafeMetricResource')(function* (
+  metric: MetricResource,
+) {
   if (metric.definition.kind === 'exec') {
     const sensitivePosition = credentialArgumentPosition(metric.definition.argv);
 
     if (sensitivePosition >= 0) {
-      throw new LocalError(
+      return yield* new LocalError(
         'project_invalid',
         'Metric argv cannot contain credential-like literals.',
         {
@@ -48,19 +57,18 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
 
   if (metric.definition.kind !== 'http') return;
   const request = metric.definition.request;
-  let url: URL;
 
-  try {
-    url = new URL(request.url);
-  } catch (error: unknown) {
-    throw new LocalError('project_invalid', 'HTTP metric URL is invalid.', {
-      path: '/metric/definition/request/url',
-      cause: error,
-    });
-  }
+  const url = yield* Effect.try({
+    try: () => new URL(request.url),
+    catch: (cause) =>
+      new LocalError('project_invalid', 'HTTP metric URL is invalid.', {
+        path: '/metric/definition/request/url',
+        cause,
+      }),
+  });
 
   if (url.username.length > 0 || url.password.length > 0) {
-    throw new LocalError(
+    return yield* new LocalError(
       'project_invalid',
       'HTTP metric URLs cannot contain userinfo credentials.',
       {
@@ -72,7 +80,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
 
   for (const name of url.searchParams.keys()) {
     if (isSensitiveFieldName(name)) {
-      throw new LocalError(
+      return yield* new LocalError(
         'project_invalid',
         'HTTP metric URLs cannot contain credential-like query values.',
         {
@@ -88,8 +96,10 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
     ['query', request.query],
   ] as const) {
     for (const [name, value] of Object.entries(values ?? {})) {
-      if (isSensitiveFieldName(name) && typeof value === 'string') {
-        throw new LocalError(
+      const literal = parseWithSchema(Schema.String, value);
+
+      if (isSensitiveFieldName(name) && literal.ok) {
+        return yield* new LocalError(
           'project_invalid',
           'Sensitive HTTP values must use secret references.',
           {
@@ -109,9 +119,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
   while (pending.length > 0) {
     const current = pending.shift();
 
-    if (current === undefined || current.value === null || typeof current.value !== 'object') {
-      continue;
-    }
+    if (current === undefined) continue;
 
     if (isJsonArray(current.value)) {
       current.value.forEach((value, index) =>
@@ -120,9 +128,11 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       continue;
     }
 
+    if (!isJsonObject(current.value)) continue;
+
     for (const [name, value] of Object.entries(current.value)) {
       if (isSensitiveFieldName(name) && value !== null) {
-        throw new LocalError(
+        return yield* new LocalError(
           'project_invalid',
           'HTTP metric bodies cannot contain credential-like authored values.',
           {
@@ -135,6 +145,6 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       pending.push({ path: `${current.path}/${name}`, value });
     }
   }
-};
+});
 
 export { assertSafeMetricResource };

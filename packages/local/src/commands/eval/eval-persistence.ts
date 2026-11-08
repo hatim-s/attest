@@ -105,25 +105,27 @@ const createEvalBaselineAdapter = (store: AttestStore): EvalBaselineAdapter<RunD
 });
 
 /** Verifies the engine-provided JUnit integrity metadata before publishing any bytes. */
-const verifyJUnitPayload = (payload: EvalJUnitPayload): void => {
-  const bytes = Buffer.byteLength(payload.contents, 'utf8');
-  const hash = createHash('sha256').update(payload.contents, 'utf8').digest('hex');
+const verifyJUnitPayload = Effect.fn('verifyJUnitPayload')(function* (payload: EvalJUnitPayload) {
+  const { bytes, hash } = yield* Effect.try({
+    try: () => ({
+      bytes: Buffer.byteLength(payload.contents, 'utf8'),
+      hash: createHash('sha256').update(payload.contents, 'utf8').digest('hex'),
+    }),
+    catch: (cause) =>
+      cause instanceof Error ? cause : new Error('Invalid JUnit payload.', { cause }),
+  });
 
   if (bytes !== payload.byte_length || hash !== payload.sha256) {
-    throw new LocalError('output_write_failed', 'JUnit integrity metadata is invalid.');
+    return yield* new LocalError('output_write_failed', 'JUnit integrity metadata is invalid.');
   }
-};
+});
 
 /** Publishes JUnit through a synced sibling temporary file and one atomic rename. */
 const createEvalArtifactWriter = (projectRoot: string): EvalArtifactWriter => ({
   writeJUnitAtomically: (path, payload) =>
     Effect.uninterruptibleMask(() =>
       Effect.gen(function* () {
-        yield* Effect.try({
-          try: () => verifyJUnitPayload(payload),
-          catch: (cause) =>
-            cause instanceof Error ? cause : new Error('Invalid JUnit payload.', { cause }),
-        });
+        yield* verifyJUnitPayload(payload);
 
         const outputPath = yield* prepareEvalProjectFile(projectRoot, path, {
           allowAbsolute: true,

@@ -1,4 +1,5 @@
 import { LocalError } from '../../errors/index.js';
+import * as Effect from 'effect/Effect';
 
 /** Parses repeatable `NAME=VALUE` flags into a record; a repeated name keeps the last value. */
 const parseNameValuePairs = (values: readonly string[], path: string, hint: string) => {
@@ -34,4 +35,17 @@ const parseSecretBindings = (values: readonly string[], path: string) =>
     ).map(([target, source]) => [target, { from_env: source }]),
   );
 
-export { parseNameValuePairs, parseSecretBindings };
+/** Parses secret bindings in the typed channel for native Effect command builders. */
+const parseSecretBindingsEffect = Effect.fn('parseSecretBindingsEffect')(function* (
+  values: readonly string[],
+  path: string,
+) {
+  return yield* Effect.try({
+    try: () => parseSecretBindings(values, path),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
+});
+
+export { parseNameValuePairs, parseSecretBindings, parseSecretBindingsEffect };
