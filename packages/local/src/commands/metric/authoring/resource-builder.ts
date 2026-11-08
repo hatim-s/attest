@@ -365,7 +365,7 @@ const createMetricResource = Effect.fn('createMetricResource')(function* (fields
     if (env !== undefined) definition = { ...definition, env: env };
 
     if (fields.timeout !== undefined)
-      definition = { ...definition, timeout_ms: yield* parseDuration(fields.timeout) };
+      definition = { ...definition, timeout_ms: yield* parseDuration(fields.timeout, '--timeout') };
   } else if (fields.preset === 'http') {
     yield* assertOnlyFields(
       fields,
@@ -425,7 +425,7 @@ const createMetricResource = Effect.fn('createMetricResource')(function* (fields
       };
 
     if (fields.timeout !== undefined)
-      definition = { ...definition, timeout_ms: yield* parseDuration(fields.timeout) };
+      definition = { ...definition, timeout_ms: yield* parseDuration(fields.timeout, '--timeout') };
   } else if (fields.preset !== undefined) {
     yield* assertOnlyFields(fields, ASSERTION_PRESET_FIELDS[fields.preset]);
     definition = yield* buildAssertionDefinition(fields);

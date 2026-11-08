@@ -205,7 +205,7 @@ const createEvalRunRequest = Effect.fn('createEvalRunRequest')(function* (
   if (fields.timeout !== undefined)
     request = {
       ...request,
-      timeout_ms: yield* parseDuration(fields.timeout),
+      timeout_ms: yield* parseDuration(fields.timeout, '--timeout'),
     };
 
   if (fields.baseline !== undefined) request = { ...request, baseline_run_id: fields.baseline };

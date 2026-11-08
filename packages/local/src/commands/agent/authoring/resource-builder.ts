@@ -296,7 +296,10 @@ const createAgentResource = Effect.fn('createAgentResource')(function* (fields: 
   }
 
   yield* assertApplicableAuthoringFlags(fields, selections[0]!);
-  const timeout = fields.timeout === undefined ? undefined : yield* parseDuration(fields.timeout);
+
+  const timeout =
+    fields.timeout === undefined ? undefined : yield* parseDuration(fields.timeout, '--timeout');
+
   const name = fields.name?.trim() || fields.agentId;
 
   const processEnvironment =

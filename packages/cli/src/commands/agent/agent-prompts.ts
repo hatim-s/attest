@@ -2,12 +2,26 @@ import * as Effect from 'effect/Effect';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { ask, type PromptContext } from '../shared/required-input.js';
 
+type DefaultPrompt = {
+  /** A flag value that, when present, is used without asking. */
+  value?: string;
+  question: string;
+  /** Shown in brackets and used for an empty answer or a non-interactive command. */
+  fallback: string;
+};
+
+type ChoicePrompt<Choice extends string> = {
+  question: string;
+  choices: readonly [Choice, ...Choice[]];
+  fallback: Choice;
+  /** Names the choice in the unknown-choice error. */
+  path: string;
+};
+
 /** Returns a flag value, or asks with a documented default. */
 const promptDefault = Effect.fn('promptDefault')(function* (
-  value: string | undefined,
-  question: string,
-  fallback: string,
   context: PromptContext,
+  { value, question, fallback }: DefaultPrompt,
 ) {
   if (value?.trim()) return value.trim();
 
@@ -33,13 +47,10 @@ const promptOptional = Effect.fn('promptOptional')(function* (
 
 /** Asks with a default and accepts only one of the listed answers. */
 const promptChoice = Effect.fn('promptChoice')(function* <const Choice extends string>(
-  question: string,
-  choices: readonly [Choice, ...Choice[]],
-  fallback: Choice,
-  path: string,
   context: PromptContext,
+  { question, choices, fallback, path }: ChoicePrompt<Choice>,
 ) {
-  const answer = yield* promptDefault(undefined, question, fallback, context);
+  const answer = yield* promptDefault(context, { question, fallback });
   const choice = choices.find((candidate) => candidate === answer);
 
   if (choice !== undefined) return choice;

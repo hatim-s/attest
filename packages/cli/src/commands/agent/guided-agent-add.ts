@@ -63,8 +63,11 @@ const promptBackgroundFields = Effect.fn('promptBackgroundFields')(function* (
       { path: '--invoke-url', question: 'Invoke HTTP URL: ' },
       context,
     ),
-    responsePointer: yield* promptDefault(undefined, 'Result JSON Pointer', '/output', context),
-    stopTimeout: yield* promptDefault(undefined, 'Stop timeout', '5s', context),
+    responsePointer: yield* promptDefault(context, {
+      question: 'Result JSON Pointer',
+      fallback: '/output',
+    }),
+    stopTimeout: yield* promptDefault(context, { question: 'Stop timeout', fallback: '5s' }),
   };
 });
 
@@ -75,14 +78,16 @@ const promptJsonlFields = Effect.fn('promptJsonlFields')(function* (context: Pro
       { path: '--jsonl-command', question: 'JSONL bridge command: ' },
       context,
     ),
-    bridgeConcurrency: yield* promptChoice(
-      'Bridge concurrency',
-      ['serial', 'multiplexed'],
-      'serial',
-      '--bridge-concurrency',
-      context,
-    ),
-    cancellationGrace: yield* promptDefault(undefined, 'Cancellation grace', '1s', context),
+    bridgeConcurrency: yield* promptChoice(context, {
+      question: 'Bridge concurrency',
+      choices: ['serial', 'multiplexed'],
+      fallback: 'serial',
+      path: '--bridge-concurrency',
+    }),
+    cancellationGrace: yield* promptDefault(context, {
+      question: 'Cancellation grace',
+      fallback: '1s',
+    }),
   };
 });
 
@@ -93,16 +98,23 @@ const promptStreamFields = Effect.fn('promptStreamFields')(function* (context: P
       { path: '--stream-url', question: 'Stream HTTP URL: ' },
       context,
     ),
-    streamFraming: yield* promptChoice(
-      'Stream framing',
-      ['sse', 'jsonl'],
-      'sse',
-      '--stream-framing',
-      context,
-    ),
-    terminalPointer: yield* promptDefault(undefined, 'Terminal JSON Pointer', '/type', context),
-    terminalValues: [yield* promptDefault(undefined, 'Terminal JSON value', '"result"', context)],
-    responsePointer: yield* promptDefault(undefined, 'Result JSON Pointer', '/output', context),
+    streamFraming: yield* promptChoice(context, {
+      question: 'Stream framing',
+      choices: ['sse', 'jsonl'],
+      fallback: 'sse',
+      path: '--stream-framing',
+    }),
+    terminalPointer: yield* promptDefault(context, {
+      question: 'Terminal JSON Pointer',
+      fallback: '/type',
+    }),
+    terminalValues: [
+      yield* promptDefault(context, { question: 'Terminal JSON value', fallback: '"result"' }),
+    ],
+    responsePointer: yield* promptDefault(context, {
+      question: 'Result JSON Pointer',
+      fallback: '/output',
+    }),
   };
 });
 
@@ -115,21 +127,19 @@ const promptWebSocketFields = Effect.fn('promptWebSocketFields')(function* (
     context,
   );
 
-  const webSocketLifecycle = yield* promptChoice(
-    'WebSocket lifecycle',
-    ['per_run', 'per_case'],
-    'per_run',
-    '--websocket-lifecycle',
-    context,
-  );
+  const webSocketLifecycle = yield* promptChoice(context, {
+    question: 'WebSocket lifecycle',
+    choices: ['per_run', 'per_case'],
+    fallback: 'per_run',
+    path: '--websocket-lifecycle',
+  });
 
-  const connectionMode = yield* promptChoice(
-    'Connection mode',
-    ['serial', 'multiplexed'],
-    webSocketLifecycle === 'per_case' ? 'serial' : 'multiplexed',
-    '--connection-mode',
-    context,
-  );
+  const connectionMode = yield* promptChoice(context, {
+    question: 'Connection mode',
+    choices: ['serial', 'multiplexed'],
+    fallback: webSocketLifecycle === 'per_case' ? 'serial' : 'multiplexed',
+    path: '--connection-mode',
+  });
 
   return {
     webSocketUrl,
@@ -139,35 +149,41 @@ const promptWebSocketFields = Effect.fn('promptWebSocketFields')(function* (
       yield* ask(context, 'Header environment references HEADER=ENV, comma-separated [none]: '),
     ),
     webSocketSubprotocol: yield* promptOptional(undefined, 'WebSocket subprotocol', context),
-    requestTemplate: yield* promptDefault(
-      undefined,
-      'Request template JSON',
-      '{"request_id":"{{request_id}}","request":"{{request}}"}',
-      context,
-    ),
-    requestIdPointer: yield* promptDefault(
-      undefined,
-      'Request id JSON Pointer',
-      '/request_id',
-      context,
-    ),
-    acknowledgementPointer: yield* promptDefault(
-      undefined,
-      'Acknowledgement JSON Pointer',
-      '/type',
-      context,
-    ),
+    requestTemplate: yield* promptDefault(context, {
+      question: 'Request template JSON',
+      fallback: '{"request_id":"{{request_id}}","request":"{{request}}"}',
+    }),
+    requestIdPointer: yield* promptDefault(context, {
+      question: 'Request id JSON Pointer',
+      fallback: '/request_id',
+    }),
+    acknowledgementPointer: yield* promptDefault(context, {
+      question: 'Acknowledgement JSON Pointer',
+      fallback: '/type',
+    }),
     acknowledgementValues: [
-      yield* promptDefault(undefined, 'Acknowledgement JSON value', '"acknowledgement"', context),
+      yield* promptDefault(context, {
+        question: 'Acknowledgement JSON value',
+        fallback: '"acknowledgement"',
+      }),
     ],
-    responsePointer: yield* promptDefault(undefined, 'Result JSON Pointer', '/output', context),
-    errorPointer: yield* promptDefault(undefined, 'Error JSON Pointer', '/error', context),
+    responsePointer: yield* promptDefault(context, {
+      question: 'Result JSON Pointer',
+      fallback: '/output',
+    }),
+    errorPointer: yield* promptDefault(context, {
+      question: 'Error JSON Pointer',
+      fallback: '/error',
+    }),
     tracePointer: yield* promptOptional(undefined, 'Trace JSON Pointer', context),
-    openTimeout: yield* promptDefault(undefined, 'Open timeout', '10s', context),
-    idleTimeout: yield* promptDefault(undefined, 'Message idle timeout', '30s', context),
-    attemptTimeout: yield* promptDefault(undefined, 'Attempt timeout', '60s', context),
-    pingInterval: yield* promptDefault(undefined, 'Ping interval', '15s', context),
-    closeTimeout: yield* promptDefault(undefined, 'Close timeout', '5s', context),
+    openTimeout: yield* promptDefault(context, { question: 'Open timeout', fallback: '10s' }),
+    idleTimeout: yield* promptDefault(context, {
+      question: 'Message idle timeout',
+      fallback: '30s',
+    }),
+    attemptTimeout: yield* promptDefault(context, { question: 'Attempt timeout', fallback: '60s' }),
+    pingInterval: yield* promptDefault(context, { question: 'Ping interval', fallback: '15s' }),
+    closeTimeout: yield* promptDefault(context, { question: 'Close timeout', fallback: '5s' }),
   };
 });
 

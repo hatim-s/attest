@@ -5,7 +5,6 @@ import {
   tryOwned,
   vercelSandboxSchema,
   type Argv,
-  type JsonValue,
 } from '@attest/contracts';
 
 import * as Effect from 'effect/Effect';
@@ -85,10 +84,7 @@ const parseSandboxJson = Effect.fn('parseSandboxJson')(function* (value: string)
 });
 
 /** Parses a positive duration expressed as milliseconds, seconds, or minutes. */
-const parseDuration = Effect.fn('parseDuration')(function* (
-  value: string,
-  path: string = '--timeout',
-) {
+const parseDuration = Effect.fn('parseDuration')(function* (value: string, path: string) {
   const match = /^(\d+)(ms|s|m)$/u.exec(value);
   const amount = match?.[1] === undefined ? 0 : Number(match[1]);
   const unit = match?.[2];
@@ -110,18 +106,12 @@ const parseJsonValues = Effect.fn('parseJsonValues')(function* (
   values: readonly string[],
   path: string,
 ) {
-  const parsed: JsonValue[] = [];
-
-  for (const value of values) {
-    parsed.push(
-      yield* parseJsonText(value, {
-        path,
-        hint: 'Quote strings as JSON, for example `--terminal-value \'"done"\'`.',
-      }),
-    );
-  }
-
-  return parsed;
+  return yield* Effect.forEach(values, (value) =>
+    parseJsonText(value, {
+      path,
+      hint: 'Quote strings as JSON, for example `--terminal-value \'"done"\'`.',
+    }),
+  );
 });
 
 /** Parses one WebSocket text-JSON request template. */

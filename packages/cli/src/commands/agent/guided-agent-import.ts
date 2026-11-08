@@ -56,30 +56,26 @@ const promptPollingFields = Effect.fn('promptPollingFields')(function* (
 ): Effect.fn.Return<CurlFlags, AttestCliError | LocalError> {
   const polling: CurlFlags = {
     ...fields,
-    pollJobIdPointer: yield* promptDefault(
-      fields.pollJobIdPointer,
-      'Submission job id JSON Pointer',
-      '/job_id',
-      context,
-    ),
+    pollJobIdPointer: yield* promptDefault(context, {
+      value: fields.pollJobIdPointer,
+      question: 'Submission job id JSON Pointer',
+      fallback: '/job_id',
+    }),
   };
 
   if (fields.pollStatusUrlPointer === undefined && fields.pollStatusUrlTemplate === undefined) {
-    const statusSource = yield* promptChoice(
-      'Status URL source',
-      ['pointer', 'template'],
-      'pointer',
-      'status-url-source',
-      context,
-    );
+    const statusSource = yield* promptChoice(context, {
+      question: 'Status URL source',
+      choices: ['pointer', 'template'],
+      fallback: 'pointer',
+      path: 'status-url-source',
+    });
 
     if (statusSource === 'pointer') {
-      polling.pollStatusUrlPointer = yield* promptDefault(
-        undefined,
-        'Submission status URL JSON Pointer',
-        '/status_url',
-        context,
-      );
+      polling.pollStatusUrlPointer = yield* promptDefault(context, {
+        question: 'Submission status URL JSON Pointer',
+        fallback: '/status_url',
+      });
     } else {
       polling.pollStatusUrlTemplate = yield* requiredInput(
         undefined,
@@ -92,12 +88,11 @@ const promptPollingFields = Effect.fn('promptPollingFields')(function* (
     }
   }
 
-  polling.pollStatusPointer = yield* promptDefault(
-    fields.pollStatusPointer,
-    'Polling status JSON Pointer',
-    '/status',
-    context,
-  );
+  polling.pollStatusPointer = yield* promptDefault(context, {
+    value: fields.pollStatusPointer,
+    question: 'Polling status JSON Pointer',
+    fallback: '/status',
+  });
   polling.pollSuccess = fields.pollSuccess ??
     commaSeparated(
       yield* ask(context, 'Polling success JSON values, comma-separated ["done"]: '),
@@ -106,18 +101,16 @@ const promptPollingFields = Effect.fn('promptPollingFields')(function* (
     commaSeparated(
       yield* ask(context, 'Polling failure JSON values, comma-separated ["failed"]: '),
     ) ?? ['"failed"'];
-  polling.pollMinimumInterval = yield* promptDefault(
-    fields.pollMinimumInterval,
-    'Minimum polling interval',
-    '1s',
-    context,
-  );
-  polling.pollMaximumInterval = yield* promptDefault(
-    fields.pollMaximumInterval,
-    'Maximum polling interval',
-    '5s',
-    context,
-  );
+  polling.pollMinimumInterval = yield* promptDefault(context, {
+    value: fields.pollMinimumInterval,
+    question: 'Minimum polling interval',
+    fallback: '1s',
+  });
+  polling.pollMaximumInterval = yield* promptDefault(context, {
+    value: fields.pollMaximumInterval,
+    question: 'Maximum polling interval',
+    fallback: '5s',
+  });
   polling.idempotencyHeader = yield* promptOptional(
     fields.idempotencyHeader,
     'Submission idempotency header',
@@ -158,18 +151,22 @@ const promptCurlImportFields = Effect.fn('promptCurlImportFields')(function* (
 
   const transport = pollingFlagsPresent(fields)
     ? 'polling'
-    : yield* promptChoice('Transport', ['direct', 'polling'], 'direct', 'transport', context);
+    : yield* promptChoice(context, {
+        question: 'Transport',
+        choices: ['direct', 'polling'],
+        fallback: 'direct',
+        path: 'transport',
+      });
 
   if (transport === 'polling') guided = yield* promptPollingFields(guided, context);
 
   return {
     ...guided,
-    responsePointer: yield* promptDefault(
-      fields.responsePointer,
-      'Response JSON Pointer',
-      '/answer',
-      context,
-    ),
+    responsePointer: yield* promptDefault(context, {
+      value: fields.responsePointer,
+      question: 'Response JSON Pointer',
+      fallback: '/answer',
+    }),
   };
 });
 
