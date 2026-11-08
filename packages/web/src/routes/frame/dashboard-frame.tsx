@@ -24,9 +24,12 @@ const DashboardFrame = () => {
   const entry = overviews.data?.items.find((item) => item.project.key === projectKey);
   const running = entry?.status === 'ready' && entry.overview.runningRunCount > 0;
 
+  // A store the catalog could not read has no evals to list; its page shows the reason.
+  const unreadable = entry?.status === 'error';
+
   const evals = useQuery({
     ...evalsQueryOptions(source, projectKey ?? '', running),
-    enabled: projectKey !== undefined,
+    enabled: projectKey !== undefined && !unreadable,
   });
 
   return (
@@ -37,7 +40,13 @@ const DashboardFrame = () => {
       evals={
         projectKey === undefined
           ? null
-          : { sourceId: source.id, projectKey, state: navigationData(evals, shellEvals) }
+          : {
+              sourceId: source.id,
+              projectKey,
+              state: unreadable
+                ? { status: 'unavailable', message: 'The run store cannot be read.' }
+                : navigationData(evals, shellEvals),
+            }
       }
       current={current}
       breadcrumbs={breadcrumbsFor(current, {

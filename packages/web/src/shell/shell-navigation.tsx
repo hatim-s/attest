@@ -116,7 +116,7 @@ const ShellNavigation = ({
                   {item(
                     { kind: 'project', sourceId: source.id, projectKey: project.key },
                     <>
-                      {project.name}
+                      <span className="attest-nav-label">{project.name}</span>
                       {!open && project.failing && <NavMark mark="failing" />}
                     </>,
                     open && current.kind !== 'project',
@@ -153,7 +153,7 @@ const ShellNavigation = ({
                                 className="attest-nav-item"
                                 inPath={selected}
                               >
-                                {evaluation.name}
+                                <span className="attest-nav-label">{evaluation.name}</span>
                                 {evaluation.mark && <NavMark mark={evaluation.mark} />}
                               </ShellLink>
                               {selected && (
