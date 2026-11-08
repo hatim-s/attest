@@ -7,6 +7,7 @@ import { projectRunsQueryOptions } from '../../api/queries/runs.js';
 import { EmptyState } from '../../components/empty/empty-state.js';
 import { RunLifecycle } from '../../components/marks/run-lifecycle.js';
 import { formatStarted, shortRunId } from '../../lib/format.js';
+import { NewRunButton } from '../new-run/new-run-button.js';
 import '../../styles/compact/pages.css';
 import '../../styles/compact/runs.css';
 
@@ -41,6 +42,9 @@ const AllRunsPage = () => {
       <div className="attest-page-head">
         <div className="attest-page-title">
           <h1>All runs</h1>
+        </div>
+        <div className="attest-page-end">
+          <NewRunButton projectKey={projectKey} />
         </div>
       </div>
       {runs.data === undefined ? (

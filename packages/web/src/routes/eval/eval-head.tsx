@@ -1,7 +1,8 @@
 import { Link } from '@tanstack/react-router';
+import { NewRunButton } from '../new-run/new-run-button.js';
 
 /**
- * The eval's title and the two tab labels. The Test cases view is not built
+ * The eval's title, its New run control and the two tab labels. The Test cases view is not built
  * yet, so its tab is shown disabled rather than linking to a page that does not exist.
  */
 const EvalHead = ({ projectKey, suiteName }: { projectKey: string; suiteName: string }) => (
@@ -9,6 +10,9 @@ const EvalHead = ({ projectKey, suiteName }: { projectKey: string; suiteName: st
     <div className="attest-page-head">
       <div className="attest-page-title">
         <h1>{suiteName}</h1>
+      </div>
+      <div className="attest-page-end">
+        <NewRunButton projectKey={projectKey} suiteName={suiteName} />
       </div>
     </div>
     <nav className="attest-tabs" aria-label={`${suiteName} views`}>

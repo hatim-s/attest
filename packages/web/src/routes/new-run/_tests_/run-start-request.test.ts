@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { selectTests, toRunStartRequest } from '../routes/run-start-request.js';
+import { selectTests, toRunStartRequest } from '../run-start-request.js';
 
 const testIds = ['smoke', 'billing', 'refunds'];
 
