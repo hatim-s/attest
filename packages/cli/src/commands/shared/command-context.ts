@@ -36,7 +36,6 @@ type CliServices = {
   eval?: Partial<Pick<typeof EvalAdapter, 'runConfiguration' | 'cancelConfiguration'>>;
 };
 
-/** What every command registration needs: the root program, terminal I/O, and invocation facts. */
 /**
  * A native command program. It returns an exit code only when it already published its own
  * terminal result, such as an eval whose verdict failed its gate; otherwise the exit code is 0.
@@ -47,6 +46,7 @@ type CommandProgram = Effect.Effect<
   EvalApplication | CancellationRegistry
 >;
 
+/** What every command registration needs: the root program, terminal I/O, and invocation facts. */
 type CommandContext = {
   /** Selects the native command program executed by the application root. */
   submit: (

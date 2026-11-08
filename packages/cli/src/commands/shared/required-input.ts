@@ -16,7 +16,14 @@ type RequiredInput = {
   question: string;
 };
 
-const cancelled = (): AttestCliError => new AttestCliError('cancelled', 'Command cancelled.');
+/** Cancellation of a pending question. Its literal code lets `localPrompt` map it by type. */
+class PromptCancelledError extends AttestCliError {
+  override readonly code = 'cancelled';
+
+  constructor() {
+    super('cancelled', 'Command cancelled.');
+  }
+}
 
 /**
  * Asks one question and closes it when either the command or its fiber is cancelled. An abort
@@ -26,7 +33,7 @@ const cancelled = (): AttestCliError => new AttestCliError('cancelled', 'Command
 const ask = Effect.fn('ask')(function* (context: PromptContext, question: string) {
   const { prompt, signal } = context;
 
-  if (signal.aborted) return yield* cancelled();
+  if (signal.aborted) return yield* new PromptCancelledError();
 
   const answer = Effect.tryPromise({
     try: (interruption) => prompt(question, { signal: interruption }),
@@ -35,13 +42,13 @@ const ask = Effect.fn('ask')(function* (context: PromptContext, question: string
     Effect.catch((cause) =>
       // Readline closes the question itself on Ctrl+C or Ctrl+D, without any process signal.
       signal.aborted || (cause instanceof Error && cause.name === 'AbortError')
-        ? Effect.fail(cancelled())
+        ? Effect.fail(new PromptCancelledError())
         : Effect.die(cause),
     ),
   );
 
-  const cancellation = Effect.callback<never, AttestCliError>((resume) => {
-    const abort = () => resume(Effect.fail(cancelled()));
+  const cancellation = Effect.callback<never, PromptCancelledError>((resume) => {
+    const abort = () => resume(Effect.fail(new PromptCancelledError()));
     signal.addEventListener('abort', abort, { once: true });
 
     if (signal.aborted) abort();
@@ -54,11 +61,11 @@ const ask = Effect.fn('ask')(function* (context: PromptContext, question: string
 
 /**
  * Lends `ask` to a local command, such as a mutation confirmation. Its only failure is
- * cancellation, reported in local's own error vocabulary with the same code and message.
+ * cancellation, carried into local's own error vocabulary with the same code and message.
  */
 const localPrompt = (context: PromptContext) => (question: string) =>
   ask(context, question).pipe(
-    Effect.mapError(() => new LocalError('cancelled', 'Command cancelled.')),
+    Effect.mapError(({ code, message }) => new LocalError(code, message)),
   );
 
 /** Returns the flag value, else asks for it on a terminal, else reports it as missing input. */
@@ -67,7 +74,7 @@ const requiredInput = Effect.fn('requiredInput')(function* (
   input: RequiredInput,
   context: PromptContext,
 ) {
-  if (context.signal.aborted) return yield* cancelled();
+  if (context.signal.aborted) return yield* new PromptCancelledError();
   const provided = value?.trim();
 
   if (provided !== undefined && provided.length > 0) return provided;
@@ -88,4 +95,4 @@ const requiredInput = Effect.fn('requiredInput')(function* (
   );
 });
 
-export { ask, localPrompt, requiredInput, type PromptContext };
+export { ask, localPrompt, requiredInput, type PromptCancelledError, type PromptContext };
