@@ -204,12 +204,29 @@ stable artifact error identities. `report` snapshots carry the record of the pro
 registry on the same port, and cannot be combined with `--store`. See
 [project registry and dashboard](./index.md#project-registry-and-dashboard).
 
-The dashboard and its read API are project scoped. Dashboard routes are `/` (every project),
-`/projects/<key>`, `/projects/<key>/runs`, `/projects/<key>/runs/<run-id>` (opens the eval run
-page when the run has one eval, otherwise lists its evals), `/projects/<key>/evals/<eval>/runs`,
-`/projects/<key>/evals/<eval>/runs/<run-id>` and
-`/projects/<key>/evals/<eval>/runs/<run-id>/cases/<case-id>`. The read API mirrors them under `/api/projects` and
-`/api/projects/<key>/runs`. An unknown key returns `PROJECT_NOT_FOUND`.
+The dashboard and its read API are project scoped. Dashboard routes:
+
+- `/`: every project.
+- `/projects/<key>`: the project's pass-rate trend, cases per day and evals.
+- `/projects/<key>/runs`: every run of the project.
+- `/projects/<key>/runs/<run-id>`: opens the eval run page when the run has one eval, otherwise
+  lists its evals.
+- `/projects/<key>/evals/<eval>`: opens the eval's Runs tab.
+- `/projects/<key>/evals/<eval>/runs`: the Runs tab. `x=run|date` spaces the trend.
+- `/projects/<key>/evals/<eval>/cases`: the Test cases tab. `q` searches case ids and
+  `filter=all|failing|flaky` picks a chip.
+- `/projects/<key>/evals/<eval>/cases/<case-id>`: one case across the eval's runs.
+- `/projects/<key>/evals/<eval>/runs/<run-id>`: one run of the eval.
+- `/projects/<key>/evals/<eval>/runs/<run-id>/cases/<case-id>`: one case in one run.
+
+The read API mirrors them under `/api/projects` and `/api/projects/<key>/runs`. An unknown key
+returns `PROJECT_NOT_FOUND`. A file from `attest report` serves the same routes from its one-run
+snapshot without network access.
+
+On the Test cases tab, Failing means the case failed or errored in the newest completed run of
+the window, and Flaky means the window holds both a pass and a failure or error for it. A run
+with no row for a case leaves no mark and never counts as a result. Case names, tags and
+definitions live in authored files, not in runs, so the tab and the case page show case ids.
 
 The dashboard pages read precomputed per-eval totals, so no page pages through case rows to draw
 a chart. An "eval" is a test id; one run can hold slices of several evals. Only a complete slice
