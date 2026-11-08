@@ -178,18 +178,8 @@ const triggerCallbackAgent = Effect.fn('callback.triggerCallbackAgent')(function
         const secrets = [...(options.secrets ?? []), token];
         const { transport } = agent;
 
-        if (signal.aborted) {
-          const attempt = attemptFromError(
-            callbackFailure(
-              abortedError(options.signal, 'Callback agent trigger'),
-              signal,
-              options.signal,
-            ),
-            duration(),
-          );
-
-          return { ...attempt, attempts: [...retryAttempts, attempt] };
-        }
+        // The outer catch turns this into the failed attempt, like any other trigger failure.
+        if (signal.aborted) return yield* abortedError(options.signal, 'Callback agent trigger');
 
         // `{{request}}` maps the whole envelope, so the request cap also covers the body.
         const template: HttpRequestTemplate = {
@@ -417,15 +407,8 @@ const completeCallbackAgent = Effect.fn('callback.completeCallbackAgent')(functi
           redactTransportText(JSON.stringify(completion), secrets),
         );
 
-        if (signal.aborted)
-          return attemptFromError(
-            callbackFailure(
-              abortedError(options.signal, 'Callback agent completion'),
-              signal,
-              options.signal,
-            ),
-            duration(),
-          );
+        if (signal.aborted) return yield* abortedError(options.signal, 'Callback agent completion');
+
         const artifacts = completion.artifacts ?? [];
         // Count and path checks first, so an over-limit completion triggers no fetches.
         yield* tryOwned(AgentInvocationError, () =>

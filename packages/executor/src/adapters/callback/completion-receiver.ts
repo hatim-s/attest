@@ -1,6 +1,7 @@
 import * as Exit from 'effect/Exit';
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 import * as Fiber from 'effect/Fiber';
 import * as Queue from 'effect/Queue';
 import * as Semaphore from 'effect/Semaphore';
@@ -240,19 +241,15 @@ const createLoopbackCompletionReceiver = Effect.fn('callback.makeReceiver')(func
       return;
     }
 
-    const candidate = yield* Effect.try(() => parseJson(body)).pipe(
-      Effect.catch(() =>
-        Effect.sync(() => {
-          reply(response, 400, { error: 'malformed_json' });
+    const candidate = yield* Effect.option(Effect.try(() => parseJson(body)));
 
-          return undefined;
-        }),
-      ),
-    );
+    if (Option.isNone(candidate)) {
+      reply(response, 400, { error: 'malformed_json' });
 
-    if (candidate === undefined) return;
+      return;
+    }
 
-    const parsed = parseAgentCompletion(candidate);
+    const parsed = parseAgentCompletion(candidate.value);
 
     if (!parsed.ok) {
       const issues = parsed.error

@@ -244,33 +244,25 @@ const invokeSandboxAttempt = Effect.fn('invokeSandboxAttempt')(function* (
               }
 
               return yield* Effect.try({
-                try: () => {
-                  return {
+                try: () => parseJson(raw),
+                catch: (cause) =>
+                  new AgentInvocationError(
+                    'invalid_envelope',
+                    'Sandbox agent stdout was not valid JSON',
+                    { cause },
+                  ),
+              }).pipe(
+                Effect.match({
+                  onFailure: (error) => fail(error, diagnostics, rawExcerpt),
+                  onSuccess: (parsed) => ({
                     status: 'ok' as const,
-                    raw: parseJson(raw),
+                    raw: parsed,
                     diagnostics,
                     durationMs: duration(),
                     rawExcerpt,
                     warnings: [],
-                  };
-                },
-                catch: (error) => error,
-              }).pipe(
-                Effect.catch((error) =>
-                  Effect.succeed(
-                    fail(
-                      new AgentInvocationError(
-                        'invalid_envelope',
-                        'Sandbox agent stdout was not valid JSON',
-                        {
-                          cause: error,
-                        },
-                      ),
-                      diagnostics,
-                      rawExcerpt,
-                    ),
-                  ),
-                ),
+                  }),
+                }),
               );
             }).pipe(
               Effect.catch((error) =>
