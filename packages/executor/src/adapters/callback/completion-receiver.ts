@@ -240,15 +240,17 @@ const createLoopbackCompletionReceiver = Effect.fn('callback.makeReceiver')(func
       return;
     }
 
-    let candidate: ReturnType<typeof parseJson>;
+    const candidate = yield* Effect.try(() => parseJson(body)).pipe(
+      Effect.catch(() =>
+        Effect.sync(() => {
+          reply(response, 400, { error: 'malformed_json' });
 
-    try {
-      candidate = parseJson(body);
-    } catch {
-      reply(response, 400, { error: 'malformed_json' });
+          return undefined;
+        }),
+      ),
+    );
 
-      return;
-    }
+    if (candidate === undefined) return;
 
     const parsed = parseAgentCompletion(candidate);
 

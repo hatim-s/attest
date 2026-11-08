@@ -151,15 +151,14 @@ class WebSocketSessionState {
     signal: AbortSignal | undefined,
   ): Effect.Effect<void, AgentInvocationError> {
     return Effect.gen({ self: this }, function* () {
-      let text: string;
-
-      try {
-        text = materializeRequest(this.agent, pending.request, pending.requestId);
-      } catch (cause) {
-        return yield* cause instanceof AgentInvocationError
-          ? Effect.fail(cause)
-          : Effect.die(cause);
-      }
+      const text = yield* Effect.try({
+        try: () => materializeRequest(this.agent, pending.request, pending.requestId),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.catch((cause) =>
+          cause instanceof AgentInvocationError ? Effect.fail(cause) : Effect.die(cause),
+        ),
+      );
 
       pending.dispatched = true;
       yield* connection.sendText(text, signal);

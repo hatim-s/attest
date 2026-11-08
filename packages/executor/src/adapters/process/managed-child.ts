@@ -58,7 +58,8 @@ class ManagedChild {
   static start = Effect.fn('ManagedChild.start')(function* (options: ManagedChildOptions) {
     const [executable, ...argumentsList] = options.argv;
 
-    if (executable === undefined) throw new TypeError('Managed process argv cannot be empty.');
+    if (executable === undefined)
+      return yield* Effect.die(new TypeError('Managed process argv cannot be empty.'));
 
     const child = spawn(executable, argumentsList, {
       cwd: options.cwd,

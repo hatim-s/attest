@@ -37,16 +37,17 @@ const startWebSocketAgent = Effect.fn('startWebSocketAgent')(function* (
     );
   }
 
-  let implementation: PerCaseWebSocketSession | RunScopedWebSocketSession;
-
-  try {
-    implementation =
+  const implementation = yield* Effect.try({
+    try: () =>
       agent.transport.lifecycle === 'per_case'
         ? new PerCaseWebSocketSession(agent, options)
-        : new RunScopedWebSocketSession(agent, options);
-  } catch (cause) {
-    return yield* cause instanceof AgentInvocationError ? Effect.fail(cause) : Effect.die(cause);
-  }
+        : new RunScopedWebSocketSession(agent, options),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      cause instanceof AgentInvocationError ? Effect.fail(cause) : Effect.die(cause),
+    ),
+  );
 
   const accepted = new Set<Deferred.Deferred<void>>();
   const closing = Semaphore.makeUnsafe(1);

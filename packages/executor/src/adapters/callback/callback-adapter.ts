@@ -177,70 +177,70 @@ const triggerCallbackAgent = Effect.fn('callback.triggerCallbackAgent')(function
         const secrets = [...(options.secrets ?? []), token];
         const { transport } = agent;
 
-        try {
-          if (signal.aborted) throw abortedError(options.signal, 'Callback agent trigger');
-
-          // `{{request}}` maps the whole envelope, so the request cap also covers the body.
-          const template: HttpRequestTemplate = {
-            ...transport.trigger,
-            body: '{{request}}',
-            body_encoding: 'json',
-          };
-
-          const materialized = yield* httpSync(() =>
-            materializeHttpRequest(
-              resolveRequestTemplate(template, options),
-              { ...request, callback: { url, token } },
-              agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
-            ),
-          );
-
-          const idempotencyHeader = transport.idempotency_header;
-
-          if (idempotencyHeader !== undefined) {
-            yield* httpSync(() =>
-              setIdempotencyHeader(materialized.headers, idempotencyHeader, request),
-            );
-          }
-
-          const policy = clientPolicy(agent, signal, {
-            ...options,
-            secrets,
-            responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
-          });
-
-          const sent = yield* requestWithRetries(
-            materialized,
-            { retry: agent.retry, policy, signal, retryAttempts, requestJson: discardBody },
-            {
-              allowRetry: transport.idempotency_header !== undefined,
-              delayFor: (retry, retryAfter) =>
-                parseRetryAfter(retryAfter) ?? retryBackoffDelay(agent.retry?.backoff, retry),
-            },
-          );
-
-          if (!sent.ok) {
-            const attempt = attemptFromError(sent.error, sent.durationMs);
-
-            return { ...attempt, attempts: [...retryAttempts, attempt] };
-          }
-
-          return {
-            status: 'triggered' as const,
-            attempts: retryAttempts,
-            diagnostics: { httpStatus: sent.response.status },
-            durationMs: duration(),
-          };
-        } catch (error: unknown) {
-          if (!(error instanceof AgentInvocationError)) throw error;
-
+        if (signal.aborted) {
           const attempt = attemptFromError(
-            callbackFailure(error, signal, options.signal),
+            callbackFailure(
+              abortedError(options.signal, 'Callback agent trigger'),
+              signal,
+              options.signal,
+            ),
             duration(),
           );
 
           return { ...attempt, attempts: [...retryAttempts, attempt] };
         }
+
+        // `{{request}}` maps the whole envelope, so the request cap also covers the body.
+        const template: HttpRequestTemplate = {
+          ...transport.trigger,
+          body: '{{request}}',
+          body_encoding: 'json',
+        };
+
+        const materialized = yield* httpSync(() =>
+          materializeHttpRequest(
+            resolveRequestTemplate(template, options),
+            { ...request, callback: { url, token } },
+            agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
+          ),
+        );
+
+        const idempotencyHeader = transport.idempotency_header;
+
+        if (idempotencyHeader !== undefined) {
+          yield* httpSync(() =>
+            setIdempotencyHeader(materialized.headers, idempotencyHeader, request),
+          );
+        }
+
+        const policy = clientPolicy(agent, signal, {
+          ...options,
+          secrets,
+          responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
+        });
+
+        const sent = yield* requestWithRetries(
+          materialized,
+          { retry: agent.retry, policy, signal, retryAttempts, requestJson: discardBody },
+          {
+            allowRetry: transport.idempotency_header !== undefined,
+            delayFor: (retry, retryAfter) =>
+              parseRetryAfter(retryAfter) ?? retryBackoffDelay(agent.retry?.backoff, retry),
+          },
+        );
+
+        if (!sent.ok) {
+          const attempt = attemptFromError(sent.error, sent.durationMs);
+
+          return { ...attempt, attempts: [...retryAttempts, attempt] };
+        }
+
+        return {
+          status: 'triggered' as const,
+          attempts: retryAttempts,
+          diagnostics: { httpStatus: sent.response.status },
+          durationMs: duration(),
+        };
       }).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
@@ -384,16 +384,14 @@ const resolveTrace = Effect.fn('callback.resolveTrace')(function* (
     field: 'trace_fetch',
   });
 
-  try {
-    return parseJson(response.body.toString('utf8'));
-  } catch (error: unknown) {
-    return yield* Effect.fail(
+  return yield* Effect.try({
+    try: () => parseJson(response.body.toString('utf8')),
+    catch: (cause) =>
       new AgentInvocationError('invalid_envelope', 'Callback trace_fetch did not return JSON.', {
-        cause: error,
+        cause,
         rawExcerpt: response.rawExcerpt,
       }),
-    );
-  }
+  });
 });
 
 /**
@@ -418,85 +416,87 @@ const completeCallbackAgent = Effect.fn('callback.completeCallbackAgent')(functi
           redactTransportText(JSON.stringify(completion), secrets),
         );
 
-        try {
-          if (signal.aborted) throw abortedError(options.signal, 'Callback agent completion');
-          const artifacts = completion.artifacts ?? [];
-          // Count and path checks first, so an over-limit completion triggers no fetches.
-          yield* httpSync(() => assertArtifactManifest(artifacts, agent.limits));
+        if (signal.aborted)
+          return attemptFromError(
+            callbackFailure(
+              abortedError(options.signal, 'Callback agent completion'),
+              signal,
+              options.signal,
+            ),
+            duration(),
+          );
+        const artifacts = completion.artifacts ?? [];
+        // Count and path checks first, so an over-limit completion triggers no fetches.
+        yield* httpSync(() => assertArtifactManifest(artifacts, agent.limits));
 
-          const perArtifact = agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES;
-          let remaining = agent.limits?.total_artifact_bytes ?? DEFAULT_TOTAL_ARTIFACT_BYTES;
-          const resolved: InlineArtifact[] = [];
+        const perArtifact = agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES;
+        let remaining = agent.limits?.total_artifact_bytes ?? DEFAULT_TOTAL_ARTIFACT_BYTES;
+        const resolved: InlineArtifact[] = [];
 
-          for (const artifact of artifacts) {
-            // Once the total is spent, the size check below reports it without fetching more.
-            if (remaining < 0) break;
+        for (const artifact of artifacts) {
+          // Once the total is spent, the size check below reports it without fetching more.
+          if (remaining < 0) break;
 
-            // A fetch may only read what is left of the total, so references never buffer past it.
-            const inline =
-              artifact.kind === 'inline'
-                ? artifact
-                : yield* resolveArtifact(agent, artifact, {
-                    overrides: options.artifactFetch,
-                    policy: clientPolicy(agent, signal, {
-                      ...options,
-                      responseCapBytes: Math.min(perArtifact, remaining),
-                    }),
-                  });
-
-            remaining -= artifactByteLength(inline);
-            resolved.push(inline);
-          }
-
-          yield* httpSync(() => assertArtifactSizes(resolved, agent.limits));
-
-          const trace =
-            completion.trace_ref === undefined
-              ? completion.trace
-              : yield* resolveTrace(agent, completion.trace_ref, {
-                  overrides: options.traceFetch,
+          // A fetch may only read what is left of the total, so references never buffer past it.
+          const inline =
+            artifact.kind === 'inline'
+              ? artifact
+              : yield* resolveArtifact(agent, artifact, {
+                  overrides: options.artifactFetch,
                   policy: clientPolicy(agent, signal, {
                     ...options,
-                    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
+                    responseCapBytes: Math.min(perArtifact, remaining),
                   }),
                 });
 
-          const envelope: AgentResponseCandidate =
-            'error' in completion
-              ? { protocol: AGENT_PROTOCOL, error: completion.error }
-              : { protocol: AGENT_PROTOCOL, output: completion.output };
-
-          if (completion.state !== undefined) envelope.state = completion.state;
-
-          if (trace !== undefined) envelope.trace = trace;
-
-          if (resolved.length > 0) envelope.artifacts = resolved;
-          const report = parseAgentResponse(envelope);
-
-          if (!report.ok) {
-            return yield* Effect.fail(
-              new AgentInvocationError(
-                'invalid_envelope',
-                'Callback completion is not a valid agent response.',
-                { rawExcerpt },
-              ),
-            );
-          }
-
-          return {
-            status: 'ok' as const,
-            raw: envelope,
-            report,
-            diagnostics: {},
-            durationMs: duration(),
-            rawExcerpt,
-            warnings: report.warnings,
-          };
-        } catch (error: unknown) {
-          if (!(error instanceof AgentInvocationError)) throw error;
-
-          return attemptFromError(callbackFailure(error, signal, options.signal), duration());
+          remaining -= artifactByteLength(inline);
+          resolved.push(inline);
         }
+
+        yield* httpSync(() => assertArtifactSizes(resolved, agent.limits));
+
+        const trace =
+          completion.trace_ref === undefined
+            ? completion.trace
+            : yield* resolveTrace(agent, completion.trace_ref, {
+                overrides: options.traceFetch,
+                policy: clientPolicy(agent, signal, {
+                  ...options,
+                  responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
+                }),
+              });
+
+        const envelope: AgentResponseCandidate =
+          'error' in completion
+            ? { protocol: AGENT_PROTOCOL, error: completion.error }
+            : { protocol: AGENT_PROTOCOL, output: completion.output };
+
+        if (completion.state !== undefined) envelope.state = completion.state;
+
+        if (trace !== undefined) envelope.trace = trace;
+
+        if (resolved.length > 0) envelope.artifacts = resolved;
+        const report = parseAgentResponse(envelope);
+
+        if (!report.ok) {
+          return yield* Effect.fail(
+            new AgentInvocationError(
+              'invalid_envelope',
+              'Callback completion is not a valid agent response.',
+              { rawExcerpt },
+            ),
+          );
+        }
+
+        return {
+          status: 'ok' as const,
+          raw: envelope,
+          report,
+          diagnostics: {},
+          durationMs: duration(),
+          rawExcerpt,
+          warnings: report.warnings,
+        };
       }).pipe(
         Effect.catch((error) =>
           Effect.succeed(

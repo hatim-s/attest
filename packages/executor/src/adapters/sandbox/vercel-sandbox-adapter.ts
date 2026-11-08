@@ -243,28 +243,35 @@ const invokeSandboxAttempt = Effect.fn('invokeSandboxAttempt')(function* (
                 );
               }
 
-              try {
-                return {
-                  status: 'ok' as const,
-                  raw: parseJson(raw),
-                  diagnostics,
-                  durationMs: duration(),
-                  rawExcerpt,
-                  warnings: [],
-                };
-              } catch (error: unknown) {
-                return fail(
-                  new AgentInvocationError(
-                    'invalid_envelope',
-                    'Sandbox agent stdout was not valid JSON',
-                    {
-                      cause: error,
-                    },
+              return yield* Effect.try({
+                try: () => {
+                  return {
+                    status: 'ok' as const,
+                    raw: parseJson(raw),
+                    diagnostics,
+                    durationMs: duration(),
+                    rawExcerpt,
+                    warnings: [],
+                  };
+                },
+                catch: (error) => error,
+              }).pipe(
+                Effect.catch((error) =>
+                  Effect.succeed(
+                    fail(
+                      new AgentInvocationError(
+                        'invalid_envelope',
+                        'Sandbox agent stdout was not valid JSON',
+                        {
+                          cause: error,
+                        },
+                      ),
+                      diagnostics,
+                      rawExcerpt,
+                    ),
                   ),
-                  diagnostics,
-                  rawExcerpt,
-                );
-              }
+                ),
+              );
             }).pipe(
               Effect.catch((error) =>
                 Effect.sync(() => {
@@ -381,7 +388,7 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
       const { artifactRoot } = options;
 
       if (artifacts.length > 0 && artifactRoot === undefined) {
-        throw new TypeError('Sandbox artifacts require an output directory.');
+        return yield* Effect.die(new TypeError('Sandbox artifacts require an output directory.'));
       }
 
       const credentials = yield* Effect.try({
