@@ -2,7 +2,6 @@ import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
 import { stripStruct, SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
-import type { ApiClient } from '@attest/api/client';
 import {
   caseParamsSchema,
   diffParamsSchema,
@@ -21,6 +20,7 @@ import {
 } from '@tanstack/react-router';
 import * as Schema from 'effect/Schema';
 import { projectsQueryOptions, runsQueryOptions } from './api/queries.js';
+import type { DashboardSource } from './api/dashboard-source.js';
 import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
 import { ProjectsPage } from './routes/projects-page.js';
@@ -33,7 +33,7 @@ import { ComparePage } from './routes/compare-page.js';
 import { ErrorNotice } from './components/shared/ui.js';
 import { runTabSchema } from './components/runs/run-tabs.js';
 
-type RouterContext = { client: ApiClient; queryClient: QueryClient };
+type RouterContext = { source: DashboardSource; queryClient: QueryClient };
 
 const runsSearchSchema = stripStruct({
   branch: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
@@ -60,7 +60,10 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: async ({ context }) => {
-    const projects = await context.queryClient.fetchQuery(projectsQueryOptions(context.client));
+    const projects = await context.queryClient.fetchQuery(
+      projectsQueryOptions(context.source.client),
+    );
+
     const [only] = projects;
 
     if (projects.length === 1 && only !== undefined) {
@@ -87,7 +90,7 @@ const workspaceRoute = createRoute({
   }),
   // An unknown key fails here, so the error notice replaces the workspace with the API message.
   loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(runsQueryOptions(context.client, params.projectKey)),
+    context.queryClient.ensureQueryData(runsQueryOptions(context.source.client, params.projectKey)),
 });
 
 const workspaceIndexRoute = createRoute({
@@ -108,7 +111,7 @@ const runsIndexRoute = createRoute({
   component: NewestRun,
   beforeLoad: async ({ context, params, search }) => {
     const page = await context.queryClient.fetchQuery(
-      runsQueryOptions(context.client, params.projectKey),
+      runsQueryOptions(context.source.client, params.projectKey),
     );
 
     const newest = page.items[0];

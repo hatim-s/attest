@@ -1,4 +1,4 @@
-import { createApiClient } from '@attest/api/client';
+import { createDashboardSource } from '../api/dashboard-source.js';
 import type { ProjectRecord, RunRecord } from '@attest/core/records';
 import { QueryClient } from '@tanstack/react-query';
 import { createMemoryHistory } from '@tanstack/react-router';
@@ -17,15 +17,16 @@ const run: RunRecord = {
 const project: ProjectRecord = { key: 'demo', name: 'Demo' };
 
 const snapshotClient = () =>
-  createApiClient({
+  createDashboardSource({
     kind: 'snapshot',
     snapshot: { project, run, cases: [], generatedAt: run.createdAt, truncated: false },
   });
 
 /** Answers `/api/projects` with `projects` and every runs page with `runs`. */
 const httpClient = (projects: readonly ProjectRecord[], runs: readonly RunRecord[]) =>
-  createApiClient({
+  createDashboardSource({
     kind: 'http',
+    host: 'local',
     baseUrl: '/api',
     capabilities: { control: false },
     fetch: (input) => {
@@ -39,13 +40,13 @@ const httpClient = (projects: readonly ProjectRecord[], runs: readonly RunRecord
 
 /** Loads `path` in a memory router and hands the router to `inspect` before cleaning up. */
 const loadAt = async (
-  client: ReturnType<typeof createApiClient>,
+  client: ReturnType<typeof createDashboardSource>,
   path: string,
   inspect: (router: ReturnType<typeof createDashboardRouter>) => void,
 ): Promise<void> => {
   const queryClient = new QueryClient();
   const history = createMemoryHistory({ initialEntries: [path] });
-  const router = createDashboardRouter(history, { client, queryClient });
+  const router = createDashboardRouter(history, { source: client, queryClient });
   router.update({ ...router.options, isServer: false, origin: 'http://localhost' });
 
   try {
@@ -82,7 +83,7 @@ it('encodes suite segments and restores their raw route identity', async () => {
   const client = snapshotClient();
   const queryClient = new QueryClient();
   const history = createMemoryHistory({ initialEntries: ['/projects/demo/runs'] });
-  const router = createDashboardRouter(history, { client, queryClient });
+  const router = createDashboardRouter(history, { source: client, queryClient });
   router.update({ ...router.options, isServer: false, origin: 'http://localhost' });
 
   try {

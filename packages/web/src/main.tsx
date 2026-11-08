@@ -4,10 +4,10 @@ import { createRoot } from 'react-dom/client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { createApiClient } from '@attest/api/client';
 import { dashboardBootstrapSchema } from '@attest/api/contract';
 
-import { ApiClientProvider } from './api/api-client-context.js';
+import { DashboardSourceProvider } from './api/api-client-context.js';
+import { createDashboardSource } from './api/dashboard-source.js';
 import { RouterProvider, createHashHistory } from '@tanstack/react-router';
 import { createDashboardRouter } from './router.js';
 import './styles.css';
@@ -18,7 +18,7 @@ declare global {
   }
 }
 
-const client = createApiClient(
+const source = createDashboardSource(
   parseWithSchemaSync(dashboardBootstrapSchema, window.__ATTEST_BOOTSTRAP__),
 );
 
@@ -26,7 +26,7 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 1_000 } },
 });
 
-const router = createDashboardRouter(createHashHistory(), { client, queryClient });
+const router = createDashboardRouter(createHashHistory(), { source, queryClient });
 
 const rootElement = document.querySelector('#root');
 
@@ -34,10 +34,10 @@ if (rootElement === null) throw new Error('Dashboard root element was not found.
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ApiClientProvider client={client}>
+    <DashboardSourceProvider source={source}>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>
-    </ApiClientProvider>
+    </DashboardSourceProvider>
   </StrictMode>,
 );

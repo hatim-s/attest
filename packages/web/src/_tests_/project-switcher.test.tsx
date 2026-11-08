@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-import { createApiClient } from '@attest/api/client';
+import { createDashboardSource } from '../api/dashboard-source.js';
 import type { ProjectRecord, RunRecord } from '@attest/core/records';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-import { ApiClientProvider } from '../api/api-client-context.js';
+import { DashboardSourceProvider } from '../api/api-client-context.js';
 import { createDashboardRouter } from '../router.js';
 
 const run: RunRecord = {
@@ -23,8 +23,9 @@ const other: ProjectRecord = { key: 'other', name: 'Other' };
 
 /** Mounts the dashboard at `path`. Only `demo` has a run, so `other` stops at its runs index. */
 const renderAt = (projects: readonly ProjectRecord[], path: string) => {
-  const client = createApiClient({
+  const client = createDashboardSource({
     kind: 'http',
+    host: 'local',
     baseUrl: '/api',
     capabilities: { control: false },
     fetch: (input) => {
@@ -42,16 +43,16 @@ const renderAt = (projects: readonly ProjectRecord[], path: string) => {
 
   const queryClient = new QueryClient();
   const history = createMemoryHistory({ initialEntries: [path] });
-  const router = createDashboardRouter(history, { client, queryClient });
+  const router = createDashboardRouter(history, { source: client, queryClient });
   const container = document.createElement('div');
   const root = createRoot(container);
 
   root.render(
-    <ApiClientProvider client={client}>
+    <DashboardSourceProvider source={client}>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>
-    </ApiClientProvider>,
+    </DashboardSourceProvider>,
   );
 
   const cleanup = () => {
