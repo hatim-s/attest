@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { PROJECT_SCHEMA_ID, type ProjectResources } from '@attest/contracts';
 import { hashCanonicalContent } from '@attest/core';
 import { ulid } from 'ulid';
-import { errnoCode } from '../../internal/errno-code.js';
+import { anchoredCall } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
@@ -73,10 +73,7 @@ const inspectTargetDirectory = Effect.fn('projectInit.inspectTargetDirectory')(f
   targetDirectory: string,
 ) {
   const inspected = yield* Effect.gen(function* () {
-    const metadata = yield* Effect.tryPromise({
-      try: () => lstat(targetDirectory),
-      catch: (cause) => cause,
-    });
+    const metadata = yield* anchoredCall('lstat', targetDirectory, () => lstat(targetDirectory));
 
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       return yield* new LocalError(
@@ -89,10 +86,7 @@ const inspectTargetDirectory = Effect.fn('projectInit.inspectTargetDirectory')(f
       );
     }
 
-    const root = yield* Effect.tryPromise({
-      try: () => realpath(targetDirectory),
-      catch: (cause) => cause,
-    });
+    const root = yield* anchoredCall('realpath', targetDirectory, () => realpath(targetDirectory));
 
     return { exists: true, root };
   }).pipe(Effect.catch((cause) => Effect.succeed({ cause })));
@@ -102,10 +96,10 @@ const inspectTargetDirectory = Effect.fn('projectInit.inspectTargetDirectory')(f
 
   if (cause instanceof LocalError) return yield* cause;
 
-  if (errnoCode(cause) !== 'ENOENT') {
+  if (cause.code !== 'ENOENT') {
     return yield* new LocalError('init_failed', 'Could not inspect the initialization target.', {
       path: targetDirectory,
-      cause,
+      cause: cause.cause,
     });
   }
 
@@ -125,13 +119,10 @@ const inspectTargetDirectory = Effect.fn('projectInit.inspectTargetDirectory')(f
 
 /** Checks one path while preserving non-ENOENT filesystem failures. */
 const pathExists = Effect.fn('projectInit.pathExists')(function* (path: string) {
-  return yield* Effect.tryPromise({
-    try: () => lstat(path),
-    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-  }).pipe(
+  return yield* anchoredCall('lstat', path, () => lstat(path)).pipe(
     Effect.as(true),
-    Effect.catch((cause) =>
-      errnoCode(cause) === 'ENOENT' ? Effect.succeed(false) : Effect.fail(cause),
+    Effect.catch((failure) =>
+      failure.code === 'ENOENT' ? Effect.succeed(false) : Effect.fail(failure),
     ),
   );
 });
@@ -287,10 +278,9 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
       const primary = yield* Effect.exit(
         Effect.gen(function* () {
           if (!inspected.exists) {
-            yield* Effect.tryPromise({
-              try: () => mkdir(inspected.root),
-              catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-            }).pipe(Effect.mapError(initFailure));
+            yield* anchoredCall('mkdir', inspected.root, () => mkdir(inspected.root)).pipe(
+              Effect.mapError(initFailure),
+            );
             createdDirectory = true;
           }
 
@@ -370,10 +360,7 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
       if (createdDirectory)
         releases.push(
           yield* Effect.exit(
-            Effect.tryPromise({
-              try: () => rmdir(inspected.root),
-              catch: (cause) => cause,
-            }).pipe(
+            anchoredCall('rmdir', inspected.root, () => rmdir(inspected.root)).pipe(
               recoveryRequired(
                 'Initialization failed and the new target directory could not be removed.',
                 inspected.root,

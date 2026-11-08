@@ -3,6 +3,7 @@ import * as Exit from 'effect/Exit';
 import * as Context from 'effect/Context';
 import * as Option from 'effect/Option';
 import { StoreCleanup } from '../../store/internal/store-effect.js';
+import * as Data from 'effect/Data';
 import * as Effect from 'effect/Effect';
 import { StoreError } from '@attest/core';
 import { constants, type BigIntStats } from 'node:fs';
@@ -11,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { errnoCode } from '../../internal/errno-code.js';
+import { anchoredCall } from '../../internal/open-anchored.js';
 import { withReadCleanup, runCleanupSteps } from './cleanup.js';
 
 const COPY_BUFFER_BYTES = 64 * 1024;
@@ -25,11 +27,9 @@ type RunStoreSnapshot = {
   release: Effect.Effect<void, StoreError>;
 };
 
-class SnapshotChangedError extends Error {
-  constructor() {
-    super('Run store changed while its read snapshot was captured.');
-    this.name = 'SnapshotChangedError';
-  }
+/** Marks a source version change during capture; only this failure allows another attempt. */
+class SnapshotChangedError extends Data.TaggedError('SnapshotChangedError') {
+  override readonly message = 'Run store changed while its read snapshot was captured.';
 }
 
 const sameIdentity = (left: FileVersion, right: FileVersion): boolean =>
@@ -41,14 +41,12 @@ const sameVersion = (left: FileVersion, right: FileVersion): boolean =>
   left.mtimeNs === right.mtimeNs &&
   left.ctimeNs === right.ctimeNs;
 
-/** Wraps individual filesystem calls without changing snapshot-version diagnostics. */
+/** Wraps individual filesystem calls; their rejections are store read failures. */
 const fileCall = <A>(call: () => Promise<A>) =>
   Effect.tryPromise({
     try: call,
     catch: (cause) =>
-      cause instanceof SnapshotChangedError
-        ? cause
-        : new StoreError('READ_FAILED', 'Could not capture the run store snapshot.', { cause }),
+      new StoreError('READ_FAILED', 'Could not capture the run store snapshot.', { cause }),
   });
 
 /** Copies an exact descriptor version without reopening its source pathname. */
@@ -92,15 +90,14 @@ const copyFileHandle = Effect.fn('copyFileHandle')(function* (
 
 /** Missing WAL is distinct from inaccessible or unsafe WAL. */
 const statOptional = (path: string) =>
-  Effect.tryPromise({
-    try: () => lstat(path, { bigint: true }),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      errnoCode(cause) === 'ENOENT'
+  anchoredCall('lstat', path, () => lstat(path, { bigint: true })).pipe(
+    Effect.catch((failure) =>
+      failure.code === 'ENOENT'
         ? Effect.succeed(undefined)
         : Effect.fail(
-            new StoreError('READ_FAILED', 'Could not inspect snapshot source.', { cause }),
+            new StoreError('READ_FAILED', 'Could not inspect snapshot source.', {
+              cause: failure.cause,
+            }),
           ),
     ),
   );
@@ -198,13 +195,11 @@ const captureAttempt = Effect.fn('captureAttempt')(function* (
         if (!sameVersion(wal.version, walAfter) || !(yield* pathMatchesVersion(walPath, walAfter)))
           return yield* Effect.fail(new SnapshotChangedError());
         const openedWal = wal;
-        snapshot.release = fileCall(() => openedWal.handle.close()).pipe(
-          Effect.mapError((cause) =>
-            cause instanceof StoreError
-              ? cause
-              : new StoreError('READ_FAILED', 'Could not close WAL descriptor.', { cause }),
-          ),
-        );
+        snapshot.release = Effect.tryPromise({
+          try: () => openedWal.handle.close(),
+          catch: (cause) =>
+            new StoreError('READ_FAILED', 'Could not close WAL descriptor.', { cause }),
+        });
       }
 
       transferred = true;

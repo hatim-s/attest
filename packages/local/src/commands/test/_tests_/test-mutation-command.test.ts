@@ -58,9 +58,9 @@ const mutate = (root: string, request: TestAuthoringCommand) =>
     runTestMutationCommand({
       project: root,
       readImportStdin: () => {
-        throw new Error('stdin must not be read');
+        throw new LocalError('cli_usage', 'stdin must not be read');
       },
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      readStdin: () => Promise.reject(new LocalError('cli_usage', 'stdin must not be read')),
       request,
       workingDirectory: root,
     }),
@@ -482,7 +482,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
 
     const error: unknown = await Effect.runPromiseExit(
       readCommandRequest('test.add', requestPath, {
-        readStdin: () => Promise.reject(new Error('stdin must not be read')),
+        readStdin: () => Promise.reject(new LocalError('cli_usage', 'stdin must not be read')),
         workingDirectory: root,
       }),
     )

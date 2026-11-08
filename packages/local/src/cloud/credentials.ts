@@ -33,7 +33,11 @@ const readCloudCredentials = Effect.fn('readCloudCredentials')(function* (
   return yield* Effect.gen(function* () {
     const text = yield* readPrivateFile(path);
 
-    if (text.length > 16384) return yield* Effect.fail(new Error('Unsafe credentials'));
+    if (text.length > 16384)
+      return yield* new LocalError(
+        'cloud_auth_required',
+        'Cloud credentials are missing, expired, or unsafe.',
+      );
 
     const credentials = yield* Effect.try({
       try: () => parseWithSchemaSync(credentialSchema, JSON.parse(text)),
@@ -48,7 +52,10 @@ const readCloudCredentials = Effect.fn('readCloudCredentials')(function* (
     yield* normalizeCloudUrl(credentials.baseUrl);
 
     if (!options.allowExpired && Date.parse(credentials.expiresAt) <= Date.now())
-      return yield* Effect.fail(new Error('Expired credentials'));
+      return yield* new LocalError(
+        'cloud_auth_required',
+        'Cloud credentials are missing, expired, or unsafe.',
+      );
 
     return credentials;
   }).pipe(

@@ -4,8 +4,7 @@ import { dirname, join } from 'node:path';
 
 import { StoreError, type RunStore } from '@attest/core';
 
-import { errnoCode } from '../../internal/errno-code.js';
-import { openAnchored } from '../../internal/open-anchored.js';
+import { anchoredCall, openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
 import { openReadonlyRunStore, withStoreScope } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
@@ -60,27 +59,25 @@ const withReadonlyRunStoreFile = <T, E, R>(
   Effect.gen(function* () {
     const storeDirectory = dirname(storePath);
 
-    const metadata = yield* Effect.tryPromise({
-      try: () => lstat(storeDirectory, { bigint: true }),
-      catch: (cause) => cause,
-    }).pipe(
-      Effect.catch((cause) =>
-        errnoCode(cause) === 'ENOENT'
+    const metadata = yield* anchoredCall('lstat', storeDirectory, () =>
+      lstat(storeDirectory, { bigint: true }),
+    ).pipe(
+      Effect.catch((failure) =>
+        failure.code === 'ENOENT'
           ? Effect.succeed(undefined)
-          : Effect.fail(toSafeStoreError(cause, storePath)),
+          : Effect.fail(toSafeStoreError(failure.cause, storePath)),
       ),
     );
 
     if (metadata === undefined) return undefined;
 
-    const storeMetadata = yield* Effect.tryPromise({
-      try: () => lstat(storePath, { bigint: true }),
-      catch: (cause) => cause,
-    }).pipe(
-      Effect.catch((cause) =>
-        errnoCode(cause) === 'ENOENT'
+    const storeMetadata = yield* anchoredCall('lstat', storePath, () =>
+      lstat(storePath, { bigint: true }),
+    ).pipe(
+      Effect.catch((failure) =>
+        failure.code === 'ENOENT'
           ? Effect.succeed(undefined)
-          : Effect.fail(toSafeStoreError(cause, storePath)),
+          : Effect.fail(toSafeStoreError(failure.cause, storePath)),
       ),
     );
 

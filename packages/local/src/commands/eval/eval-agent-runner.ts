@@ -287,7 +287,7 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
 
                 const uncertainCleanup = appendLifecycleFailure(
                   { execution, metrics: [] },
-                  new Error('Vercel sandbox cleanup was not confirmed.'),
+                  new LocalError('run_failed', 'Vercel sandbox cleanup was not confirmed.'),
                 );
 
                 execution = uncertainCleanup.execution;

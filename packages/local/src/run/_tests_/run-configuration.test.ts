@@ -757,7 +757,8 @@ it('native root interruption cancels as input and joins evidence before propagat
               );
 
               yield* Deferred.succeed(ready, source);
-              yield* Effect.never;
+
+              return yield* Effect.never;
             }),
           ),
         );

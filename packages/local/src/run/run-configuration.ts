@@ -66,14 +66,12 @@ type CancelConfigurationResult = {
 /** Captures bounded Git metadata when the project is in a repository, otherwise omitting it. */
 const readGitMetadata = Effect.fn('readGitMetadata')(function* (projectRoot: string) {
   const runGit = (arguments_: string[]) =>
-    Effect.tryPromise({
-      try: () =>
-        execFileAsync('git', ['-C', projectRoot, ...arguments_], {
-          encoding: 'utf8',
-          timeout: 2_000,
-        }),
-      catch: (cause) => new Error('Git metadata unavailable.', { cause }),
-    }).pipe(
+    Effect.tryPromise(() =>
+      execFileAsync('git', ['-C', projectRoot, ...arguments_], {
+        encoding: 'utf8',
+        timeout: 2_000,
+      }),
+    ).pipe(
       Effect.map(({ stdout }) => stdout.trim() || undefined),
       Effect.orElseSucceed(() => undefined),
     );

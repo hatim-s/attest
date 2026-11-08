@@ -64,7 +64,11 @@ const readCloudLink = Effect.fn('readCloudLink')(function* (root: string) {
 
     const parsed = parseWithSchema(cloudLinkSchema, value);
 
-    if (!parsed.ok) return yield* Effect.fail(new Error('Invalid link'));
+    if (!parsed.ok)
+      return yield* new LocalError('project_invalid', 'Cloud link is unreadable or invalid.', {
+        path: '.attest/cloud.json',
+        cause: parsed.error,
+      });
 
     return parsed.value;
   }).pipe(

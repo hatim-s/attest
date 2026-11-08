@@ -1,3 +1,5 @@
+import { AttestError, tryPromiseClassify } from '@attest/contracts';
+import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -10,6 +12,7 @@ import { createRegistryCatalog, readRegistry } from '../registry/index.js';
 import { createRunLauncher, type CliCommand } from '../run-control/index.js';
 import { openStore, type StoreScope } from '../store/index.js';
 import { withStoreScope } from '../store/index.js';
+import { anchoredCall } from '../internal/open-anchored.js';
 import { finishOperation } from '../internal/operation-cleanup.js';
 import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
@@ -49,10 +52,9 @@ const openViewCatalog = Effect.fn('openViewCatalog')(function* (
 
   const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
   const project = yield* describeStoreProject(storePath);
-  yield* Effect.tryPromise({
-    try: () => mkdir(dirname(storePath), { recursive: true }),
-    catch: (cause) => new Error('Could not create view store directory.', { cause }),
-  });
+  yield* anchoredCall('mkdir', dirname(storePath), () =>
+    mkdir(dirname(storePath), { recursive: true }),
+  );
   const store = yield* openStore(storePath, owner);
   const catalog = createSingleProjectCatalog(project, store.runs);
 
@@ -115,13 +117,15 @@ const runViewCommand = Effect.fn('runViewCommand')(function* (options: RunViewCo
               Effect.gen(function* () {
                 if (options.onReady !== undefined)
                   yield* Effect.raceFirst(
-                    Effect.tryPromise({
-                      try: () => Promise.resolve(options.onReady?.(server)),
-                      catch: (cause) =>
-                        cause instanceof Error
+                    // An embedder's AttestError (local or cli) keeps its code; any other failure stays unknown.
+                    // The UnknownError message matches the one Effect.tryPromise gives it.
+                    tryPromiseClassify(
+                      async () => options.onReady?.(server),
+                      (cause) =>
+                        cause instanceof AttestError
                           ? cause
-                          : new Error('View readiness callback failed.', { cause }),
-                    }),
+                          : new Cause.UnknownError(cause, 'An error occurred in Effect.tryPromise'),
+                    ),
                     options.signal === undefined
                       ? Effect.never
                       : Effect.callback<void>((resume) => {

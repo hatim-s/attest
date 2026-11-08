@@ -15,6 +15,7 @@ import { Kysely } from 'kysely';
 import { projectListSchema } from '@attest/api/contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { LocalError } from '../../errors/index.js';
 import { runViewCommand } from '../run-view-command.js';
 
 const directories: string[] = [];
@@ -151,8 +152,23 @@ describe('runViewCommand', () => {
           },
         }),
       ).then(valueFromExit),
-    ).rejects.toBe(primary);
+    ).rejects.toMatchObject({ cause: primary });
     await expect(fetch(origin)).rejects.toThrow();
+  });
+
+  it('keeps an embedder LocalError from onReady as the typed failure', async () => {
+    const directory = await temporaryDirectory('attest-view-onready-local-');
+    const primary = new LocalError('project_changed', 'Embedder refused the dashboard.');
+
+    const exit = await Effect.runPromiseExit(
+      runViewCommand({
+        scope: { kind: 'store' },
+        workingDirectory: directory,
+        onReady: () => Promise.reject(primary),
+      }),
+    );
+
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(primary);
   });
 
   it('preserves a listen failure and its store release diagnostic', async () => {
@@ -248,5 +264,5 @@ it('retains readiness failure even when the callback already closed the server',
         },
       }),
     ).then(valueFromExit),
-  ).rejects.toBe(primary);
+  ).rejects.toMatchObject({ cause: primary });
 });

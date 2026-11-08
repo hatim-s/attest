@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect';
 
-import type { EvalRunRequest } from '@attest/contracts';
+import { tryOwned, type EvalRunRequest } from '@attest/contracts';
 import {
   resolveEvalRun as resolve,
   EvalResolutionError,
@@ -16,13 +16,10 @@ const resolveEvalRun = Effect.fn('resolveEvalRun')(function* (
   request: EvalRunRequest,
   options: EvalResolverOptions,
 ) {
-  return yield* Effect.try({
-    try: () => resolve(project, request, options),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => {
-      if (!(cause instanceof EvalResolutionError)) return Effect.die(cause);
-
+  return yield* tryOwned(
+    EvalResolutionError,
+    () => resolve(project, request, options),
+    (cause) => {
       const details: LocalErrorOptions = {
         cause,
       };
@@ -39,8 +36,8 @@ const resolveEvalRun = Effect.fn('resolveEvalRun')(function* (
         details.path = cause.path;
       }
 
-      return Effect.fail(new LocalError(cause.code, cause.message, details));
-    }),
+      return new LocalError(cause.code, cause.message, details);
+    },
   );
 });
 
