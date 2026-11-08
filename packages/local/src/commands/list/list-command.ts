@@ -1,4 +1,3 @@
-import { LocalError } from '../../errors/index.js';
 import * as Effect from 'effect/Effect';
 import type { RunRecord } from '@attest/core';
 
@@ -58,115 +57,100 @@ const toSafeRunSummary = (run: RunRecord): RunListItem => {
 };
 
 const listRuns = Effect.fn('listRuns')(function* (project: LoadedProject) {
-  try {
-    return (
-      (yield* withReadonlyRunStore(project.root, (store) =>
-        Effect.gen(function* () {
-          const items: RunListItem[] = [];
-          let cursor: string | undefined;
+  return (
+    (yield* withReadonlyRunStore(project.root, (store) =>
+      Effect.gen(function* () {
+        const items: RunListItem[] = [];
+        let cursor: string | undefined;
 
-          do {
-            const page = yield* store.listRuns({ cursor });
-            items.push(...page.items.map(toSafeRunSummary));
-            cursor = page.nextCursor;
-          } while (cursor !== undefined);
+        do {
+          const page = yield* store.listRuns({ cursor });
+          items.push(...page.items.map(toSafeRunSummary));
+          cursor = page.nextCursor;
+        } while (cursor !== undefined);
 
-          return items;
-        }),
-      )) ?? []
-    );
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
-  }
+        return items;
+      }),
+    )) ?? []
+  );
 });
 
 const listResourceSummaries = Effect.fn('listResourceSummaries')(function* (
   project: LoadedProject,
   resourceType: ListResourceType,
 ) {
-  try {
-    if (resourceType === 'runs') {
-      return {
-        resource_type: 'runs' as const,
-        items: yield* listRuns(project),
-      } satisfies ResourceListResult;
-    }
-
-    if (resourceType === 'agents') {
-      return {
-        resource_type: 'agents' as const,
-        items: project.agents.map(({ id, name, schema, transport }) => ({
-          id,
-          name,
-          schema,
-          transport: transport.kind,
-        })),
-      } satisfies ResourceListResult;
-    }
-
-    if (resourceType === 'tests') {
-      return {
-        resource_type: 'tests' as const,
-        items: project.tests.map(({ agent_id, cases, datasets, id, metrics, name, schema }) => ({
-          id,
-          name,
-          schema,
-          agent_id,
-          case_count: cases.length,
-          dataset_count: datasets.length,
-          metric_count: metrics.length,
-        })),
-      } satisfies ResourceListResult;
-    }
-
-    if (resourceType === 'datasets') {
-      return {
-        resource_type: 'datasets' as const,
-        items: project.datasets.map(({ metadata }) => ({
-          id: metadata.id,
-          name: metadata.name,
-          schema: metadata.schema,
-          case_count: metadata.case_count,
-        })),
-      } satisfies ResourceListResult;
-    }
-
+  if (resourceType === 'runs') {
     return {
-      resource_type: 'metrics' as const,
-      items: project.metrics.map(({ definition, id, name, schema }) => ({
+      resource_type: 'runs' as const,
+      items: yield* listRuns(project),
+    } satisfies ResourceListResult;
+  }
+
+  if (resourceType === 'agents') {
+    return {
+      resource_type: 'agents' as const,
+      items: project.agents.map(({ id, name, schema, transport }) => ({
         id,
         name,
         schema,
-        kind: definition.kind,
+        transport: transport.kind,
       })),
     } satisfies ResourceListResult;
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
   }
+
+  if (resourceType === 'tests') {
+    return {
+      resource_type: 'tests' as const,
+      items: project.tests.map(({ agent_id, cases, datasets, id, metrics, name, schema }) => ({
+        id,
+        name,
+        schema,
+        agent_id,
+        case_count: cases.length,
+        dataset_count: datasets.length,
+        metric_count: metrics.length,
+      })),
+    } satisfies ResourceListResult;
+  }
+
+  if (resourceType === 'datasets') {
+    return {
+      resource_type: 'datasets' as const,
+      items: project.datasets.map(({ metadata }) => ({
+        id: metadata.id,
+        name: metadata.name,
+        schema: metadata.schema,
+        case_count: metadata.case_count,
+      })),
+    } satisfies ResourceListResult;
+  }
+
+  return {
+    resource_type: 'metrics' as const,
+    items: project.metrics.map(({ definition, id, name, schema }) => ({
+      id,
+      name,
+      schema,
+      kind: definition.kind,
+    })),
+  } satisfies ResourceListResult;
 });
 
 /** Lists deterministic resource summaries without creating missing local state. */
 const runListCommand = Effect.fn('runListCommand')(function* (options: ListCommandOptions) {
-  try {
-    const project = yield* loadCommandProject({
-      project: options.project,
-      workingDirectory: options.workingDirectory,
-    });
+  const project = yield* loadCommandProject({
+    project: options.project,
+    workingDirectory: options.workingDirectory,
+  });
 
-    const result = yield* listResourceSummaries(project, options.resourceType);
+  const result = yield* listResourceSummaries(project, options.resourceType);
 
-    return {
-      operation: 'list' as const,
-      projectHashBefore: project.projectHash,
-      projectHashAfter: project.projectHash,
-      result,
-    } satisfies CommandResult<'list', ResourceListResult>;
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
-  }
+  return {
+    operation: 'list' as const,
+    projectHashBefore: project.projectHash,
+    projectHashAfter: project.projectHash,
+    result,
+  } satisfies CommandResult<'list', ResourceListResult>;
 });
 
 export { runListCommand, toSafeRunSummary, type ListCommandOptions, type ListResourceType };

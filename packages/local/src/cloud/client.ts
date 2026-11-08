@@ -33,14 +33,11 @@ type CloudClientOptions = {
 };
 
 /** Accepts encrypted endpoints and loopback development origins without credentials. */
-const normalizeCloudUrl = (value: string): string => {
-  let url: URL;
-
-  try {
-    url = new URL(value);
-  } catch {
-    throw new LocalError('cli_usage', 'Cloud URL must be an absolute HTTPS URL.');
-  }
+const normalizeCloudUrl = Effect.fn('normalizeCloudUrl')(function* (value: string) {
+  const url = yield* Effect.try({
+    try: () => new URL(value),
+    catch: () => new LocalError('cli_usage', 'Cloud URL must be an absolute HTTPS URL.'),
+  });
 
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 
@@ -52,13 +49,13 @@ const normalizeCloudUrl = (value: string): string => {
     url.hash ||
     url.pathname !== '/'
   )
-    throw new LocalError(
+    return yield* new LocalError(
       'cli_usage',
       'Cloud URL must be an HTTPS origin, or an HTTP loopback origin.',
     );
 
   return url.origin;
-};
+});
 
 /** Bounds response bytes and retains release failures rather than replacing primary failures. */
 const readResponseText = Effect.fn('readCloudResponse')(function* (response: Response) {
@@ -69,14 +66,12 @@ const readResponseText = Effect.fn('readCloudResponse')(function* (response: Res
 
   const reader = response.body?.getReader();
 
-  if (!reader)
-    return yield* Effect.fail(new LocalError('cloud_request_failed', 'Cloud response is empty.'));
+  if (!reader) return yield* new LocalError('cloud_request_failed', 'Cloud response is empty.');
   let done = false;
 
   return yield* withOperationCleanup(
     Effect.gen(function* () {
-      if (Number(response.headers.get('content-length')) > limit)
-        return yield* Effect.fail(invalid());
+      if (Number(response.headers.get('content-length')) > limit) return yield* invalid();
       const chunks: Uint8Array[] = [];
       let size = 0;
 
@@ -93,7 +88,7 @@ const readResponseText = Effect.fn('readCloudResponse')(function* (response: Res
 
         size += chunk.value.byteLength;
 
-        if (size > limit) return yield* Effect.fail(invalid());
+        if (size > limit) return yield* invalid();
         chunks.push(chunk.value);
       }
 
@@ -141,8 +136,10 @@ const readResponseText = Effect.fn('readCloudResponse')(function* (response: Res
 });
 
 /** Sends each request once. Unknown dispatch is never retried or treated as rollback. */
-const createCloudClient = (options: CloudClientOptions): CloudClient => {
-  const baseUrl = normalizeCloudUrl(options.baseUrl);
+const createCloudClient = Effect.fn('createCloudClient')(function* (
+  options: CloudClientOptions,
+): Effect.fn.Return<CloudClient, LocalError> {
+  const baseUrl = yield* normalizeCloudUrl(options.baseUrl);
   const fetcher = options.fetch ?? fetch;
 
   const send = Effect.fn('sendCloudRequest')(function* <T>(
@@ -162,9 +159,7 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
       new URL(path, baseUrl).origin !== baseUrl ||
       !new URL(path, baseUrl).pathname.startsWith('/v1/')
     )
-      return yield* Effect.fail(
-        new LocalError('cli_usage', 'Cloud request path must stay under /v1/.'),
-      );
+      return yield* new LocalError('cli_usage', 'Cloud request path must stay under /v1/.');
     const headers = new Headers({ accept: 'application/json' });
 
     if (request.body !== undefined) headers.set('content-type', request.contentType);
@@ -173,7 +168,7 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
       headers.set('authorization', `Bearer ${options.accessToken}`);
 
     if (request.signal?.aborted)
-      return yield* Effect.fail(new LocalError('cancelled', 'Cloud request did not complete.'));
+      return yield* new LocalError('cancelled', 'Cloud request did not complete.');
     const controller = new AbortController();
     const cancel = () => controller.abort(request.signal?.reason);
     const timer = setTimeout(() => controller.abort(), request.timeout);
@@ -293,6 +288,6 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
     upload: (path, request) =>
       send('POST', path, { ...request, contentType: 'application/x-ndjson', timeout: 120_000 }),
   };
-};
+});
 
 export { createCloudClient, normalizeCloudUrl, type CloudClient, type CloudClientOptions };

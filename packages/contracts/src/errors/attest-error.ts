@@ -1,3 +1,5 @@
+import * as Data from 'effect/Data';
+
 /**
  * Base class for Attest errors that have not migrated to native tagged errors.
  *
@@ -6,11 +8,37 @@
  * subclasses that narrow `code` to their own unions. Native tagged errors retain their
  * own identity and stable code, such as StoreError.
  */
-abstract class AttestError extends Error {
+abstract class AttestError extends Data.Error {
   readonly code: string;
 
+  /** Lets JSON.stringify apply its native property and replacer rules to this Error. */
+  override toJSON() {
+    return this;
+  }
+
+  /** Returning this lets Node format the native Error message, stack and cause. */
+  [Symbol.for('nodejs.util.inspect.custom')]() {
+    return this;
+  }
+
   constructor(code: string, message: string, options?: ErrorOptions) {
-    super(message, options);
+    super();
+    Object.defineProperty(this, 'message', {
+      configurable: true,
+      enumerable: false,
+      value: message,
+      writable: true,
+    });
+
+    if (options && 'cause' in options) {
+      Object.defineProperty(this, 'cause', {
+        configurable: true,
+        enumerable: false,
+        value: options.cause,
+        writable: true,
+      });
+    }
+
     this.name = new.target.name;
     this.code = code;
   }

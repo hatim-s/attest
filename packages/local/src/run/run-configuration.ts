@@ -112,7 +112,7 @@ const readStoredRun = Effect.fn('readStoredRun')(function* (storePath: string, r
     withRunNotFound(() => store.getRun(runId), runNotFound),
   );
 
-  if (run === undefined) return yield* Effect.fail(runNotFound());
+  if (run === undefined) return yield* runNotFound();
 
   return run;
 });
@@ -127,7 +127,7 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
     workingDirectory: options.workingDirectory,
   });
 
-  const resolved = resolveEvalRun(project, request, { argv: options.argv });
+  const resolved = yield* resolveEvalRun(project, request, { argv: options.argv });
   const identity = createRunIdentity();
   const git = yield* readGitMetadata(project.root);
 

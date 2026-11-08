@@ -58,18 +58,29 @@ const addRedactedRequestValues = (
 };
 
 /** Reads the argv values the agent marks for redaction, so evidence can hide them. */
-const redactedArgvValues = (agent: AgentResource, argv: readonly string[]): string[] =>
-  (agent.redaction?.argv_positions ?? []).map((position) => {
+const redactedArgvValues = Effect.fn('redactedArgvValues')(function* (
+  agent: AgentResource,
+  argv: readonly string[],
+) {
+  const values: string[] = [];
+
+  for (const position of agent.redaction?.argv_positions ?? []) {
     const value = argv[position];
 
     if (value === undefined) {
-      throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
-        path: `/agents/${agent.id}/redaction/argv_positions`,
-      });
+      // Authored argv positions have already been validated before runtime resolution.
+      return yield* Effect.die(
+        new LocalError('project_invalid', 'An argv redaction position is out of range.', {
+          path: `/agents/${agent.id}/redaction/argv_positions`,
+        }),
+      );
     }
 
-    return value;
-  });
+    values.push(value);
+  }
+
+  return values;
+});
 
 type ProcessTransport = Extract<
   AgentResource['transport'],
@@ -91,14 +102,14 @@ const resolveProcessAgent = Effect.fn('resolveProcessAgent')(function* (
       env: variables,
       kind: 'vercel_sandbox',
       sandbox: transport.sandbox,
-      secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
+      secrets: [...secrets, ...(yield* redactedArgvValues(agent, transport.argv))],
     };
   }
 
   const cwd = yield* resolveProcessCwd(projectRoot, transport.cwd);
   const authoredArgv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
   const argv = resolveProcessArgv(authoredArgv, cwd);
-  const processSecrets = [...secrets, ...redactedArgvValues(agent, argv)];
+  const processSecrets = [...secrets, ...(yield* redactedArgvValues(agent, argv))];
 
   if (transport.kind === 'native_cli') {
     return {

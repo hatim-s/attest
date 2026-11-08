@@ -8,7 +8,7 @@ import {
 
 import { LocalError } from '../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
-import { parseJsonText, readSourceText } from '../../internal/source-text.js';
+import { parseJsonTextEffect, readSourceText } from '../../internal/source-text.js';
 
 type CommandRequestFor<TCommand extends CommandRequest['command']> = Extract<
   CommandRequest,
@@ -70,31 +70,26 @@ const readRequestDocument = Effect.fn('readRequestDocument')(function* (
   source: string,
   options: ReadRequestDocumentOptions,
 ) {
-  try {
-    const text = yield* readSourceText(source, { ...options, path: '--from-json' });
+  const text = yield* readSourceText(source, { ...options, path: '--from-json' });
 
-    return parseJsonText(text, { path: '--from-json', hint: options.hint });
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
-  }
+  return yield* parseJsonTextEffect(text, { path: '--from-json', hint: options.hint });
 });
 
 /** Reads one `--from-json` request document from a file or stdin and validates it. */
 const readCommandRequest = Effect.fn('readCommandRequest')(function* <
   TCommand extends CommandRequest['command'],
 >(command: TCommand, source: string, options: ReadCommandRequestOptions) {
-  try {
-    const value = yield* readRequestDocument(source, {
-      ...options,
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
-    });
+  const value = yield* readRequestDocument(source, {
+    ...options,
+    hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
+  });
 
-    return parseCommandRequest(command, value, '--from-json');
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
-  }
+  return yield* Effect.try({
+    try: () => parseCommandRequest(command, value, '--from-json'),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
 });
 
 export { readCommandRequest, readRequestDocument, validateCommandRequest };

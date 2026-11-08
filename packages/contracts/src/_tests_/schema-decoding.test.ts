@@ -1,3 +1,5 @@
+import * as Exit from 'effect/Exit';
+import { AttestError } from '../errors/attest-error.js';
 import * as Effect from 'effect/Effect';
 import * as Cause from 'effect/Cause';
 import { describe, expect, expectTypeOf, it } from 'vitest';
@@ -47,6 +49,18 @@ describe('public schema decoding', () => {
   });
 
   it('retains error identity, authored paths and synchronous throws', () => {
+    const error = new YieldableContractError('example', 'wrapped');
+
+    const exit = Effect.runSync(
+      Effect.exit(
+        Effect.gen(function* () {
+          return yield* error;
+        }),
+      ),
+    );
+
+    expect(exit).toEqual(Exit.fail(error));
+
     const schema = stripStruct({ items: Schema.Array(Schema.String) }).check(
       Schema.makeFilter((value) =>
         value.items.length === 0
@@ -161,3 +175,6 @@ describe('native diagnostic invariants', () => {
     if (exit._tag === 'Failure') expect(Cause.squash(exit.cause)).toBe(defect);
   });
 });
+
+/** Exercises error yielding through the existing contracts test execution root. */
+class YieldableContractError extends AttestError {}

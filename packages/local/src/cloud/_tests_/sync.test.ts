@@ -192,14 +192,16 @@ describe('cloud revision synchronization', () => {
     ).then(valueFromExit);
     let dispatches = 0;
 
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example',
-      fetch: () => {
-        dispatches++;
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example',
+        fetch: () => {
+          dispatches++;
 
-        return Promise.reject(new Error('Unexpected dispatch'));
-      },
-    });
+          return Promise.reject(new Error('Unexpected dispatch'));
+        },
+      }),
+    ).then(valueFromExit);
 
     const exit = await Effect.runPromiseExit(
       pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
@@ -247,20 +249,28 @@ describe('cloud revision synchronization', () => {
         }),
       ).then(valueFromExit);
 
-      const client = createCloudClient({
-        baseUrl: 'https://cloud.example',
-        fetch: () =>
-          Promise.resolve(
-            Response.json({
-              revision: { id: 'revision-1', project_id: 'project-1', created_at: '2026-10-01' },
-              bundle: {
-                schema: 'attest.project-bundle.v1',
-                resources: { project: manifest, agents: [], tests: [], datasets: [], metrics: [] },
-                files: { 'attest.project.json': mismatched },
-              },
-            }),
-          ),
-      });
+      const client = await Effect.runPromiseExit(
+        createCloudClient({
+          baseUrl: 'https://cloud.example',
+          fetch: () =>
+            Promise.resolve(
+              Response.json({
+                revision: { id: 'revision-1', project_id: 'project-1', created_at: '2026-10-01' },
+                bundle: {
+                  schema: 'attest.project-bundle.v1',
+                  resources: {
+                    project: manifest,
+                    agents: [],
+                    tests: [],
+                    datasets: [],
+                    metrics: [],
+                  },
+                  files: { 'attest.project.json': mismatched },
+                },
+              }),
+            ),
+        }),
+      ).then(valueFromExit);
 
       if (direction === 'push') await writeFile(join(root, 'attest.project.json'), mismatched);
       const before = await readFile(join(root, 'attest.project.json'), 'utf8');
@@ -336,10 +346,12 @@ describe('cloud revision synchronization', () => {
       }),
     ).then(valueFromExit);
 
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example',
-      fetch: () => Promise.reject(new Error('Must reject before upload.')),
-    });
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example',
+        fetch: () => Promise.reject(new Error('Must reject before upload.')),
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(
@@ -380,52 +392,55 @@ describe('cloud revision synchronization', () => {
     ).then(valueFromExit);
     let uploaded: PortableProjectBundle | undefined;
 
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.example',
-      fetch: async (_url, init) => {
-        if (init?.method === 'POST') {
-          const body = parseWithSchemaSync(
-            stripStruct({
-              bundle: portableProjectBundleSchema,
-              parent_revision_id: Schema.NullOr(Schema.String),
-            }),
-            await new Response(init.body).json(),
-          );
+    const client = await Effect.runPromiseExit(
+      createCloudClient({
+        baseUrl: 'https://cloud.example',
+        fetch: async (_url, init) => {
+          if (init?.method === 'POST') {
+            const body = parseWithSchemaSync(
+              stripStruct({
+                bundle: portableProjectBundleSchema,
+                parent_revision_id: Schema.NullOr(Schema.String),
+              }),
+              await new Response(init.body).json(),
+            );
 
-          expect(body.parent_revision_id).toBe(uploaded === undefined ? null : 'revision-1');
-          uploaded = body.bundle;
+            expect(body.parent_revision_id).toBe(uploaded === undefined ? null : 'revision-1');
+            uploaded = body.bundle;
+
+            return Promise.resolve(
+              Response.json({
+                revision: { id: 'revision-1', project_id: 'project-1', created_at: '2026-10-01' },
+              }),
+            );
+          }
+
+          if (uploaded === undefined) throw new Error('Expected an uploaded revision before pull.');
+          let remote = structuredClone(uploaded);
+          remote = {
+            ...remote,
+            resources: {
+              ...remote.resources,
+              project: { ...remote.resources.project, name: 'Remote' },
+            },
+          };
+          remote = {
+            ...remote,
+            files: {
+              ...remote.files,
+              ['attest.project.json']: JSON.stringify(remote.resources.project, null, 2),
+            },
+          };
 
           return Promise.resolve(
             Response.json({
-              revision: { id: 'revision-1', project_id: 'project-1', created_at: '2026-10-01' },
+              revision: { id: 'revision-2', project_id: 'project-1', created_at: '2026-10-02' },
+              bundle: remote,
             }),
           );
-        }
-
-        let remote = structuredClone(uploaded!);
-        remote = {
-          ...remote,
-          resources: {
-            ...remote.resources,
-            project: { ...remote.resources.project, name: 'Remote' },
-          },
-        };
-        remote = {
-          ...remote,
-          files: {
-            ...remote.files,
-            ['attest.project.json']: JSON.stringify(remote.resources.project, null, 2),
-          },
-        };
-
-        return Promise.resolve(
-          Response.json({
-            revision: { id: 'revision-2', project_id: 'project-1', created_at: '2026-10-02' },
-            bundle: remote,
-          }),
-        );
-      },
-    });
+        },
+      }),
+    ).then(valueFromExit);
 
     await expect(
       Effect.runPromiseExit(pushCloudProject({ workingDirectory: root, client })).then(
@@ -437,7 +452,10 @@ describe('cloud revision synchronization', () => {
     await Effect.runPromiseExit(
       pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
     ).then(valueFromExit);
-    expect(Object.keys(uploaded!.files)).toEqual(['attest.project.json']);
+
+    if (uploaded === undefined) throw new Error('Expected the pushed revision to be captured.');
+
+    expect(Object.keys(uploaded.files)).toEqual(['attest.project.json']);
     await Effect.runPromiseExit(pushCloudProject({ workingDirectory: root, client })).then(
       valueFromExit,
     );

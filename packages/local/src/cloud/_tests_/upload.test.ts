@@ -101,11 +101,13 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
     ),
   );
 
-  const client = createCloudClient({
-    baseUrl: 'https://cloud.test',
-    accessToken: 'session',
-    fetch: fetcher,
-  });
+  const client = await Effect.runPromiseExit(
+    createCloudClient({
+      baseUrl: 'https://cloud.test',
+      accessToken: 'session',
+      fetch: fetcher,
+    }),
+  ).then(valueFromExit);
 
   expect(
     await Effect.runPromiseExit(

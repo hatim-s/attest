@@ -71,12 +71,7 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
   onDevice: (notice: LoginNotice) => void;
   fetch?: typeof fetch;
 }) {
-  const client = yield* Effect.try({
-    try: () => createCloudClient({ baseUrl: options.baseUrl, fetch: options.fetch }),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
+  const client = yield* createCloudClient({ baseUrl: options.baseUrl, fetch: options.fetch });
 
   const verifier = randomBytes(32).toString('base64url');
 
@@ -87,8 +82,9 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
   });
 
   if (new URL(device.verification_uri).origin !== client.baseUrl)
-    return yield* Effect.fail(
-      new LocalError('cloud_request_failed', 'Cloud approval URL points to another origin.'),
+    return yield* new LocalError(
+      'cloud_request_failed',
+      'Cloud approval URL points to another origin.',
     );
   options.onDevice({
     user_code: device.user_code,
@@ -100,7 +96,7 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
 
   while (Date.now() < deadline) {
     if (options.signal?.aborted)
-      return yield* Effect.fail(new LocalError('cancelled', 'Cloud login cancelled.'));
+      return yield* new LocalError('cancelled', 'Cloud login cancelled.');
 
     const loggedIn = yield* Effect.gen(function* () {
       const token = yield* client.request('POST', '/v1/auth/device/token', {
@@ -123,22 +119,18 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
       Effect.catch((error) =>
         Effect.gen(function* () {
           if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device')
-            return yield* Effect.fail(error);
+            return yield* error;
 
           if (error.outcome.code === 'slow_down') interval += 5000;
           else if (error.outcome.code === 'expired_token') {
-            return yield* Effect.fail(
-              new LocalError(
-                'cloud_auth_required',
-                'Cloud approval code expired. Run attest cloud login again.',
-              ),
+            return yield* new LocalError(
+              'cloud_auth_required',
+              'Cloud approval code expired. Run attest cloud login again.',
             );
           } else if (error.outcome.code === 'access_denied') {
-            return yield* Effect.fail(
-              new LocalError(
-                'cloud_auth_required',
-                'Cloud login was denied. Run attest cloud login again.',
-              ),
+            return yield* new LocalError(
+              'cloud_auth_required',
+              'Cloud login was denied. Run attest cloud login again.',
             );
           }
         }),
@@ -149,11 +141,9 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
     yield* waitForCloudPoll(Math.min(interval, Math.max(0, deadline - Date.now())), options.signal);
   }
 
-  return yield* Effect.fail(
-    new LocalError(
-      'cloud_auth_required',
-      'Cloud approval code expired. Run attest cloud login again.',
-    ),
+  return yield* new LocalError(
+    'cloud_auth_required',
+    'Cloud approval code expired. Run attest cloud login again.',
   );
 });
 
@@ -163,14 +153,14 @@ const authenticatedCloudClient = Effect.fn('authenticatedCloudClient')(function*
 ) {
   const credentials = yield* resolveCloudCredentials(credentialPath);
 
-  return createCloudClient(credentials);
+  return yield* createCloudClient(credentials);
 });
 
 /** Revokes the server session before removing the local token. */
 const logoutCloud = Effect.fn('logoutCloud')(function* (credentialPath: string) {
   const credentials = yield* readCloudCredentials(credentialPath, { allowExpired: true });
 
-  const client = createCloudClient({
+  const client = yield* createCloudClient({
     baseUrl: credentials.baseUrl,
     accessToken: credentials.accessToken,
   });
@@ -181,7 +171,7 @@ const logoutCloud = Effect.fn('logoutCloud')(function* (credentialPath: string) 
     Effect.catch((error) =>
       Effect.gen(function* () {
         if (!(error instanceof LocalError) || error.code !== 'cloud_auth_required')
-          return yield* Effect.fail(error);
+          return yield* error;
       }),
     ),
   );
@@ -222,9 +212,7 @@ const cloudEvents = Effect.fn('cloudEvents')(function* (options: {
   const after = options.after ?? 0;
 
   if (!Number.isSafeInteger(after) || after < 0)
-    return yield* Effect.fail(
-      new LocalError('cli_usage', 'Event cursor must be a non-negative integer.'),
-    );
+    return yield* new LocalError('cli_usage', 'Event cursor must be a non-negative integer.');
 
   const page = yield* options.client.request(
     'GET',
@@ -240,8 +228,9 @@ const cloudEvents = Effect.fn('cloudEvents')(function* (options: {
         event.sequence > page.next_cursor,
     )
   )
-    return yield* Effect.fail(
-      new LocalError('cloud_request_failed', 'Cloud event page has an invalid cursor order.'),
+    return yield* new LocalError(
+      'cloud_request_failed',
+      'Cloud event page has an invalid cursor order.',
     );
 
   return page;

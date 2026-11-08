@@ -1,4 +1,5 @@
 import { LocalError } from '../../errors/index.js';
+import * as Effect from 'effect/Effect';
 
 /** The label each lookup error names and the command that lists the available ids. */
 const RESOURCE_LOOKUPS = {
@@ -23,22 +24,26 @@ const missingResource = (type: ResourceType, id: string): LocalError =>
   });
 
 /** Finds one resource by id, so every command reports a missing id the same way. */
-const findResource = <Resource extends { id: string }>(
+const findResource = Effect.fn('findResource')(function* <Resource extends { id: string }>(
   type: ResourceType,
   resources: readonly Resource[],
   id: string,
-): Resource => {
+) {
   const resource = resources.find((candidate) => candidate.id === id);
 
-  if (resource === undefined) throw missingResource(type, id);
+  if (resource === undefined) return yield* missingResource(type, id);
 
   return resource;
-};
+});
 
 /** Rejects an add, import or rename whose target id is already taken. */
-const assertNewId = (type: ResourceType, resources: readonly { id: string }[], id: string) => {
+const assertNewId = Effect.fn('assertNewId')(function* (
+  type: ResourceType,
+  resources: readonly { id: string }[],
+  id: string,
+) {
   if (resources.some((resource) => resource.id === id)) {
-    throw new LocalError(
+    return yield* new LocalError(
       'project_invalid',
       `${RESOURCE_LOOKUPS[type].label} ${id} already exists.`,
       {
@@ -47,6 +52,6 @@ const assertNewId = (type: ResourceType, resources: readonly { id: string }[], i
       },
     );
   }
-};
+});
 
 export { assertNewId, findResource, missingResource };

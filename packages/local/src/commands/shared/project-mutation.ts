@@ -1,4 +1,4 @@
-import { LocalError } from '../../errors/index.js';
+import type { LocalError } from '../../errors/index.js';
 import * as Effect from 'effect/Effect';
 import {
   applyProjectMutation,
@@ -21,22 +21,17 @@ type ExecuteProjectMutationOptions = {
 const executeProjectMutation = Effect.fn('executeProjectMutation')(function* (
   options: ExecuteProjectMutationOptions,
 ) {
-  try {
-    const preview = yield* applyProjectMutation({ ...options.mutation, dryRun: true });
+  const preview = yield* applyProjectMutation({ ...options.mutation, dryRun: true });
 
-    if (options.dryRun) return preview;
+  if (options.dryRun) return preview;
 
-    if (options.confirm !== undefined) yield* options.confirm(preview);
+  if (options.confirm !== undefined) yield* options.confirm(preview);
 
-    return yield* applyProjectMutation({
-      ...options.mutation,
-      dryRun: false,
-      expectedProjectHash: preview.projectHashBefore,
-    });
-  } catch (error) {
-    if (error instanceof LocalError) return yield* Effect.fail(error);
-    throw error;
-  }
+  return yield* applyProjectMutation({
+    ...options.mutation,
+    dryRun: false,
+    expectedProjectHash: preview.projectHashBefore,
+  });
 });
 
 export { executeProjectMutation };

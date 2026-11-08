@@ -21,16 +21,16 @@ afterEach(async () => {
 });
 
 describe('eval lifecycle worker directories', () => {
-  test('anchors explicit hook script arguments to the project root', () => {
-    expect(resolveHookArgv('/project', ['node', './hooks/setup.mjs', 'before_case'])).toEqual([
-      'node',
-      '/project/hooks/setup.mjs',
-      'before_case',
-    ]);
+  test('anchors explicit hook script arguments to the project root', async () => {
+    await expect(
+      runNative(resolveHookArgv('/project', ['node', './hooks/setup.mjs', 'before_case'])),
+    ).resolves.toEqual(['node', '/project/hooks/setup.mjs', 'before_case']);
   });
 
-  test('keeps the default runtime working directory when workers are not configured', () => {
-    expect(resolveWorkerDirectory('/project', 'run-1', 0, undefined)).toBeUndefined();
+  test('keeps the default runtime working directory when workers are not configured', async () => {
+    await expect(
+      runNative(resolveWorkerDirectory('/project', 'run-1', 0, undefined)),
+    ).resolves.toBeUndefined();
   });
 
   test('creates shared worker parents concurrently', async () => {
@@ -51,11 +51,13 @@ describe('eval lifecycle worker directories', () => {
   test('rejects an explicit worker directory equal to the project root', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'attest-worker-root-'));
     temporaryDirectories.push(projectRoot);
-    expect(() =>
-      resolveWorkerDirectory(projectRoot, 'run-1', 0, {
-        workers: { count: 1, directory: '.' },
-      }),
-    ).toThrow('Eval worker directory escapes the project');
+    await expect(
+      runNative(
+        resolveWorkerDirectory(projectRoot, 'run-1', 0, {
+          workers: { count: 1, directory: '.' },
+        }),
+      ),
+    ).rejects.toThrow('Eval worker directory escapes the project');
     await expect(runNative(prepareWorkerDirectory(projectRoot, projectRoot))).rejects.toThrow(
       'Eval worker directory escapes the project through a symbolic link.',
     );
@@ -74,12 +76,16 @@ describe('eval lifecycle worker directories', () => {
     ).rejects.toThrow('Eval worker directory escapes the project through a symbolic link.');
   });
 
-  test('requires distinct templates when multiple workers are configured', () => {
-    expect(() =>
-      resolveWorkerDirectory('/project', 'run-1', 0, {
-        workers: { count: 2, directory: '.attest/workers/{run_id}' },
-      }),
-    ).toThrow('Eval worker directory must include {worker_index} when worker count exceeds one.');
+  test('requires distinct templates when multiple workers are configured', async () => {
+    await expect(
+      runNative(
+        resolveWorkerDirectory('/project', 'run-1', 0, {
+          workers: { count: 2, directory: '.attest/workers/{run_id}' },
+        }),
+      ),
+    ).rejects.toThrow(
+      'Eval worker directory must include {worker_index} when worker count exceeds one.',
+    );
   });
 });
 

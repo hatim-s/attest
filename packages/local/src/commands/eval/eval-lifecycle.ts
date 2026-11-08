@@ -24,34 +24,50 @@ type LifecycleConfig = {
 type CaseHookContext = { case_id: string; test_id: string; worker_index: number };
 
 /** Anchors explicitly relative hook paths to the project snapshot before worker cwd changes. */
-const resolveHookArgv = (projectRoot: string, argv: readonly string[]): string[] =>
-  argv.map((argument) => {
-    if (!argument.startsWith('./') && !argument.startsWith('../')) return argument;
+const resolveHookArgv = Effect.fn('resolveHookArgv')(function* (
+  projectRoot: string,
+  argv: readonly string[],
+) {
+  const resolvedArguments: string[] = [];
+
+  for (const argument of argv) {
+    if (!argument.startsWith('./') && !argument.startsWith('../')) {
+      resolvedArguments.push(argument);
+      continue;
+    }
+
     const resolved = resolve(projectRoot, argument);
 
     if (!isProjectPath(projectRoot, resolved)) {
-      throw new LocalError('project_invalid', 'Eval hook argument path escapes the project.', {
-        path: argument,
-      });
+      return yield* new LocalError(
+        'project_invalid',
+        'Eval hook argument path escapes the project.',
+        {
+          path: argument,
+        },
+      );
     }
 
-    return resolved;
-  });
+    resolvedArguments.push(resolved);
+  }
+
+  return resolvedArguments;
+});
 
 /** Resolves a snapshotted worker template and rejects substitutions that escape the project. */
-const resolveWorkerDirectory = (
+const resolveWorkerDirectory = Effect.fn('resolveWorkerDirectory')(function* (
   projectRoot: string,
   runId: string,
   workerIndex: number,
   config: LifecycleConfig | undefined,
-): string | undefined => {
+) {
   const template = config?.workers?.directory;
 
   if (template === undefined) return undefined;
   const workers = config?.workers;
 
   if (workers !== undefined && workers.count > 1 && !template.includes('{worker_index}')) {
-    throw new LocalError(
+    return yield* new LocalError(
       'project_invalid',
       'Eval worker directory must include {worker_index} when worker count exceeds one.',
       { path: template },
@@ -65,7 +81,7 @@ const resolveWorkerDirectory = (
   const directory = resolve(projectRoot, relative);
 
   if (directory === resolve(projectRoot) || !isProjectPath(projectRoot, directory)) {
-    throw new LocalError(
+    return yield* new LocalError(
       'project_invalid',
       `Eval worker directory escapes the project: ${relative}`,
       {
@@ -75,7 +91,7 @@ const resolveWorkerDirectory = (
   }
 
   return directory;
-};
+});
 
 /** Creates a worker directory whose every segment is a real directory inside the project. */
 const prepareWorkerDirectory = (projectRoot: string, directory: string) =>
@@ -122,7 +138,7 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   /** Runs one argv-only hook with an isolated environment and bounded process cleanup. */
   const runHook = Effect.fn('runHook')(function* (options: RunHookOptions) {
     if (options.command === undefined) return;
-    const [file, ...argumentsList] = resolveHookArgv(projectRoot, options.command.argv);
+    const [file, ...argumentsList] = yield* resolveHookArgv(projectRoot, options.command.argv);
 
     const executable =
       file !== undefined && !isAbsolute(file) && file.includes('/')
@@ -179,7 +195,7 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   };
 
   const prepareCase = Effect.fn('prepareCase')(function* (context: CaseHookContext) {
-    const configuredDirectory = resolveWorkerDirectory(
+    const configuredDirectory = yield* resolveWorkerDirectory(
       projectRoot,
       run.run_id,
       context.worker_index,
@@ -189,6 +205,15 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
     if (configuredDirectory === undefined) return undefined;
 
     return yield* prepareWorkerDirectory(projectRoot, configuredDirectory);
+  });
+
+  /** Reports hook cleanup uncertainty through the lifecycle error channel. */
+  const assertCleanup = Effect.fn('assertCleanup')(function* () {
+    if (!cleanupConfirmed) {
+      return yield* Effect.fail(
+        new HookCommandError('Eval hook process cleanup could not be confirmed.', false),
+      );
+    }
   });
 
   return {
@@ -206,11 +231,7 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
         },
         phase: 'after_run',
       }),
-    assertCleanup: (): void => {
-      if (!cleanupConfirmed) {
-        throw new HookCommandError('Eval hook process cleanup could not be confirmed.', false);
-      }
-    },
+    assertCleanup,
     beforeRun: (signal: AbortSignal): Effect.Effect<void, Error> =>
       runHook({
         command: config?.hooks?.before_run,

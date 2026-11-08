@@ -1,4 +1,5 @@
 import type { AgentResource, HttpRequestTemplate } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
@@ -344,4 +345,16 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   assertRedactionTargets(agent, [request]);
 };
 
-export { assertSafeNativeAgentResource };
+/** Runs native agent validation in the typed error channel while preserving unexpected defects. */
+const validateNativeAgentResource = Effect.fn('validateNativeAgentResource')(function* (
+  agent: AgentResource,
+) {
+  return yield* Effect.try({
+    try: () => assertSafeNativeAgentResource(agent),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
+});
+
+export { assertSafeNativeAgentResource, validateNativeAgentResource };
