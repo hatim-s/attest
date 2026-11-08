@@ -1,5 +1,10 @@
-import { isJsonObject } from '@attest/contracts';
-import { parseWithSchema, vercelSandboxSchema, type JsonValue } from '@attest/contracts';
+import {
+  isJsonObject,
+  parseWithSchema,
+  tryOwned,
+  vercelSandboxSchema,
+  type JsonValue,
+} from '@attest/contracts';
 
 import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';
@@ -11,21 +16,14 @@ import { ShellWordsError, splitShellWords } from '../shell-words.js';
 
 /** Tokenizes a convenience command string into argv without expansion or shell execution. */
 const tokenizeCommand = Effect.fn('tokenizeCommand')(function* (value: string) {
-  // The tokenizer throws its own class; anything else is a defect, not a usage error.
-  const argv = yield* Effect.try({
-    try: () => splitShellWords(value, { rejectShellControl: false }),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof ShellWordsError
-        ? Effect.fail(
-            new LocalError('cli_usage', 'The native command contains an unclosed quote.', {
-              path: '--native-command',
-              hint: 'Close the quote or use `--argv-json` for an unambiguous argv array.',
-            }),
-          )
-        : Effect.die(cause),
-    ),
+  const argv = yield* tryOwned(
+    ShellWordsError,
+    () => splitShellWords(value, { rejectShellControl: false }),
+    () =>
+      new LocalError('cli_usage', 'The native command contains an unclosed quote.', {
+        path: '--native-command',
+        hint: 'Close the quote or use `--argv-json` for an unambiguous argv array.',
+      }),
   );
 
   if (argv.length === 0) {

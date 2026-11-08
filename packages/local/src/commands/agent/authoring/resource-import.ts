@@ -6,6 +6,7 @@ import {
   parseWithSchema,
   AGENT_RESOURCE_SCHEMA_ID,
   agentResourceSchema,
+  tryOwned,
   type AgentResource,
   type CommandRequest,
 } from '@attest/contracts';
@@ -249,18 +250,15 @@ const readCurlBodyFile = Effect.fn('readCurlBodyFile')(function* (
 
 /** Maps known cURL parse failures while leaving unexpected exceptions as defects. */
 const parseCurlInput = <A>(parse: () => A) =>
-  Effect.try({ try: parse, catch: (cause) => cause }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof CurlImportError
-        ? Effect.fail(
-            new LocalError('cli_usage', cause.message, {
-              path: 'source',
-              hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
-              details: { diagnostics: cause.diagnostics },
-            }),
-          )
-        : Effect.die(cause),
-    ),
+  tryOwned(
+    CurlImportError,
+    parse,
+    (error) =>
+      new LocalError('cli_usage', error.message, {
+        path: 'source',
+        hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
+        details: { diagnostics: error.diagnostics },
+      }),
   );
 
 /** Converts one inert cURL request into a canonical direct or polling agent resource. */

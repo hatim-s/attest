@@ -1,4 +1,4 @@
-import { parseWithSchema, commandRequestSchema } from '@attest/contracts';
+import { parseWithSchema, commandRequestSchema, tryOwned } from '@attest/contracts';
 import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../errors/index.js';
@@ -359,19 +359,11 @@ const findUnboundCurlCredential = Effect.fn('findUnboundCurlCredential')(functio
   const querySecrets = yield* parseEnvironmentBindings(bindings.queryEnv, '--query-env');
 
   // The parser throws its own class; only its diagnostics name an unbound credential.
-  return yield* Effect.try({
-    try: () => {
-      parseCurlCommand(source, { headerSecrets, querySecrets });
-
-      return undefined;
-    },
-    catch: (cause) => cause,
+  return yield* tryOwned(CurlImportError, () => {
+    parseCurlCommand(source, { headerSecrets, querySecrets });
   }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof CurlImportError
-        ? Effect.succeed(firstUnboundCredential(cause.diagnostics))
-        : Effect.die(cause),
-    ),
+    Effect.as(undefined),
+    Effect.catch((error) => Effect.succeed(firstUnboundCredential(error.diagnostics))),
   );
 });
 
