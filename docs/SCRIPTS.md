@@ -66,3 +66,19 @@ Runtime also provides `test:node` and `test:bun`. They run the same compiled eva
 | `typecheck:scripts` | root                 | Checks release packaging, consumer verification, and web build/config inputs with Node types.                                                |
 | `test:fuzz`         | root                 | Builds contracts and runs uncached conformance parser fuzzing.                                                                               |
 | `prepublishOnly`    | ten release packages | Rejects workspace publication. Publish the reviewed archives instead.                                                                        |
+
+## Compiler and cache ownership
+
+Every TypeScript build and typecheck, including conformance and `typecheck:scripts`,
+invokes `node_modules/typescript7/bin/tsc` explicitly. `typescript7` is an exact npm
+alias for `typescript@7.0.2`. The ordinary `typescript@5.9.3` package supplies
+ESLint's type-aware JavaScript API. Explicit paths avoid their colliding `tsc` binaries.
+
+`lint` uses ESLint's content cache at `node_modules/.cache/eslint/`; its type-aware
+rules and project configuration are unchanged. `generate:schemas` runs Turbo's
+schema `generate` task, which caches `generated/**` after building contracts.
+Builds cache `dist/**` and package-root `*.tsbuildinfo`; typechecks cache their
+package-root `*.tsbuildinfo`. Site typechecking emits nothing. The checked build
+artifacts and build-info files contain no absolute worktree paths. Default task
+inputs include package source and configuration; global inputs also include the
+shared tsconfig, root manifest and lockfile. No custom local cache directory is used.

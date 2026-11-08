@@ -7,6 +7,6 @@
     "dev": "bun --watch src/serve.ts",
     "build": "mkdir -p dist && cp index.html dist/index.html",
     "preview": "bun src/serve.ts --built",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit"
   }
 }

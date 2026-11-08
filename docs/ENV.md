@@ -71,3 +71,15 @@ heap for ESLint's TypeScript programs. The setting applies only to that step.
 `FUZZ=1` enables conformance fuzz tests. `FUZZ_ITERATIONS` overrides their iteration
 count. The `test:fuzz` script enables `FUZZ` itself. Telemetry opt-outs described in
 [the telemetry policy](TELEMETRY.md) are requirements for a future change, not current switches.
+
+## Turborepo remote cache
+
+Set `TURBO_TOKEN` and `TURBO_TEAM` in your shell to enable Vercel Remote Cache.
+CI reads the repository secret `TURBO_TOKEN` and repository variable `TURBO_TEAM`.
+Without them Turbo uses its shared local cache. No account linking is required by
+these scripts. Configure credentials in GitHub settings; never commit their values.
+
+Build hashes include `NODE_ENV` and `VITE_*`. Test hashes include `CI`, `FUZZ`,
+`FUZZ_ITERATIONS`, `VITEST_MAX_THREADS`, `VITEST_MAX_FORKS`, and the Attest
+home, cloud and test-secret overrides listed in `turbo.json`. Runtime-only provider
+credentials are not needed by the offline test suite.

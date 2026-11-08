@@ -21,9 +21,9 @@
     "@attest/executor": "workspace:*"
   },
   "scripts": {
-    "build": "tsc --build tsconfig.build.json",
+    "build": "node ../../node_modules/typescript7/bin/tsc --build tsconfig.build.json",
     "test": "vitest run --maxWorkers=1",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit -p tsconfig.json",
     "test:node": "node --test src/eval/_tests_/portability.check.mjs",
     "test:bun": "bun test ./src/eval/_tests_/portability.check.mjs",
     "prepublishOnly": "node ../../scripts/block-source-publish.mjs"

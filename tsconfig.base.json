@@ -8,6 +8,7 @@
     "declaration": true,
     "composite": true,
     "skipLibCheck": true,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "types": ["node"]
   }
 }

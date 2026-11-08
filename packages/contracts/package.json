@@ -11,8 +11,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "node ../../node_modules/typescript7/bin/tsc -p tsconfig.build.json",
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },

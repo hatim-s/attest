@@ -12,6 +12,10 @@ on:
         type: number
 
 # Scheduled fuzzing is intentionally non-blocking and is not a required check.
+env:
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
 jobs:
   fuzz:
     runs-on: ubuntu-latest
