@@ -189,23 +189,22 @@ const newestCompletedRunQueryOptions = (client: ApiClient, projectKey: string) =
 const useNewestCompletedRun = (projectKey: string) =>
   useQuery(newestCompletedRunQueryOptions(useApiClient(), projectKey));
 
-/** Keeps the history limit in the cache identity and polls only live sources. */
-const suiteHistoryQueryOptions = (
+/** Reads an eval's newest slices from stored totals; refreshes on focus instead of polling. */
+const evalRunsQueryOptions = (
   client: ApiClient,
   projectKey: string,
   suiteName: string,
   limit: number,
 ) =>
   queryOptions({
-    queryKey: ['suite-history', projectKey, suiteName, limit],
+    queryKey: ['eval-runs', projectKey, suiteName, limit],
     queryFn: ({ signal }) =>
-      Effect.runPromise(client.getSuiteHistory({ projectKey, suiteName }, { limit }, { signal })),
-    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
+      Effect.runPromise(client.listEvalRuns({ projectKey, suiteName }, { limit }, { signal })),
   });
 
 /** Lets both history charts consume a single parsed response. */
-const useSuiteHistory = (projectKey: string, suiteName: string, limit: number) =>
-  useQuery(suiteHistoryQueryOptions(useApiClient(), projectKey, suiteName, limit));
+const useEvalRuns = (projectKey: string, suiteName: string, limit: number) =>
+  useQuery(evalRunsQueryOptions(useApiClient(), projectKey, suiteName, limit));
 
 /** Lists the tests a new run can select. Tests change only when someone edits the project. */
 const useTests = (projectKey: string) => {
@@ -249,9 +248,9 @@ export {
   projectsQueryOptions,
   useProjects,
   newestCompletedRunQueryOptions,
-  suiteHistoryQueryOptions,
+  evalRunsQueryOptions,
   useNewestCompletedRun,
-  useSuiteHistory,
+  useEvalRuns,
   runSuitesQueryOptions,
   useRunSuites,
   runsQueryOptions,

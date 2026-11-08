@@ -15,15 +15,16 @@ type ApiCall =
   | { method: 'GET'; query?: URLSearchParams; options?: RequestOptions }
   | { method: 'POST'; body?: RunStartRequest; options?: RequestOptions };
 
-const toSearch = (query: PageQuery): URLSearchParams => {
-  const search = new URLSearchParams();
+/** Serialises a flat query; absent fields are omitted so the server applies its defaults. */
+const toSearch = (query: Readonly<Record<string, string | number | undefined>>): URLSearchParams =>
+  new URLSearchParams(
+    Object.entries(query).flatMap(([name, value]) =>
+      value === undefined ? [] : [[name, String(value)]],
+    ),
+  );
 
-  if (query.cursor !== undefined) search.set('cursor', query.cursor);
-
-  if (query.limit !== undefined) search.set('limit', String(query.limit));
-
-  return search;
-};
+/** Picks the page fields; decoded queries also carry an open index signature. */
+const pageSearch = ({ cursor, limit }: PageQuery) => toSearch({ cursor, limit });
 
 const toRequestInit = (call: ApiCall): RequestInit => {
   const signal = call.options?.signal;
@@ -122,15 +123,56 @@ const createHttpClient = (
   return {
     mode: { kind: 'live' },
     capabilities,
+    listOverviews: (options) =>
+      request(apiResponses.listOverviews, apiRoutes.listOverviews.path, {
+        method: apiRoutes.listOverviews.method,
+        options,
+      }),
     listProjects: (options) =>
       request(apiResponses.listProjects, apiRoutes.listProjects.path, {
         method: apiRoutes.listProjects.method,
         options,
       }),
+    getProjectOverview: (params, options) =>
+      request(
+        apiResponses.getProjectOverview,
+        buildPath(apiRoutes.getProjectOverview.path, params),
+        { method: apiRoutes.getProjectOverview.method, options },
+      ),
+    listEvals: (params, query, options) =>
+      request(apiResponses.listEvals, buildPath(apiRoutes.listEvals.path, params), {
+        method: apiRoutes.listEvals.method,
+        query: pageSearch(query),
+        options,
+      }),
+    listEvalRuns: (params, { cursor, limit, since, until }, options) =>
+      request(apiResponses.listEvalRuns, buildPath(apiRoutes.listEvalRuns.path, params), {
+        method: apiRoutes.listEvalRuns.method,
+        query: toSearch({ cursor, limit, since, until }),
+        options,
+      }),
+    getEvalCaseWindow: (params, query, options) =>
+      request(apiResponses.getEvalCaseWindow, buildPath(apiRoutes.getEvalCaseWindow.path, params), {
+        method: apiRoutes.getEvalCaseWindow.method,
+        query: pageSearch(query),
+        options,
+      }),
+    getCaseHistory: (params, query, options) =>
+      request(apiResponses.getCaseHistory, buildPath(apiRoutes.getCaseHistory.path, params), {
+        method: apiRoutes.getCaseHistory.method,
+        query: pageSearch(query),
+        options,
+      }),
+    getActivity: (params, { from, to }, options) =>
+      request(apiResponses.getActivity, buildPath(apiRoutes.getActivity.path, params), {
+        method: apiRoutes.getActivity.method,
+        query: toSearch({ from, to }),
+        options,
+      }),
     listRuns: (params, query, options) =>
       request(apiResponses.listRuns, buildPath(apiRoutes.listRuns.path, params), {
         method: apiRoutes.listRuns.method,
-        query: toSearch(query),
+        query: pageSearch(query),
         options,
       }),
     getRun: (params, options) =>
@@ -138,10 +180,10 @@ const createHttpClient = (
         method: apiRoutes.getRun.method,
         options,
       }),
-    listCaseSummaries: (params, query, options) =>
+    listCaseSummaries: (params, { cursor, limit, suiteName }, options) =>
       request(apiResponses.listCaseSummaries, buildPath(apiRoutes.listCaseSummaries.path, params), {
         method: apiRoutes.listCaseSummaries.method,
-        query: toSearch(query),
+        query: toSearch({ cursor, limit, suiteName }),
         options,
       }),
     getCase: (params, options) =>
@@ -152,12 +194,6 @@ const createHttpClient = (
     listRunSuites: (params, options) =>
       request(apiResponses.listRunSuites, buildPath(apiRoutes.listRunSuites.path, params), {
         method: apiRoutes.listRunSuites.method,
-        options,
-      }),
-    getSuiteHistory: (params, query, options) =>
-      request(apiResponses.getSuiteHistory, buildPath(apiRoutes.getSuiteHistory.path, params), {
-        method: apiRoutes.getSuiteHistory.method,
-        query: toSearch(query),
         options,
       }),
     getDiff: (params, options) =>

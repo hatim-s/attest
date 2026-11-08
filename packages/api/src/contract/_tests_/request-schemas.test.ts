@@ -1,11 +1,6 @@
 import { parseWithSchema, parseWithSchemaSync, SchemaDecodeError } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
-import {
-  pageQuerySchema,
-  suiteHistoryQuerySchema,
-  runStartRequestSchema,
-  diffParamsSchema,
-} from '../requests.js';
+import { pageQuerySchema, runStartRequestSchema, diffParamsSchema } from '../requests.js';
 
 /** Exercises the wire coercion and strictness policies rather than decoder call routing. */
 describe('native request schemas', () => {
@@ -19,10 +14,6 @@ describe('native request schemas', () => {
     for (const limit of ['', null, '1.5', '1001', 'bad']) {
       expect(parseWithSchema(pageQuerySchema, { limit }).ok).toBe(false);
     }
-
-    expect(parseWithSchemaSync(suiteHistoryQuerySchema, {})).toEqual({ limit: 20 });
-    expect(parseWithSchemaSync(suiteHistoryQuerySchema, { limit: '50' })).toEqual({ limit: 50 });
-    expect(parseWithSchema(suiteHistoryQuerySchema, { limit: '51' }).ok).toBe(false);
   });
 
   it('rejects mixed run selections and extra request fields while preserving authored errors', () => {

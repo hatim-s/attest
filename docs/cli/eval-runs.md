@@ -211,6 +211,22 @@ The dashboard and its read API are project scoped. Dashboard routes are `/projec
 `/projects/<key>/evals/<suite-name>`. The read API mirrors them under `/api/projects` and
 `/api/projects/<key>/runs`. An unknown key returns `PROJECT_NOT_FOUND`.
 
+The dashboard pages read precomputed per-eval totals, so no page pages through case rows to draw
+a chart. An "eval" is a test id; one run can hold slices of several evals. Only a complete slice
+(terminal run, every planned case recorded, nothing errored or skipped) has a pass rate.
+
+| Route                                                          | Answer                                                                                                                  |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/overview`                                            | One entry per registered project: `ready` with its overview, or `error` with an API error code for an unreadable store. |
+| `GET /api/projects/<key>/overview`                             | Eval summaries, running run count and last run time.                                                                    |
+| `GET /api/projects/<key>/evals`                                | Each eval's newest slice, newest complete slice and whether it is failing. Cursor paged.                                |
+| `GET /api/projects/<key>/evals/<eval>/runs`                    | The eval's slices, newest first. Cursor paged; `since` and `until` bound a trend window.                                |
+| `GET /api/projects/<key>/evals/<eval>/cases`                   | The eval's newest 10 slices and each case's cell in them (`pass`, `fail`, `error`, `skipped` or absent). Cursor paged.  |
+| `GET /api/projects/<key>/evals/<eval>/cases/<case-id>/history` | One case's outcomes, newest first. Cursor paged.                                                                        |
+| `GET /api/projects/<key>/activity?from=&to=`                   | Cases per UTC day across evals, for at most 92 days.                                                                    |
+| `GET /api/projects/<key>/runs/<run-id>/suites`                 | The run's slice for each eval it ran.                                                                                   |
+| `GET /api/projects/<key>/runs/<run-id>/cases?suiteName=`       | The run's case summaries, optionally for one eval.                                                                      |
+
 ## Starting and cancelling runs from the dashboard
 
 `attest web` and `attest web --all` can start and cancel eval runs in every project they serve.

@@ -401,7 +401,7 @@ describe('ApiClient', () => {
         ),
       () =>
         Effect.runPromiseExit(
-          client.getSuiteHistory({ projectKey: 'other', suiteName: 'a/b' }, {}),
+          client.listEvalRuns({ projectKey: 'other', suiteName: 'a/b' }, {}),
         ).then(valueFromExit),
     ]) {
       await expect(read()).rejects.toMatchObject({
