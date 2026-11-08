@@ -19,8 +19,9 @@ type RequiredInput = {
 const cancelled = (): AttestCliError => new AttestCliError('cancelled', 'Command cancelled.');
 
 /**
- * Asks one question and closes it when either the command or its fiber is cancelled. A rejection
- * after the command signal aborted is cancellation; any other rejection is a defect.
+ * Asks one question and closes it when either the command or its fiber is cancelled. An abort
+ * rejection, or any rejection after the command signal aborted, is cancellation; any other
+ * rejection is a defect.
  */
 const ask = Effect.fn('ask')(function* (context: PromptContext, question: string) {
   const { prompt, signal } = context;
@@ -30,7 +31,14 @@ const ask = Effect.fn('ask')(function* (context: PromptContext, question: string
   const answer = Effect.tryPromise({
     try: (interruption) => prompt(question, { signal: interruption }),
     catch: (cause) => cause,
-  }).pipe(Effect.catch((cause) => (signal.aborted ? Effect.fail(cancelled()) : Effect.die(cause))));
+  }).pipe(
+    Effect.catch((cause) =>
+      // Readline closes the question itself on Ctrl+C or Ctrl+D, without any process signal.
+      signal.aborted || (cause instanceof Error && cause.name === 'AbortError')
+        ? Effect.fail(cancelled())
+        : Effect.die(cause),
+    ),
+  );
 
   const cancellation = Effect.callback<never, AttestCliError>((resume) => {
     const abort = () => resume(Effect.fail(cancelled()));

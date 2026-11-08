@@ -60,4 +60,20 @@ describe('owned command prompts', () => {
     expect(exitCode).toBe(130);
     expect(errors).toEqual([expect.stringContaining('cancelled: Command cancelled.')]);
   }, 5_000);
+
+  it('reports cancellation when readline aborts the question on Ctrl+C', async () => {
+    const errors: string[] = [];
+
+    // Readline rejects on Ctrl+C itself; no process signal reaches the command.
+    const prompt: CliInteraction['prompt'] = () =>
+      Promise.reject(new DOMException('Aborted with Ctrl+C', 'AbortError'));
+
+    const exitCode = await runCli(['metric', 'test'], {
+      interaction: { ci: false, inputIsTTY: true, outputIsTTY: true, prompt },
+      io: { error: (line) => errors.push(line), output: () => {} },
+    });
+
+    expect(exitCode).toBe(130);
+    expect(errors).toEqual([expect.stringContaining('cancelled: Command cancelled.')]);
+  });
 });
