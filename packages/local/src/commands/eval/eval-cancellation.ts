@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import * as Schema from 'effect/Schema';
 
 import { errnoCode } from '../../internal/errno-code.js';
-import { isProcessPresent } from '../../internal/process-presence.js';
+import { isProcessPresent, type ProcessPresenceFailure } from '../../internal/process-presence.js';
 import { LocalError } from '../../errors/index.js';
 import { prepareEvalProjectFile } from './eval-project-path.js';
 
@@ -89,7 +89,7 @@ const registryKey = (projectRoot: string, runId: string): string => `${projectRo
 const registerEvalRun = Effect.fn('registerEvalRun')(function* (
   projectRoot: string,
   runId: string,
-): Effect.fn.Return<EvalRegistryHandle, Error, CancellationRegistry | Scope.Scope> {
+): Effect.fn.Return<EvalRegistryHandle, LocalError, CancellationRegistry | Scope.Scope> {
   const localControllers = yield* CancellationRegistry;
 
   const path = yield* prepareEvalProjectFile(
@@ -205,7 +205,11 @@ const parseRegistryRecord = (value: unknown, runId: string): EvalRegistryRecord 
 const signalRegisteredEvalRun = Effect.fn('signalRegisteredEvalRun')(function* (
   projectRoot: string,
   runId: string,
-): Effect.fn.Return<'cancellation_requested' | 'not_active', Error, CancellationRegistry> {
+): Effect.fn.Return<
+  'cancellation_requested' | 'not_active',
+  LocalError | ProcessPresenceFailure,
+  CancellationRegistry
+> {
   const localControllers = yield* CancellationRegistry;
 
   const path = yield* prepareEvalProjectFile(

@@ -1,5 +1,4 @@
-import { AttestError, tryPromiseClassify } from '@attest/contracts';
-import * as Cause from 'effect/Cause';
+import { tryPromiseClassify } from '@attest/contracts';
 import * as Effect from 'effect/Effect';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -15,6 +14,7 @@ import { withStoreScope } from '../store/index.js';
 import { anchoredCall } from '../internal/open-anchored.js';
 import { finishOperation } from '../internal/operation-cleanup.js';
 import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
+import { classifyForeignFailure } from '../errors/index.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 
 /** What the dashboard serves: one project's store, or every project in the registry. */
@@ -117,14 +117,10 @@ const runViewCommand = Effect.fn('runViewCommand')(function* (options: RunViewCo
               Effect.gen(function* () {
                 if (options.onReady !== undefined)
                   yield* Effect.raceFirst(
-                    // An embedder's AttestError (local or cli) keeps its code; any other failure stays unknown.
-                    // The UnknownError message matches the one Effect.tryPromise gives it.
+                    // An embedder's coded error (local or cli) keeps its code; any other stays unknown.
                     tryPromiseClassify(
                       async () => options.onReady?.(server),
-                      (cause) =>
-                        cause instanceof AttestError
-                          ? cause
-                          : new Cause.UnknownError(cause, 'An error occurred in Effect.tryPromise'),
+                      classifyForeignFailure,
                     ),
                     options.signal === undefined
                       ? Effect.never

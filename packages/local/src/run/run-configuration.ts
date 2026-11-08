@@ -16,12 +16,15 @@ import {
   type EvalRun,
   type EvalRunRequest,
 } from '@attest/contracts';
+import type { StoreError } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import * as Exit from 'effect/Exit';
 import { EvalApplication, applicationStore } from '../commands/eval/eval-application.js';
 import { LocalError } from '../errors/index.js';
+import type { AnchoredCleanupFailure, AnchoredFileFailure } from '../internal/open-anchored.js';
+import type { ProcessPresenceFailure } from '../internal/process-presence.js';
 import { createRunIdentity } from '../store/run-store.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
 import {
@@ -119,7 +122,11 @@ const readStoredRun = Effect.fn('readStoredRun')(function* (storePath: string, r
 const runConfiguration = Effect.fn('runConfiguration')(function* (
   request: EvalRunRequest,
   options: RunConfigurationOptions,
-): Effect.fn.Return<AsyncIterable<EvalEvent>, Error, EvalApplication | CancellationRegistry> {
+): Effect.fn.Return<
+  AsyncIterable<EvalEvent>,
+  LocalError | StoreError | AnchoredFileFailure | AnchoredCleanupFailure,
+  EvalApplication | CancellationRegistry
+> {
   const project = yield* loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
@@ -155,7 +162,8 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
 
   const application = yield* EvalApplication;
   const store = yield* applicationStore(project.root);
-  const ready = yield* Deferred.make<void, Error>();
+  // Only registration precedes readiness, so its failure is the only one the caller awaits.
+  const ready = yield* Deferred.make<void, LocalError>();
   const queue = new EvalEventQueue();
 
   const plan = {
@@ -175,7 +183,10 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
 
   const task = Effect.scoped(
     Effect.gen(function* () {
-      const registry = yield* registerEvalRun(project.root, run.run_id);
+      const registry = yield* registerEvalRun(project.root, run.run_id).pipe(
+        Effect.onError((cause) => Deferred.failCause(ready, cause)),
+      );
+
       yield* Deferred.succeed(ready, undefined);
 
       const primary = yield* Effect.exit(
@@ -214,10 +225,7 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
       Effect.gen(function* () {
         const exit = yield* Effect.exit(task);
 
-        if (Exit.isFailure(exit)) {
-          yield* Deferred.failCause(ready, exit.cause);
-          queue.fail(Cause.squash(exit.cause));
-        }
+        if (Exit.isFailure(exit)) queue.fail(Cause.squash(exit.cause));
 
         queue.close();
 
@@ -237,7 +245,11 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
 const cancelConfiguration = Effect.fn('cancelConfiguration')(function* (
   request: EvalCancelRequest,
   options: CancelConfigurationOptions,
-): Effect.fn.Return<CancelConfigurationResult, Error, CancellationRegistry> {
+): Effect.fn.Return<
+  CancelConfigurationResult,
+  LocalError | StoreError | AnchoredFileFailure | AnchoredCleanupFailure | ProcessPresenceFailure,
+  CancellationRegistry
+> {
   const project = yield* loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
