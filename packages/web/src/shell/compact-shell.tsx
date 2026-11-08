@@ -5,6 +5,7 @@ import { MobileNavigation } from './mobile-navigation.js';
 import type { ShellBreadcrumb } from './navigation.js';
 import { useRecents } from './use-recents.js';
 import { useTheme } from './use-theme.js';
+import '../styles/compact/base.css';
 import '../styles/compact/tokens.css';
 import '../styles/compact/shell.css';
 

@@ -1,5 +1,5 @@
 /* Approved Compact tokens. The document root takes them too while a shell is mounted, so the
-   body, overscroll and native scrollbars follow the shell theme instead of the legacy palette. */
+   body, overscroll and native scrollbars follow the shell theme. */
 :root:has(.attest-compact),
 .attest-compact {
   --bg: light-dark(#ffffff, #0c0c0d);
@@ -51,17 +51,6 @@
   --cw: 6px;
   --cg: 2px;
   color-scheme: light;
-  --surface: var(--bg);
-  --surface-muted: var(--panel);
-  --border: var(--line);
-  --accent: var(--ink);
-  --series-1: var(--ink);
-  --accent-strong: var(--ink);
-  --accent-soft: var(--sel);
-  --danger: var(--fail-text);
-  --danger-soft: var(--fail-bg);
-  --warning: var(--muted);
-  --warning-soft: var(--panel);
 }
 :root:has(.attest-compact[data-theme='dark']),
 .attest-compact[data-theme='dark'] {

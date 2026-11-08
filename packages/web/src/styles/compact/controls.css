@@ -1,5 +1,5 @@
 /* Buttons, the New run dialog, form fields and request errors in the Compact tokens. Scoped to the
-   shell so legacy element rules cannot reach in. */
+   shell like pages.css. */
 .attest-compact .attest-btn,
 .attest-compact .attest-btn-2,
 .attest-compact .attest-btn-danger {

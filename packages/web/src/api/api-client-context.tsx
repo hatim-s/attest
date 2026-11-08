@@ -1,5 +1,4 @@
 import { createContext, use, type ReactNode } from 'react';
-import type { ApiClient } from '@attest/api/client';
 import type { DashboardSource } from './dashboard-source.js';
 
 const DashboardSourceContext = createContext<DashboardSource | null>(null);
@@ -22,7 +21,4 @@ const useDashboardSource = (): DashboardSource => {
   return source;
 };
 
-/** The source's client, for the run and case pages that still key queries without a source. */
-const useApiClient = (): ApiClient => useDashboardSource().client;
-
-export { DashboardSourceProvider, useDashboardSource, useApiClient };
+export { DashboardSourceProvider, useDashboardSource };
