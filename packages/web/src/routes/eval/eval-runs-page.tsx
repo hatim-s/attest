@@ -122,7 +122,7 @@ const EvalRunsPage = () => {
 
   return (
     <>
-      <EvalHead projectKey={projectKey} suiteName={suiteName} />
+      <EvalHead projectKey={projectKey} suiteName={suiteName} tab="runs" />
       {body()}
     </>
   );

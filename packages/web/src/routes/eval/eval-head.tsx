@@ -1,11 +1,10 @@
 import { Link } from '@tanstack/react-router';
 import { NewRunButton } from '../new-run/new-run-button.js';
 
-/**
- * The eval's title, its New run control and the two tab labels. The Test cases view is not built
- * yet, so its tab is shown disabled rather than linking to a page that does not exist.
- */
-const EvalHead = ({ projectKey, suiteName }: { projectKey: string; suiteName: string }) => (
+type EvalHeadProps = { projectKey: string; suiteName: string; tab: 'runs' | 'cases' };
+
+/** The eval's title, its New run control and the Runs and Test cases tabs. */
+const EvalHead = ({ projectKey, suiteName, tab }: EvalHeadProps) => (
   <>
     <div className="attest-page-head">
       <div className="attest-page-title">
@@ -20,11 +19,18 @@ const EvalHead = ({ projectKey, suiteName }: { projectKey: string; suiteName: st
         to="/projects/$projectKey/evals/$suiteName/runs"
         params={{ projectKey, suiteName }}
         search={(previous) => ({ x: previous.x ?? 'run' })}
-        aria-current="page"
+        aria-current={tab === 'runs' ? 'page' : undefined}
       >
         Runs
       </Link>
-      <span aria-disabled="true">Test cases</span>
+      <Link
+        to="/projects/$projectKey/evals/$suiteName/cases"
+        params={{ projectKey, suiteName }}
+        search={{ filter: 'all' }}
+        aria-current={tab === 'cases' ? 'page' : undefined}
+      >
+        Test cases
+      </Link>
     </nav>
   </>
 );

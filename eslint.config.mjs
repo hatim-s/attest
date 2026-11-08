@@ -87,6 +87,11 @@ const effectRoots = [
     owner: 'TanStack query callback roots',
   },
   {
+    file: 'packages/web/src/api/queries/cases.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'TanStack query callback roots',
+  },
+  {
     file: 'packages/local/src/view/_tests_/run-view-command.test.ts',
     operations: ['Effect.runPromiseExit', 'Effect.runFork'],
     owner: 'native view command lifetime tests',

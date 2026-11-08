@@ -22,6 +22,11 @@ const queryKeys = {
   /** The Runs tab table, read page by page through the cursor. */
   evalRunPages: (scope: ProjectScope, suiteName: string) =>
     [...queryKeys.project(scope), 'eval-runs', suiteName, 'pages'] as const,
+  /** The Test cases tab and the case page's Previous and Next, read in case id order. */
+  caseWindow: (scope: ProjectScope, suiteName: string) =>
+    [...queryKeys.project(scope), 'case-window', suiteName] as const,
+  caseHistory: (scope: ProjectScope, suiteName: string, caseId: string) =>
+    [...queryKeys.project(scope), 'case-history', suiteName, caseId] as const,
   activity: (scope: ProjectScope, query: ActivityQuery) =>
     [...queryKeys.project(scope), 'activity', query] as const,
   runs: (scope: ProjectScope) => [...queryKeys.project(scope), 'runs'] as const,
