@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApiApp } from '../../server/create-api-app.js';
 import { createApiClient, type ApiClient } from '../api-client.js';
-import { ApiError } from '../api-error.js';
+import { ApiError, ApiRequestError } from '../api-error.js';
 
 const runs: RunRecord[] = ['01ARZ3NDEKTSV4RRFFQ69G5FAV', '01ARZ3NDEKTSV4RRFFQ69G5FAW'].map(
   (id) => ({
@@ -262,7 +262,7 @@ describe('ApiClient', () => {
 
     await expect(
       Effect.runPromiseExit(cancelled.listRuns({ projectKey }, {})).then(valueFromExit),
-    ).rejects.toBe(aborted);
+    ).rejects.toEqual(new ApiRequestError({ message: 'Aborted', cause: aborted }));
   });
 
   it('pages an offline snapshot and gives contract errors for missing identities', async () => {

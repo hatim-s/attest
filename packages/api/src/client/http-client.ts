@@ -7,7 +7,7 @@ import { apiErrorEnvelopeSchema } from '../contract/errors.js';
 import { apiResponses } from '../contract/responses.js';
 import { apiRoutes, buildPath } from '../contract/routes.js';
 import type { ApiClient, RequestOptions } from './api-client.js';
-import { ApiError } from './api-error.js';
+import { ApiError, type ApiRequestError } from './api-error.js';
 import { observeRequest } from './request-observation.js';
 
 /** One call to the API. Only starting a run posts a body. */
@@ -52,7 +52,7 @@ const createHttpClient = (
     schema: S,
     path: string,
     call: ApiCall,
-  ): Effect.Effect<S['Type'], Error> =>
+  ): Effect.Effect<S['Type'], ApiError | ApiRequestError> =>
     Effect.gen(function* () {
       const query = call.method === 'GET' ? call.query : undefined;
       const search = query === undefined || query.size === 0 ? '' : `?${query.toString()}`;
