@@ -23,7 +23,8 @@ abstract class AttestError extends Data.Error {
 
   constructor(code: string, message: string, options?: ErrorOptions) {
     super();
-    Object.defineProperty(this, 'message', {
+    // Native Error keeps message and cause as non-enumerable own properties.
+    void Object.defineProperty(this, 'message', {
       configurable: true,
       enumerable: false,
       value: message,
@@ -31,7 +32,7 @@ abstract class AttestError extends Data.Error {
     });
 
     if (options && 'cause' in options) {
-      Object.defineProperty(this, 'cause', {
+      void Object.defineProperty(this, 'cause', {
         configurable: true,
         enumerable: false,
         value: options.cause,
