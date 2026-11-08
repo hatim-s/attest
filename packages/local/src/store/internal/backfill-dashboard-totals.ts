@@ -1,6 +1,7 @@
 import { summarizeCaseRecord, StoreError } from '@attest/core';
 import { Kysely } from 'kysely';
-import { canonicalTime, historicalPlan } from './dashboard-boundary.js';
+import { canonicalTime } from '@attest/core/records';
+import { historicalPlan } from './dashboard-boundary.js';
 import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import type { Database } from '../schema.js';
 import type { SqliteHandle } from './sqlite-handle.js';

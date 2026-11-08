@@ -1,5 +1,5 @@
 import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
-import { canonicalTime } from './dashboard-boundary.js';
+import { canonicalTime } from '@attest/core/records';
 import { sql, type Kysely } from 'kysely';
 import {
   emptyRunSummary,

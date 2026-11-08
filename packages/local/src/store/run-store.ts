@@ -1,5 +1,5 @@
 import { createLock } from './internal/promise-lock.js';
-import { canonicalTime } from './internal/dashboard-boundary.js';
+import { canonicalTime } from '@attest/core/records';
 import { parseWithSchemaSync } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';

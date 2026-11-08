@@ -3,7 +3,7 @@ import { EVAL_RUN_SCHEMA_ID, parseWithSchemaSync, stripStruct } from '@attest/co
 import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';
 import { storeCall, storeDecode } from './store-effect.js';
-import { canonicalTime, activityBounds } from './dashboard-boundary.js';
+import { canonicalTime, activityBounds } from '@attest/core/records';
 import { summarizeEvalSlices, toEvalSlice } from '@attest/core/analytics';
 import {
   StoreError,
