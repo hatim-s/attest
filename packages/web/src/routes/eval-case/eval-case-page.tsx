@@ -103,19 +103,19 @@ const EvalCasePage = () => {
 
     return (
       <>
-        <div className="attest-hist-sum">
+        <section className="attest-hist-sum" aria-label="History">
+          <p>
+            Passed {passed} of {history.hasNextPage ? `the newest ${runs}` : runs}
+            {outcomes.length > EXACT_STRIP_LIMIT &&
+              `. The strip shows the newest ${EXACT_STRIP_LIMIT}`}
+          </p>
           <CaseHistoryStrip
             projectKey={projectKey}
             suiteName={suiteName}
             caseId={caseId}
             marks={outcomes}
           />
-          <span>
-            Passed {passed} of {history.hasNextPage ? `the newest ${runs}` : runs}
-            {outcomes.length > EXACT_STRIP_LIMIT &&
-              `. The strip shows the newest ${EXACT_STRIP_LIMIT}`}
-          </span>
-        </div>
+        </section>
         <h2 className="attest-sec-h" id="attest-outcomes-h">
           Outcomes by run
         </h2>
