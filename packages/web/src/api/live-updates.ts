@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { hashKey, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProjectRunOverview } from '@attest/core/records';
+import type { DashboardSource } from './dashboard-source.js';
+import { projectOverviewQueryOptions } from './queries/projects.js';
 import { queryKeys, type ProjectScope } from './query-keys.js';
 
 /**
- * The project's trend and activity reads do not poll. When the polled overview reports a run
- * starting (`lastRunAt`) or finishing (`runningRunCount`), every other read of that project is
- * invalidated by key prefix, so open charts pick up the change once instead of on a timer.
+ * The project's trend, table and activity reads do not poll. When the polled overview reports a
+ * run starting (`lastRunAt`) or finishing (`runningRunCount`), every other read of that project is
+ * invalidated by key prefix, so open pages pick up the change once instead of on a timer.
  */
 const useProjectChangeSignal = (
   { sourceId, projectKey }: ProjectScope,
@@ -37,4 +39,17 @@ const useProjectChangeSignal = (
   }, [projectKey, queryClient, signal, sourceId]);
 };
 
-export { useProjectChangeSignal };
+/**
+ * The project's overview, subscribed so it polls while a run executes, with the change signal
+ * attached. Every project page calls this once so its other reads refresh when a run starts or
+ * finishes.
+ */
+const useLiveProjectOverview = (source: DashboardSource, projectKey: string) => {
+  const overview = useQuery(projectOverviewQueryOptions(source, projectKey));
+
+  useProjectChangeSignal({ sourceId: source.id, projectKey }, overview.data);
+
+  return overview;
+};
+
+export { useLiveProjectOverview };

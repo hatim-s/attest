@@ -204,11 +204,11 @@ stable artifact error identities. `report` snapshots carry the record of the pro
 registry on the same port, and cannot be combined with `--store`. See
 [project registry and dashboard](./index.md#project-registry-and-dashboard).
 
-The dashboard and its read API are project scoped. Dashboard routes are `/projects`,
-`/projects/<key>/runs`, `/projects/<key>/runs/<run-id>`,
-`/projects/<key>/runs/<run-id>/cases/<suite-name>/<case-id>`,
-`/projects/<key>/compare/<base-run-id>/<candidate-run-id>`, `/projects/<key>/evals`, and
-`/projects/<key>/evals/<suite-name>`. The read API mirrors them under `/api/projects` and
+The dashboard and its read API are project scoped. Dashboard routes are `/` (every project),
+`/projects/<key>`, `/projects/<key>/runs`, `/projects/<key>/runs/<run-id>` (opens the eval run
+page when the run has one eval, otherwise lists its evals), `/projects/<key>/evals/<eval>/runs`,
+`/projects/<key>/evals/<eval>/runs/<run-id>` and
+`/projects/<key>/evals/<eval>/runs/<run-id>/cases/<case-id>`. The read API mirrors them under `/api/projects` and
 `/api/projects/<key>/runs`. An unknown key returns `PROJECT_NOT_FOUND`.
 
 The dashboard pages read precomputed per-eval totals, so no page pages through case rows to draw

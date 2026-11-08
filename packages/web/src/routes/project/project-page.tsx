@@ -2,11 +2,12 @@ import { getRouteApi } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import type { EvalSummary } from '@attest/core/records';
 import { useDashboardSource } from '../../api/api-client-context.js';
-import { useProjectChangeSignal } from '../../api/live-updates.js';
+import { useLiveProjectOverview } from '../../api/live-updates.js';
 import { evalsQueryOptions } from '../../api/queries/evals.js';
-import { overviewsQueryOptions, projectOverviewQueryOptions } from '../../api/queries/projects.js';
+import { overviewsQueryOptions } from '../../api/queries/projects.js';
 import { EmptyState } from '../../components/empty/empty-state.js';
 import { formatCount } from '../../lib/format.js';
+import { NewRunButton } from '../new-run/new-run-button.js';
 import { ActivityPanel } from './activity-panel.js';
 import { EvalsTable } from './evals-table.js';
 import { PassRatePanel } from './pass-rate-panel.js';
@@ -37,17 +38,13 @@ const ProjectPage = () => {
   const search = route.useSearch();
   const navigate = route.useNavigate();
   const source = useDashboardSource();
-  const scope = { sourceId: source.id, projectKey };
-
-  const overview = useQuery(projectOverviewQueryOptions(source, projectKey));
+  const overview = useLiveProjectOverview(source, projectKey);
   const running = (overview.data?.runningRunCount ?? 0) > 0;
   const evals = useQuery(evalsQueryOptions(source, projectKey, running));
 
   const project = useQuery(overviewsQueryOptions(source)).data?.items.find(
     (entry) => entry.project.key === projectKey,
   )?.project;
-
-  useProjectChangeSignal(scope, overview.data);
 
   const window = projectWindow(search.range, utcToday());
   const rangeName = RANGE_NAMES[search.range];
@@ -68,23 +65,28 @@ const ProjectPage = () => {
             </p>
           )}
         </div>
-        {items.length > 0 && (
-          <div className="attest-page-end">
-            <span className="attest-dim">{rangeLabel(window)}</span>
-            <div className="attest-seg" role="group" aria-label="Period">
-              {PROJECT_RANGES.map((range) => (
-                <button
-                  type="button"
-                  key={range}
-                  aria-pressed={search.range === range}
-                  onClick={() => void navigate({ search: (previous) => ({ ...previous, range }) })}
-                >
-                  {RANGE_NAMES[range]}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="attest-page-end">
+          {items.length > 0 && (
+            <>
+              <span className="attest-dim">{rangeLabel(window)}</span>
+              <div className="attest-seg" role="group" aria-label="Period">
+                {PROJECT_RANGES.map((range) => (
+                  <button
+                    type="button"
+                    key={range}
+                    aria-pressed={search.range === range}
+                    onClick={() =>
+                      void navigate({ search: (previous) => ({ ...previous, range }) })
+                    }
+                  >
+                    {RANGE_NAMES[range]}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <NewRunButton projectKey={projectKey} />
+        </div>
       </div>
       <div className="attest-pcharts">
         <PassRatePanel

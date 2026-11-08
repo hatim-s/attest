@@ -64,10 +64,8 @@ At widths above 960px, the drawer closes and focus moves to the visible sidebar 
 
 ## Chart tokens
 
-Read computed styles from a chart container **inside `.attest-compact`**. The existing
-`use-chart.ts` reads `document.documentElement` and observes that element's theme attribute;
-the chart owner must change that to its shell ancestor/container and observe theme changes
-there, including the OS media query in system mode. No root token mutation is included.
+Charts are SVG styled with these tokens from CSS inside **`.attest-compact`**, so they follow the
+shell theme, including the OS media query in system mode. No root token mutation is included.
 
 Approved tokens include `--bg`, `--text`, `--ink`, `--muted`, `--line`, `--line-2`, `--panel`,
 `--fail`, `--fail-text`, `--fail-bg`, `--fail-soft`, `--grid`, `--area`, `--skip`, `--queued`,

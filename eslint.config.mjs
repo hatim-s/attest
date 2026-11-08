@@ -67,7 +67,7 @@ const effectRoots = [
   },
 
   {
-    file: 'packages/web/src/api/queries.ts',
+    file: 'packages/web/src/api/queries/runs.ts',
     operations: ['Effect.runPromise'],
     owner: 'TanStack query and mutation callback roots',
   },
