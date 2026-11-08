@@ -11,7 +11,6 @@ import { cancelConfiguration, readRequestDocument, runConfiguration } from '@att
 import type { Command } from 'commander';
 import {
   AttestCliError,
-  CliExit,
   renderCliError,
   serializeCliError,
   type SerializedCliFailure,
@@ -80,7 +79,7 @@ const readRunRequest = (
       );
     }
 
-    assertNoEvalFlags(fields.fromJson, command);
+    yield* assertNoEvalFlags(fields.fromJson, command);
 
     const document = yield* readRequestDocument(fields.fromJson, {
       hint: REQUEST_DOCUMENT_HINT,
@@ -92,7 +91,7 @@ const readRunRequest = (
 
     if (output !== undefined) command.setOptionValueWithSource('output', output, 'config');
 
-    return parseEvalRunRequest(document);
+    return yield* parseEvalRunRequest(document);
   });
 
 /** Runs one eval, streaming progress or JSONL, and prints the final result in the chosen mode. */
@@ -204,7 +203,7 @@ const executeEvalRun = (
       }
     }
 
-    if (final.data.exit_code !== 0) return yield* Effect.die(new CliExit(final.data.exit_code));
+    return final.data.exit_code;
   });
 
 /**
@@ -219,10 +218,10 @@ const readCancelRequest = (
 ) =>
   Effect.gen(function* () {
     if (options.fromJson === undefined) {
-      return createEvalCancelRequest({ output: options.output, runId });
+      return yield* createEvalCancelRequest({ output: options.output, runId });
     }
 
-    assertNoEvalFlags(options.fromJson, command);
+    yield* assertNoEvalFlags(options.fromJson, command);
 
     const document = yield* readRequestDocument(options.fromJson, {
       hint: REQUEST_DOCUMENT_HINT,
@@ -236,7 +235,7 @@ const readCancelRequest = (
       command.setOptionValueWithSource('output', output, 'config');
     }
 
-    return parseEvalCancelRequest(document);
+    return yield* parseEvalCancelRequest(document);
   });
 
 /** Registers `eval run` and `eval cancel`, which call the local eval runner directly. */
@@ -290,7 +289,7 @@ const registerEvalCommands = (context: CommandContext): void => {
             );
           }
 
-          yield* executeEvalRun(request, {
+          return yield* executeEvalRun(request, {
             project: options.project,
             signal,
             context,

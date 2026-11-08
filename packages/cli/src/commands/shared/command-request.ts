@@ -27,11 +27,11 @@ type ReadRequestOptions<TCommand extends CommandRequest['command']> = {
   options: RequestSourceFlags & { fromJson: string };
 };
 
-type ReadOrBuildRequestOptions<TCommand extends CommandRequest['command']> = Omit<
+type ReadOrBuildRequestOptions<TCommand extends CommandRequest['command'], E> = Omit<
   ReadRequestOptions<TCommand>,
   'options'
 > & {
-  build: () => Effect.Effect<CommandRequestFor<TCommand>, unknown>;
+  build: () => Effect.Effect<CommandRequestFor<TCommand>, E>;
   options: RequestSourceFlags;
 };
 
@@ -39,18 +39,22 @@ type ReadOrBuildRequestOptions<TCommand extends CommandRequest['command']> = Omi
  * Rejects flags and arguments next to `--from-json`. A request document is complete, so any
  * flag beside it would be silently ignored.
  */
-const assertNoRequestOverlap = (options: RequestSourceFlags, fields: ReadonlySet<string>): void => {
+const assertNoRequestOverlap = Effect.fn('assertNoRequestOverlap')(function* (
+  options: RequestSourceFlags,
+  fields: ReadonlySet<string>,
+) {
   if (options.fromJson === undefined) return;
 
   const conflicts = [...fields].sort();
 
   if (conflicts.length === 0) return;
-  throw new AttestCliError('cli_usage', 'Command request sources overlap.', {
+
+  return yield* new AttestCliError('cli_usage', 'Command request sources overlap.', {
     path: '--from-json',
     hint: 'Pass command values through either flags and arguments or --from-json, not both.',
     details: { conflicting_fields: conflicts },
   });
-};
+});
 
 /** True when the request names stdin as its import source or fixture. */
 const requestReadsStdin = (request: CommandRequest): boolean =>
@@ -65,7 +69,7 @@ const readJsonRequest = <TCommand extends CommandRequest['command']>({
   options,
 }: ReadRequestOptions<TCommand>) =>
   Effect.gen(function* () {
-    assertNoRequestOverlap(options, authoredFieldPresence(leaf));
+    yield* assertNoRequestOverlap(options, authoredFieldPresence(leaf));
 
     const request = yield* readCommandRequest(command, options.fromJson, {
       readStdin: context.interaction.readStdin,
@@ -88,11 +92,11 @@ const readJsonRequest = <TCommand extends CommandRequest['command']>({
  * Returns the `--from-json` request, or validates the one built from flags, through the same
  * published schema. Both routes reach the local command with one shape.
  */
-const readOrBuildRequest = <TCommand extends CommandRequest['command']>({
+const readOrBuildRequest = <TCommand extends CommandRequest['command'], E>({
   build,
   options,
   ...read
-}: ReadOrBuildRequestOptions<TCommand>) =>
+}: ReadOrBuildRequestOptions<TCommand, E>) =>
   Effect.gen(function* () {
     const { fromJson } = options;
 

@@ -33,19 +33,6 @@ class AttestCliError extends AttestError {
 }
 
 /**
- * Ends a command whose result is already printed, with a non-zero exit code. An eval that ran
- * but failed its gate has nothing left to render.
- */
-class CliExit extends Error {
-  readonly exitCode: Exclude<CliExitCode, 0>;
-
-  constructor(exitCode: Exclude<CliExitCode, 0>) {
-    super(`Command exited with code ${exitCode}.`);
-    this.exitCode = exitCode;
-  }
-}
-
-/**
  * Maps any thrown value to a catalog error and exit code. Unknown errors lose their message
  * because it can carry paths, secrets, or stack details.
  */
@@ -111,4 +98,4 @@ const renderCliError = (error: CliError): string => {
   return lines.join('\n');
 };
 
-export { AttestCliError, CliExit, renderCliError, serializeCliError, type SerializedCliFailure };
+export { AttestCliError, renderCliError, serializeCliError, type SerializedCliFailure };

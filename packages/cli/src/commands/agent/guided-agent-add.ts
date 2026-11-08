@@ -17,9 +17,7 @@ const TRANSPORT_FLAGS = [
   'webSocketUrl',
 ] as const satisfies readonly (keyof AgentAddFields)[];
 
-const readTransport = Effect.fn('readTransport')(function* (
-  context: PromptContext,
-): Effect.fn.Return<GuidedTransport, Error> {
+const readTransport = Effect.fn('readTransport')(function* (context: PromptContext) {
   const answer = (yield* ask(context, 'Transport [cli/http/background/jsonl/stream/websocket]: '))
     .trim()
     .toLowerCase();
@@ -48,7 +46,7 @@ const readTransport = Effect.fn('readTransport')(function* (
 
 const promptBackgroundFields = Effect.fn('promptBackgroundFields')(function* (
   context: PromptContext,
-): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+) {
   return {
     backgroundCommand: yield* requiredInput(
       undefined,
@@ -70,9 +68,7 @@ const promptBackgroundFields = Effect.fn('promptBackgroundFields')(function* (
   };
 });
 
-const promptJsonlFields = Effect.fn('promptJsonlFields')(function* (
-  context: PromptContext,
-): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+const promptJsonlFields = Effect.fn('promptJsonlFields')(function* (context: PromptContext) {
   return {
     jsonlCommand: yield* requiredInput(
       undefined,
@@ -90,9 +86,7 @@ const promptJsonlFields = Effect.fn('promptJsonlFields')(function* (
   };
 });
 
-const promptStreamFields = Effect.fn('promptStreamFields')(function* (
-  context: PromptContext,
-): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+const promptStreamFields = Effect.fn('promptStreamFields')(function* (context: PromptContext) {
   return {
     streamUrl: yield* requiredInput(
       undefined,
@@ -114,7 +108,7 @@ const promptStreamFields = Effect.fn('promptStreamFields')(function* (
 
 const promptWebSocketFields = Effect.fn('promptWebSocketFields')(function* (
   context: PromptContext,
-): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+) {
   const webSocketUrl = yield* requiredInput(
     undefined,
     { path: '--websocket-url', question: 'WebSocket URL: ' },
@@ -184,7 +178,7 @@ const promptWebSocketFields = Effect.fn('promptWebSocketFields')(function* (
 const promptTransportFields = Effect.fn('promptTransportFields')(function* (
   fields: AgentAddFields,
   context: PromptContext,
-): Effect.fn.Return<AgentAddFields, Error> {
+) {
   if (!context.interactive || TRANSPORT_FLAGS.some((flag) => fields[flag] !== undefined)) {
     return fields;
   }

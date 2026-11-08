@@ -8,6 +8,7 @@ import {
   type CurlImportFields,
 } from '@attest/local/agent';
 
+import { AttestCliError } from '../../errors/cli-error.js';
 import { commaSeparated, promptChoice, promptDefault, promptOptional } from './agent-prompts.js';
 import { ask, requiredInput, type PromptContext } from '../shared/required-input.js';
 
@@ -21,7 +22,7 @@ const promptCredentialBindings = Effect.fn('promptCredentialBindings')(function*
   fields: CurlFlags,
   curlSource: string,
   context: PromptContext,
-): Effect.fn.Return<CurlFlags, Error> {
+): Effect.fn.Return<CurlFlags, AttestCliError | LocalError> {
   let headerEnv = [...(fields.headerEnv ?? [])];
   let queryEnv = [...(fields.queryEnv ?? [])];
 
@@ -52,7 +53,7 @@ const promptCredentialBindings = Effect.fn('promptCredentialBindings')(function*
 const promptPollingFields = Effect.fn('promptPollingFields')(function* (
   fields: CurlFlags,
   context: PromptContext,
-): Effect.fn.Return<CurlFlags, Error> {
+): Effect.fn.Return<CurlFlags, AttestCliError | LocalError> {
   const polling: CurlFlags = {
     ...fields,
     pollJobIdPointer: yield* promptDefault(
@@ -134,7 +135,7 @@ const promptCurlImportFields = Effect.fn('promptCurlImportFields')(function* (
   fields: CurlFlags,
   curlSource: string,
   context: PromptContext,
-): Effect.fn.Return<CurlImportFields, Error> {
+): Effect.fn.Return<CurlImportFields, AttestCliError | LocalError> {
   if (!context.interactive) {
     return { ...fields, responsePointer: fields.responsePointer ?? '/answer' };
   }
@@ -190,9 +191,7 @@ const isCurlMappingError = (cause: unknown): cause is LocalError => {
 };
 
 /** Asks for replacement body mappings after an import rejected the previous ones. */
-const promptBodyMappings = Effect.fn('promptBodyMappings')(function* (
-  context: PromptContext,
-): Effect.fn.Return<string[] | undefined, Error> {
+const promptBodyMappings = Effect.fn('promptBodyMappings')(function* (context: PromptContext) {
   return commaSeparated(
     yield* ask(
       context,

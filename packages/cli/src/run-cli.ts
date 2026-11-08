@@ -31,12 +31,12 @@ import {
   resolveAttestPaths,
   type CliIo,
   type CommandContext,
+  type CommandProgram,
   type CliServices,
 } from './commands/shared/command-context.js';
 import { registerTestCommands } from './commands/test/registration/register-test-commands.js';
 import {
   AttestCliError,
-  CliExit,
   renderCliError,
   serializeCliError,
   type SerializedCliFailure,
@@ -178,14 +178,7 @@ const runCliApplication = (
   signal: AbortSignal,
 ) =>
   Effect.gen(function* () {
-    let selected:
-      | Effect.Effect<
-          unknown,
-          unknown,
-          | import('@attest/local/eval').EvalApplication
-          | import('@attest/local/eval').CancellationRegistry
-        >
-      | undefined;
+    let selected: CommandProgram | undefined;
 
     let cancellation: Parameters<CommandContext['submit']>[1];
 
@@ -287,7 +280,7 @@ const runCliApplication = (
                 Effect.catchCause((cause) => {
                   const error = Cause.squash(cause);
 
-                  if (!signal.aborted || error instanceof CliExit) return Effect.failCause(cause);
+                  if (!signal.aborted) return Effect.failCause(cause);
 
                   return Effect.fail(
                     new AttestCliError(
@@ -305,7 +298,7 @@ const runCliApplication = (
       // Commander selects the program; its application owner observes the complete command Exit.
       const executed =
         Exit.isFailure(parsed) || execution === undefined
-          ? parsed
+          ? Exit.asVoid(parsed)
           : yield* Effect.exit(execution.pipe(Effect.provideContext(evalContext)));
 
       if (Exit.isFailure(executed)) {
@@ -313,12 +306,11 @@ const runCliApplication = (
         throw Cause.squash(executed.cause);
       }
 
-      return 0;
+      // A command that published its own verdict, such as a failed eval gate, returns its code;
+      // store release can still replace that verdict.
+      return executed.value ?? 0;
     } catch (error: unknown) {
       if (error instanceof CommanderError && error.exitCode === 0) return 0;
-
-      // A terminal eval verdict is complete, so store release can still replace that verdict.
-      if (error instanceof CliExit) return error.exitCode;
 
       const failure = serializeCliError(error);
       // Commander already owns this primary failure; a later store release cannot replace it.

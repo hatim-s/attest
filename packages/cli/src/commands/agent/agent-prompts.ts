@@ -8,7 +8,7 @@ const promptDefault = Effect.fn('promptDefault')(function* (
   question: string,
   fallback: string,
   context: PromptContext,
-): Effect.fn.Return<string, Error> {
+) {
   if (value?.trim()) return value.trim();
 
   if (!context.interactive) return fallback;
@@ -21,7 +21,7 @@ const promptOptional = Effect.fn('promptOptional')(function* (
   value: string | undefined,
   question: string,
   context: PromptContext,
-): Effect.fn.Return<string | undefined, Error> {
+) {
   if (value?.trim()) return value.trim();
 
   if (!context.interactive) return undefined;
@@ -38,7 +38,7 @@ const promptChoice = Effect.fn('promptChoice')(function* <const Choice extends s
   fallback: Choice,
   path: string,
   context: PromptContext,
-): Effect.fn.Return<Choice, Error> {
+) {
   const answer = yield* promptDefault(undefined, question, fallback, context);
   const choice = choices.find((candidate) => candidate === answer);
 
