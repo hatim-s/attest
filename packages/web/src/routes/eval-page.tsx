@@ -7,7 +7,7 @@ import { formatCount, formatDateTime, formatPercent, shortId } from '../lib/form
 
 const formatScore = (value: number) => value.toFixed(3);
 
-const route = getRouteApi('/projects/$projectKey/evals/$suiteName');
+const route = getRouteApi('/projects/$projectKey/workspace/evals/$suiteName');
 
 /** Keeps each measure on its own scale and preserves run provenance beside the charts. */
 const EvalPage = () => {

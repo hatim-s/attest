@@ -113,7 +113,7 @@ const ProjectsPage = () => {
   const projects = projectsQuery.data;
 
   return (
-    <main className="main-content">
+    <div className="main-content">
       <section className="stack" aria-label="Projects">
         <Heading
           level={1}
@@ -133,7 +133,7 @@ const ProjectsPage = () => {
           <ProjectsTable projects={projects} />
         ) : null}
       </section>
-    </main>
+    </div>
   );
 };
 

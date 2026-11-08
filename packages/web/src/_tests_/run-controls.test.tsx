@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { DashboardSourceProvider } from '../api/api-client-context.js';
 import { createDashboardRouter } from '../router.js';
+import { overviewResponse } from './overview-responses.js';
 
 const run: RunRecord = {
   id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -78,6 +79,10 @@ const renderRunsPage = ({
       }
 
       if (path.endsWith('/api/projects')) return Response.json({ items: [project] });
+
+      const overview = overviewResponse(path, [project]);
+
+      if (overview !== undefined) return overview;
 
       if (path.endsWith('/tests')) return Response.json({ items: tests });
 

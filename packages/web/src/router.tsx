@@ -20,12 +20,13 @@ import {
 } from '@tanstack/react-router';
 import * as Schema from 'effect/Schema';
 import { projectsQueryOptions, runsQueryOptions } from './api/queries.js';
+import { projectOverviewQueryOptions } from './api/queries/projects.js';
 import type { DashboardSource } from './api/dashboard-source.js';
 import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
 import { ProjectsPage } from './routes/projects-page.js';
 import { RunsLayout } from './routes/runs-layout.js';
-import { RootLayout } from './routes/root-layout.js';
+import { DashboardFrame } from './routes/frame/dashboard-frame.js';
 import { NewestRun } from './routes/newest-run.js';
 import { RunPage } from './routes/run-page.js';
 import { CaseDrawer } from './routes/case-drawer.js';
@@ -51,7 +52,7 @@ const runSearchSchema = stripStruct({
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
-  component: RootLayout,
+  component: DashboardFrame,
   notFoundComponent: () => <div className="empty-compact">This dashboard page does not exist.</div>,
 });
 
@@ -80,24 +81,31 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 });
 
-const workspaceRoute = createRoute({
+const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectKey',
   params: { parse: (params) => parseWithSchemaSync(projectParamsSchema, params) },
+  // An unknown key fails here, so the error notice replaces the page with the API message.
+  loader: ({ context, params }) =>
+    context.queryClient.ensureQueryData(
+      projectOverviewQueryOptions(context.source, params.projectKey),
+    ),
+});
+
+const projectIndexRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/',
+  beforeLoad: ({ params }) => redirect({ to: '/projects/$projectKey/runs', params }),
+});
+
+/** The run list, run, comparison and eval pages that the compact eval routes will replace. */
+const workspaceRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  id: 'workspace',
   component: RunsLayout,
   validateSearch: Schema.toStandardSchemaV1(runsSearchSchema, {
     parseOptions: { onExcessProperty: 'error', errors: 'all' },
   }),
-  // An unknown key fails here, so the error notice replaces the workspace with the API message.
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(runsQueryOptions(context.source.client, params.projectKey)),
-});
-
-const workspaceIndexRoute = createRoute({
-  getParentRoute: () => workspaceRoute,
-  path: '/',
-  beforeLoad: ({ params, search }) =>
-    redirect({ to: '/projects/$projectKey/runs', params, search }),
 });
 
 const runsRoute = createRoute({
@@ -183,12 +191,14 @@ const evalRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   projectsRoute,
-  workspaceRoute.addChildren([
-    workspaceIndexRoute,
-    runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
-    compareRoute,
-    evalsRoute,
-    evalRoute,
+  projectRoute.addChildren([
+    projectIndexRoute,
+    workspaceRoute.addChildren([
+      runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
+      compareRoute,
+      evalsRoute,
+      evalRoute,
+    ]),
   ]),
 ]);
 

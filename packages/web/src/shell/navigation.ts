@@ -42,7 +42,8 @@ type ShellSource = {
   | { kind: 'report'; capabilities: { control: false } }
 );
 
-type ShellEval = { id: string; name: string };
+/** `failing` follows the eval's last terminal verdict; `running` wins while a slice executes. */
+type ShellEval = { id: string; name: string; mark: 'failing' | 'running' | null };
 
 /** Load only the expanded project's evals; terminal states never announce loading. */
 type NavigationData<T> =
@@ -51,7 +52,8 @@ type NavigationData<T> =
   | { status: 'unavailable'; message: string }
   | { status: 'ready'; items: readonly T[] };
 
-type ShellProject = Pick<ProjectRecord, 'key' | 'name'>;
+/** `failing` marks a collapsed project when any of its evals is failing. */
+type ShellProject = Pick<ProjectRecord, 'key' | 'name'> & { failing: boolean };
 
 type ShellBreadcrumb = { label: string; target: ShellTarget };
 

@@ -2,7 +2,7 @@ import { getRouteApi, useLocation, useNavigate, useRouter } from '@tanstack/reac
 import { useCase, useRun } from '../api/queries.js';
 import { CaseDetail } from '../components/cases/case-detail.js';
 
-const route = getRouteApi('/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId');
+const route = getRouteApi('/projects/$projectKey/workspace/runs/$runId/cases/$suiteName/$caseId');
 
 /**
  * Loads deep-linked evidence without depending on a previously loaded case page. Closing goes

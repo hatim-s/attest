@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ShellLink } from './shell-link.js';
 import { visibleRecents } from './preferences.js';
 import {
@@ -31,6 +32,13 @@ type NavigationProps = {
   onSourceChange: (sourceId: string) => void;
 };
 
+/** A square for a failing verdict, a ring while running; the word is for assistive technology. */
+const NavMark = ({ mark }: { mark: 'failing' | 'running' }) => (
+  <span className="attest-nav-mark" data-mark={mark}>
+    <span className="attest-sr-only">, {mark}</span>
+  </span>
+);
+
 /** The open project owns the eval list; only the open eval expands its two views. */
 const ShellNavigation = ({
   source,
@@ -44,7 +52,7 @@ const ShellNavigation = ({
   onNavigate,
   onSourceChange,
 }: NavigationProps) => {
-  const item = (target: ShellTarget, label: string, inPath = false) => (
+  const item = (target: ShellTarget, label: ReactNode, inPath = false) => (
     <ShellLink
       target={target}
       hrefFor={hrefFor}
@@ -107,7 +115,10 @@ const ShellNavigation = ({
                 <li key={project.key}>
                   {item(
                     { kind: 'project', sourceId: source.id, projectKey: project.key },
-                    project.name,
+                    <>
+                      {project.name}
+                      {!open && project.failing && <NavMark mark="failing" />}
+                    </>,
                     open && current.kind !== 'project',
                   )}
                   {open && (
@@ -143,6 +154,7 @@ const ShellNavigation = ({
                                 inPath={selected}
                               >
                                 {evaluation.name}
+                                {evaluation.mark && <NavMark mark={evaluation.mark} />}
                               </ShellLink>
                               {selected && (
                                 <ul>

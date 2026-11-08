@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { expect, it } from 'vitest';
 import { createDashboardRouter } from '../router.js';
+import { overviewResponse } from './overview-responses.js';
 
 const run: RunRecord = {
   id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -33,7 +34,8 @@ const httpClient = (projects: readonly ProjectRecord[], runs: readonly RunRecord
       const path = input instanceof Request ? input.url : input.toString();
 
       return Promise.resolve(
-        Response.json(path.endsWith('/api/projects') ? { items: projects } : { items: runs }),
+        overviewResponse(path, projects) ??
+          Response.json(path.endsWith('/api/projects') ? { items: projects } : { items: runs }),
       );
     },
   });
@@ -97,7 +99,8 @@ it('encodes suite segments and restores their raw route identity', async () => {
     await router.load();
 
     const match = router.state.matches.find(
-      (item) => item.routeId === '/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId',
+      (item) =>
+        item.routeId === '/projects/$projectKey/workspace/runs/$runId/cases/$suiteName/$caseId',
     );
 
     expect(match?.params).toMatchObject({
@@ -135,7 +138,7 @@ it('redirects a project to its newest run and leaves an empty project at its run
         expect(router.state.location.search).toEqual({ branch: 'main', tab: 'cases' });
       } else {
         expect(router.state.location.pathname).toBe('/projects/demo/runs');
-        expect(router.state.matches.at(-1)?.routeId).toBe('/projects/$projectKey/runs/');
+        expect(router.state.matches.at(-1)?.routeId).toBe('/projects/$projectKey/workspace/runs/');
       }
     });
   }
