@@ -1,4 +1,3 @@
-import { promptEffect } from '../shared/prompt-effect.js';
 import * as Effect from 'effect/Effect';
 import type { CommandRequest, MetricResource, ProjectResources } from '@attest/contracts';
 
@@ -233,10 +232,8 @@ const runMetricMutationCommand = Effect.fn('runMetricMutationCommand')(function*
             ? `Remove metric ${built.metric.id}`
             : JSON.stringify(redactMetricResource(built.metric), undefined, 2);
 
-          const answer = (yield* promptEffect(() =>
-            options.prompt!(
-              `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
-            ),
+          const answer = (yield* options.prompt(
+            `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
           ))
             .trim()
             .toLowerCase();

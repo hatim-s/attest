@@ -32,12 +32,13 @@ describe('agent mutation confirmation', () => {
 
     const addWhilePrompting =
       (expectedLine: string, racer: string): Prompt =>
-      async (question) => {
-        expect(question).toContain(expectedLine);
-        await addAgent(root, agent(racer));
+      (question) =>
+        Effect.promise(async () => {
+          expect(question).toContain(expectedLine);
+          await addAgent(root, agent(racer));
 
-        return 'yes';
-      };
+          return 'yes';
+        });
 
     const add = Effect.runPromiseExit(
       runAgentAddCommand({

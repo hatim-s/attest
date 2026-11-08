@@ -33,7 +33,6 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
         context.submit(
           Effect.gen(function* () {
             const prompt = promptContext(options, context.interaction, context.signal);
-            const { interactive } = prompt;
 
             const request = yield* readOrBuildRequest({
               command: 'metric.rename',
@@ -58,7 +57,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
                 }),
             });
 
-            yield* runMetricMutation(request, options, interactive, context);
+            yield* runMetricMutation(request, options, context);
           }),
         ),
     );
@@ -74,7 +73,6 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
       context.submit(
         Effect.gen(function* () {
           const prompt = promptContext(options, context.interaction, context.signal);
-          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'metric.remove',
@@ -100,7 +98,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
               }),
           });
 
-          yield* runMetricMutation(request, options, interactive, context);
+          yield* runMetricMutation(request, options, context);
         }),
       ),
     );

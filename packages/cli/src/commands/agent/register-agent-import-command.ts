@@ -23,7 +23,7 @@ import {
 import type { CommandContext } from '../shared/command-context.js';
 import { readJsonRequest } from '../shared/command-request.js';
 import { renderCommandResult } from '../shared/command-result.js';
-import { requiredInput } from '../shared/required-input.js';
+import { localPrompt, requiredInput } from '../shared/required-input.js';
 import {
   isCurlMappingError,
   promptBodyMappings,
@@ -101,7 +101,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
               const result = yield* runAgentImportCommand({
                 interactive,
                 project: options.project,
-                prompt: context.interaction.prompt,
+                prompt: localPrompt(prompt),
                 readStdin: context.interaction.readStdin,
                 request,
                 sourceText,

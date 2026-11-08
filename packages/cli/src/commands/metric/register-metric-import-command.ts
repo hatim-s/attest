@@ -29,7 +29,6 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
       context.submit(
         Effect.gen(function* () {
           const prompt = promptContext(options, context.interaction, context.signal);
-          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'metric.import',
@@ -61,7 +60,7 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
               }),
           });
 
-          yield* runMetricMutation(request, options, interactive, context);
+          yield* runMetricMutation(request, options, context);
         }),
       ),
     );

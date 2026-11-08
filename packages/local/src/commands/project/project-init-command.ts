@@ -13,6 +13,7 @@ import { prepareProjectCandidate } from '../../project/transaction/index.js';
 import { registerProject } from '../../registry/index.js';
 import { readCommandRequest } from '../shared/command-request.js';
 import type { ProjectInitResult } from '../shared/command-result.js';
+import type { Prompt } from '../shared/prompt.js';
 import { publishProjectManifest, rollbackPublishedManifest } from './manifest-publish.js';
 
 type ProjectInitCommandOptions = {
@@ -22,7 +23,7 @@ type ProjectInitCommandOptions = {
   fromJson?: string;
   interactive: boolean;
   name?: string;
-  prompt?: (question: string) => Promise<string>;
+  prompt?: Prompt;
   projectDirectory?: string;
   readStdin: () => Promise<string>;
   /** Global project registry the initialized project joins. */
@@ -196,12 +197,7 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
       });
     }
 
-    const prompt = options.prompt;
-    name =
-      (yield* Effect.tryPromise({
-        try: () => prompt(`Project name [${defaultName}]: `),
-        catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-      })).trim() || defaultName;
+    name = (yield* options.prompt(`Project name [${defaultName}]: `)).trim() || defaultName;
   }
 
   name = (name ?? defaultName).trim();

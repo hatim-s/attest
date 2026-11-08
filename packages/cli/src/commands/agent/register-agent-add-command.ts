@@ -24,7 +24,7 @@ import {
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
 import { renderCommandResult } from '../shared/command-result.js';
-import { requiredInput } from '../shared/required-input.js';
+import { localPrompt, requiredInput } from '../shared/required-input.js';
 import { promptTransportFields } from './guided-agent-add.js';
 
 /** Fields whose flag spelling does not camel-case to the local field name. */
@@ -224,7 +224,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
           const result = yield* runAgentAddCommand({
             interactive,
             project: options.project,
-            prompt: context.interaction.prompt,
+            prompt: localPrompt(prompt),
             request,
             workingDirectory: context.workingDirectory,
           });

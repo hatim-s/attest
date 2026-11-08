@@ -141,18 +141,15 @@ describe('native project initialization', () => {
     expect(await readdir(options.workingDirectory)).toEqual([]);
   });
 
-  it('preserves a rejected prompt for generic CLI serialization', async () => {
+  it('keeps a failed prompt as a defect for generic CLI serialization', async () => {
     const options = await fixture();
     const failure = new Error('private prompt failure');
-    await expect(
-      Effect.runPromiseExit(
-        runProjectInitCommand({
-          ...options,
-          interactive: true,
-          prompt: () => Promise.reject(failure),
-        }),
-      ).then(valueFromExit),
-    ).rejects.toBe(failure);
+
+    const exit = await Effect.runPromiseExit(
+      runProjectInitCommand({ ...options, interactive: true, prompt: () => Effect.die(failure) }),
+    );
+
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(failure);
   });
 
   it('rolls back on interruption during verification without registering', async () => {

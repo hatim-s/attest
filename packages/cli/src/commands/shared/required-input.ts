@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect';
+import { LocalError } from '@attest/local';
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CliPrompt } from './cli-interaction.js';
 
@@ -43,6 +44,15 @@ const ask = Effect.fn('ask')(function* (context: PromptContext, question: string
   return yield* Effect.raceFirst(answer, cancellation);
 });
 
+/**
+ * Lends `ask` to a local command, such as a mutation confirmation. Its only failure is
+ * cancellation, reported in local's own error vocabulary with the same code and message.
+ */
+const localPrompt = (context: PromptContext) => (question: string) =>
+  ask(context, question).pipe(
+    Effect.mapError(() => new LocalError('cancelled', 'Command cancelled.')),
+  );
+
 /** Returns the flag value, else asks for it on a terminal, else reports it as missing input. */
 const requiredInput = Effect.fn('requiredInput')(function* (
   value: string | undefined,
@@ -70,4 +80,4 @@ const requiredInput = Effect.fn('requiredInput')(function* (
   );
 });
 
-export { ask, requiredInput, type PromptContext };
+export { ask, localPrompt, requiredInput, type PromptContext };

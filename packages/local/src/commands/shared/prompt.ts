@@ -1,4 +1,11 @@
-/** Asks one terminal question; the signal closes a pending readline question on cancellation. */
-type Prompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
+import type * as Effect from 'effect/Effect';
+
+import type { LocalError } from '../../errors/index.js';
+
+/**
+ * Asks one terminal question. The host owns cancellation: a cancelled question fails with a
+ * `cancelled` LocalError, and an unexpected terminal failure is a defect.
+ */
+type Prompt = (question: string) => Effect.Effect<string, LocalError>;
 
 export { type Prompt };

@@ -14,7 +14,7 @@ import {
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
 import { renderCommandResult } from '../shared/command-result.js';
-import { requiredInput } from '../shared/required-input.js';
+import { localPrompt, requiredInput } from '../shared/required-input.js';
 
 type RemoveOptions = MutationCliOptions & { detach?: boolean };
 
@@ -64,7 +64,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
           const result = yield* runAgentRenameCommand({
             interactive,
             project: options.project,
-            prompt: context.interaction.prompt,
+            prompt: localPrompt(prompt),
             request,
             workingDirectory: context.workingDirectory,
           });
@@ -116,7 +116,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
           const result = yield* runAgentRemoveCommand({
             interactive,
             project: options.project,
-            prompt: context.interaction.prompt,
+            prompt: localPrompt(prompt),
             request,
             workingDirectory: context.workingDirectory,
           });
