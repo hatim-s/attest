@@ -1,24 +1,8 @@
 # Compact shell integration
 
-`CompactShell` imports `tokens.css` and `shell.css` explicitly. `Tag`/`Tags` and
-`EmptyState` import their own scoped styles. Render these components inside the shell.
-
-The example below lives in `src/`.
-
-```tsx
-import { CompactShell, type CompactShellProps } from './shell/compact-shell.js';
-import { Tags } from './components/tags/tag.js';
-
-/** Receives adapted, source-scoped data from the integration owner's loader. */
-const DashboardFrame = (props: CompactShellProps) => (
-  <CompactShell {...props}>
-    <Tags names={['smoke', 'policy']} />
-    {props.children}
-  </CompactShell>
-);
-
-export { DashboardFrame };
-```
+`CompactShell` imports `base.css` (the element reset), `tokens.css` and `shell.css`
+explicitly. `EmptyState` and each page import their own scoped styles. Render these
+components inside the shell. `routes/frame/dashboard-frame.tsx` is the integration owner.
 
 `source` is the active host; `sources` contains only real available hosts including it.
 For reports use `kind: 'report', capabilities: { control: false }`. Local and cloud
@@ -69,11 +53,8 @@ shell theme, including the OS media query in system mode. No root token mutation
 
 Approved tokens include `--bg`, `--text`, `--ink`, `--muted`, `--line`, `--line-2`, `--panel`,
 `--fail`, `--fail-text`, `--fail-bg`, `--fail-soft`, `--grid`, `--area`, `--skip`, `--queued`,
-`--span`, `--span-run`, `--sans`, `--tight` and `--mono`. Existing-token aliases are
-`--surface` = background, `--surface-muted` = panel, `--border` = line,
-`--accent`/`--accent-strong`/`--series-1` = ink, `--accent-soft` = selection,
-`--danger` = failure text, `--danger-soft` = failure background,
-`--warning` = muted, `--warning-soft` = panel. Orange remains reserved for failures/errors.
+`--span`, `--span-run`, `--sans`, `--tight` and `--mono`. Orange remains reserved for
+failures/errors.
 
 `EmptyState` takes a title, explanation, optional caller-authored CLI command and optional
 supported action. For example, distinguish no runs from no cases before the first run;
@@ -97,8 +78,7 @@ last ancestor and current crumb remain. Font family tokens match the mock, but t
 must supply Inter, Inter Tight and IBM Plex Mono for exact font fidelity. No font fetch is
 performed by these components.
 
-Integration owners must remove the legacy root theme owner, scope chart theme observation
-to the shell and system media query, and handle document/body/scrollbar theme styling.
-They also own real router hrefs and DTO adapters. Keep these responsibilities out of the
-foundation components. EmptyState styles only its built-in title, description, command and
+The integration owner scopes chart theme observation to the shell and system media query,
+and owns router hrefs and DTO adapters. Keep these responsibilities out of the foundation
+components. EmptyState styles only its built-in title, description, command and
 action; arbitrary children, including primary and danger Buttons, retain caller styles.

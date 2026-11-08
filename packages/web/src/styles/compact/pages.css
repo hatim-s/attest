@@ -1,6 +1,5 @@
-/* Page layout shared by the compact directory and project pages. Every rule is scoped to the
-   shell so the legacy stylesheet's element rules cannot reach in, and its class names cannot
-   collide with legacy ones. */
+/* Page layout shared by every Compact page. Every rule is scoped to the shell, so it outranks the
+   element reset in base.css and applies only inside the dashboard. */
 .attest-compact .attest-page-head {
   display: flex;
   flex-wrap: wrap;
@@ -154,6 +153,10 @@
 }
 .attest-compact .attest-mark[data-tone='failing'] {
   background: var(--fail);
+}
+.attest-compact .attest-mark[data-tone='skipped'] {
+  background: repeating-linear-gradient(135deg, transparent 0 2px, var(--skip) 2px 3px);
+  box-shadow: inset 0 0 0 1px var(--skip);
 }
 .attest-compact .attest-mark[data-tone='running'] {
   border-radius: 50%;

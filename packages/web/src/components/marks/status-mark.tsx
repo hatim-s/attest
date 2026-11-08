@@ -1,4 +1,4 @@
-type StatusTone = 'failing' | 'passing' | 'running' | 'stopped' | 'run-failed';
+type StatusTone = 'failing' | 'passing' | 'skipped' | 'running' | 'stopped' | 'run-failed';
 
 /**
  * A square for a verdict, a circle for a lifecycle state. It is decorative: the caller always

@@ -1,0 +1,97 @@
+/* The eval Test cases tab and the case page. Scoped to the shell like pages.css. */
+.attest-compact .attest-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 0 0 14px;
+}
+.attest-compact .attest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.attest-compact .attest-chips button {
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--sans);
+  cursor: pointer;
+}
+.attest-compact .attest-chips button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.attest-compact .attest-chips button[aria-pressed='true'] {
+  color: var(--ink);
+  background: var(--sel);
+}
+.attest-compact .attest-chips button span {
+  margin-left: 4px;
+  font-weight: 400;
+}
+.attest-compact .attest-chips button[data-hot='true'] span {
+  color: var(--fail-text);
+}
+.attest-compact .attest-link-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 500 12.5px var(--sans);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.attest-compact .attest-link-btn:hover {
+  text-decoration-color: var(--ink);
+}
+.attest-compact .attest-foot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 12.5px;
+}
+.attest-compact .attest-table .attest-pos-c {
+  width: 1%;
+}
+.attest-compact .attest-case-id {
+  overflow-wrap: anywhere;
+}
+.attest-compact .attest-table .attest-case-id .attest-rowlink {
+  font: 500 12.5px var(--mono);
+}
+.attest-compact .attest-cases-table td {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+/* Rows repeat the strip, so its key would repeat on every row. Each mark names its result. */
+.attest-compact .attest-cases-table .attest-strip-key {
+  display: none;
+}
+/* "Passed 8 of 10 runs" and the case page's strip, under its title. */
+.attest-compact .attest-hist-sum {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin: -8px 0 0;
+}
+.attest-compact .attest-hist-sum > p {
+  margin: 0;
+  color: var(--ink);
+  font: 600 17px/1.3 var(--tight);
+  letter-spacing: -0.015em;
+}
+.attest-compact .attest-hist-sum .attest-strip-key {
+  color: var(--muted);
+}
+
+@media (max-width: 800px) {
+  .attest-compact .attest-chips button {
+    min-height: 36px;
+  }
+}

@@ -1,0 +1,53 @@
+/* Element reset for the whole document. It sits in a layer, so every unlayered Compact rule wins
+   over it whatever its specificity. Colours, fonts and sizes come from tokens.css and the shell. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid;
+  }
+  html {
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    min-width: 320px;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+  b,
+  strong {
+    font-weight: bolder;
+  }
+  code,
+  pre {
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 1em;
+  }
+  small {
+    font-size: 80%;
+  }
+  button,
+  select {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    opacity: 1;
+    background-color: transparent;
+    border-radius: 0;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}

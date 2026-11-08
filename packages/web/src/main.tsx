@@ -10,7 +10,6 @@ import { DashboardSourceProvider } from './api/api-client-context.js';
 import { createDashboardSource } from './api/dashboard-source.js';
 import { RouterProvider, createHashHistory } from '@tanstack/react-router';
 import { createDashboardRouter } from './router.js';
-import './styles.css';
 
 declare global {
   interface Window {

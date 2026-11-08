@@ -2,11 +2,7 @@ import { linkOptions } from '@tanstack/react-router';
 import type { ShellBreadcrumb, ShellTarget } from '../../shell/navigation.js';
 import { shortRunId } from '../../lib/format.js';
 
-/**
- * The router destination for every shell target. A case in a project-wide run opens in its eval.
- * The Test cases tab and case page do not exist yet, so their targets open the eval's Runs tab
- * instead of a dead link.
- */
+/** The router destination for every shell target. A case in a project-wide run opens in its eval. */
 const targetLink = (target: ShellTarget) => {
   switch (target.kind) {
     case 'projects':
@@ -43,12 +39,25 @@ const targetLink = (target: ShellTarget) => {
         },
       });
     case 'runs':
-    case 'cases':
-    case 'case':
       return linkOptions({
         to: '/projects/$projectKey/evals/$suiteName/runs',
         params: { projectKey: target.projectKey, suiteName: target.evalId },
         search: { x: 'run' },
+      });
+    case 'cases':
+      return linkOptions({
+        to: '/projects/$projectKey/evals/$suiteName/cases',
+        params: { projectKey: target.projectKey, suiteName: target.evalId },
+        search: { filter: 'all' },
+      });
+    case 'case':
+      return linkOptions({
+        to: '/projects/$projectKey/evals/$suiteName/cases/$caseId',
+        params: {
+          projectKey: target.projectKey,
+          suiteName: target.evalId,
+          caseId: target.caseId,
+        },
       });
   }
 };

@@ -3,7 +3,7 @@
   --chart-fail: var(--fail, #ff5c00);
   --chart-fail-soft: var(--fail-soft, #ffc29c);
   --chart-decline: var(--fail-text, #9a4619);
-  --chart-line: var(--line, var(--border, GrayText));
+  --chart-line: var(--line, GrayText);
   color: var(--chart-ink);
   min-width: 0;
   width: 100%;
@@ -174,7 +174,6 @@
 }
 
 /* Explicit scoped colors also cover engines without light-dark(). */
-:where(:root[data-theme='dark']) .attest-compact-chart,
 .attest-compact[data-theme='dark'] .attest-compact-chart {
   --chart-fail: var(--fail, #ff6a1a);
   --chart-fail-soft: var(--fail-soft, #9a4619);
@@ -186,7 +185,6 @@
   --chart-decline: var(--fail-text, #9a4619);
 }
 @media (prefers-color-scheme: dark) {
-  :where(:root:not([data-theme]), :root[data-theme='system']) .attest-compact-chart,
   .attest-compact[data-theme='system'] .attest-compact-chart {
     --chart-fail: var(--fail, #ff6a1a);
     --chart-fail-soft: var(--fail-soft, #9a4619);

@@ -3,6 +3,7 @@ import * as Option from 'effect/Option';
 import { stripStruct, SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import {
+  caseHistoryParamsSchema,
   caseParamsSchema,
   evalParamsSchema,
   projectParamsSchema,
@@ -24,6 +25,9 @@ import type { DashboardSource } from './api/dashboard-source.js';
 import { EmptyState } from './components/empty/empty-state.js';
 import { DirectoryPage } from './routes/directory/directory-page.js';
 import { EvalRunsPage } from './routes/eval/eval-runs-page.js';
+import { CASE_FILTERS } from './routes/eval-cases/case-standing.js';
+import { EvalCasesPage } from './routes/eval-cases/eval-cases-page.js';
+import { EvalCasePage } from './routes/eval-case/eval-case-page.js';
 import { EvalRunPage } from './routes/eval-run/eval-run-page.js';
 import { DashboardFrame } from './routes/frame/dashboard-frame.js';
 import { ProjectPage } from './routes/project/project-page.js';
@@ -53,6 +57,16 @@ const evalRunsSearchSchema = stripStruct({
   x: Schema.Literals(['run', 'date'])
     .pipe(Schema.withDecodingDefault(Effect.succeed('run')))
     .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some('run')))),
+});
+
+/** `q` searches case ids; `filter` picks the All, Failing or Flaky chip. */
+const evalCasesSearchSchema = stripStruct({
+  q: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
+    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+  ),
+  filter: Schema.Literals(CASE_FILTERS)
+    .pipe(Schema.withDecodingDefault(Effect.succeed(CASE_FILTERS[0])))
+    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(CASE_FILTERS[0])))),
 });
 
 const NotFound = () => (
@@ -150,6 +164,26 @@ const evalRunsRoute = createRoute({
   component: EvalRunsPage,
 });
 
+const evalCasesRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: 'cases',
+  validateSearch: Schema.toStandardSchemaV1(evalCasesSearchSchema, strictSearch),
+  component: EvalCasesPage,
+});
+
+const evalCaseRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: 'cases/$caseId',
+  params: {
+    parse: (params) =>
+      parseWithSchemaSync(
+        stripStruct({ caseId: caseHistoryParamsSchema.from.schema.fields.caseId }),
+        params,
+      ),
+  },
+  component: EvalCasePage,
+});
+
 const evalRunRoute = createRoute({
   getParentRoute: () => evalRoute,
   path: 'runs/$runId',
@@ -182,7 +216,14 @@ const routeTree = rootRoute.addChildren([
     projectIndexRoute,
     projectRunsRoute,
     projectRunRoute,
-    evalRoute.addChildren([evalIndexRoute, evalRunsRoute, evalRunRoute, runCaseRoute]),
+    evalRoute.addChildren([
+      evalIndexRoute,
+      evalRunsRoute,
+      evalCasesRoute,
+      evalCaseRoute,
+      evalRunRoute,
+      runCaseRoute,
+    ]),
   ]),
 ]);
 
