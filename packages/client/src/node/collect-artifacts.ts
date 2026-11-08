@@ -3,7 +3,7 @@ import { parseWithSchema, artifactPathSchema, type InlineArtifact } from '@attes
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
-import { listFiles } from './workspace-files.js';
+import { listFiles, WorkspaceFileError } from './workspace-files.js';
 
 // Keeps a base64-heavy completion under the executor's default 10 MiB response_bytes cap.
 const DEFAULT_MAX_BYTES = 4 * 1024 * 1024;
@@ -95,7 +95,7 @@ const collectArtifacts = (
     maxBytes = DEFAULT_MAX_BYTES,
     maxCount = DEFAULT_MAX_COUNT,
   }: CollectArtifactsOptions = {},
-): Effect.Effect<CollectedArtifacts, Error> =>
+): Effect.Effect<CollectedArtifacts, WorkspaceFileError> =>
   Effect.gen(function* () {
     const artifacts: InlineArtifact[] = [];
     const skipped: SkippedFile[] = [];
@@ -120,7 +120,7 @@ const collectArtifacts = (
         totalBytes +
           (yield* Effect.tryPromise({
             try: () => stat(absolute),
-            catch: (cause) => new Error('Artifact stat failed.', { cause }),
+            catch: (cause) => new WorkspaceFileError({ operation: 'stat', path: absolute, cause }),
           })).size >
         maxBytes
       ) {
@@ -130,7 +130,7 @@ const collectArtifacts = (
 
       const bytes = yield* Effect.tryPromise({
         try: () => readFile(absolute),
-        catch: (cause) => new Error('Artifact read failed.', { cause }),
+        catch: (cause) => new WorkspaceFileError({ operation: 'read', path: absolute, cause }),
       });
 
       // The file may have grown between stat and read.

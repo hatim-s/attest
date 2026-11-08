@@ -1,4 +1,5 @@
 import type { CliDiagnostics } from '@attest/core/records';
+import * as Data from 'effect/Data';
 
 import type { ApiErrorCode } from '../contract/errors.js';
 
@@ -23,4 +24,13 @@ class ApiError extends Error {
   }
 }
 
-export { ApiError };
+/**
+ * A fetch or body read that failed before the API answered. Keeps the foreign failure's
+ * message so callers that render `error.message` show the same text as before.
+ */
+class ApiRequestError extends Data.TaggedError('ApiRequestError')<{
+  message: string;
+  cause: unknown;
+}> {}
+
+export { ApiError, ApiRequestError };

@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit } from 'effect';
 import { withCleanup } from './lifetime.js';
+import { RunnerIoError } from './runner-errors.js';
 
 /** Reads capped UTF-8 input and always cancels and releases the reader. */
 const readBoundedText = (request: Request, maxBytes: number) =>
@@ -17,7 +18,7 @@ const readBoundedText = (request: Request, maxBytes: number) =>
         for (;;) {
           const { done, value } = yield* Effect.tryPromise({
             try: () => reader.read(),
-            catch: (cause) => new Error('Request body failed.', { cause }),
+            catch: (cause) => new RunnerIoError({ operation: 'read_body', cause }),
           }).pipe(Effect.timeout(10_000));
 
           if (done) break;
@@ -39,9 +40,10 @@ const readBoundedText = (request: Request, maxBytes: number) =>
       }).pipe(Effect.timeout(10_000)),
       Effect.gen(function* () {
         const cancelled = yield* Effect.exit(
-          Effect.tryPromise({ try: () => reader.cancel(), catch: (cause) => cause }).pipe(
-            Effect.timeout(1_000),
-          ),
+          Effect.tryPromise({
+            try: () => reader.cancel(),
+            catch: (cause) => new RunnerIoError({ operation: 'cancel_body', cause }),
+          }).pipe(Effect.timeout(1_000)),
         );
 
         const released = yield* Effect.exit(Effect.sync(() => reader.releaseLock()));

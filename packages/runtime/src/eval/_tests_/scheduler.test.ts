@@ -13,6 +13,7 @@ import {
   failingMetric,
   passingMetric,
 } from './support/eval-fixtures.js';
+import { TestFailure, toTestFailure } from '../../_tests_/support/test-failure.js';
 
 /** A runner whose cases finish only when the test completes them, recording start order. */
 const controlledRunner = (plan: ResolvedEvalPlan<string>) => {
@@ -32,7 +33,7 @@ const controlledRunner = (plan: ResolvedEvalPlan<string>) => {
 
         return yield* Effect.tryPromise({
           try: () => completion.promise,
-          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+          catch: toTestFailure,
         });
       }),
   };
@@ -62,7 +63,7 @@ describe('case scheduling', () => {
         persistenceStarted.resolve();
         yield* Effect.tryPromise({
           try: () => releasePersistence.promise,
-          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+          catch: toTestFailure,
         });
       }),
     );
@@ -179,7 +180,7 @@ describe('case scheduling', () => {
 
     const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>((_runId, resolvedCase) =>
       resolvedCase.case_id === 'a'
-        ? Effect.fail(new Error('worker directory corrupted'))
+        ? Effect.fail(new TestFailure({ message: 'worker directory corrupted' }))
         : Effect.succeed(completedExecution(resolvedCase, [passingMetric()])),
     );
 
@@ -249,7 +250,8 @@ describe('case scheduling', () => {
         persistence.adapter,
         new AbortController().signal,
         (event) => {
-          if (event.event === 'case_completed') return Effect.fail(new Error('event is too large'));
+          if (event.event === 'case_completed')
+            return Effect.fail(new TestFailure({ message: 'event is too large' }));
 
           return Effect.void;
         },
@@ -268,7 +270,7 @@ describe('case scheduling', () => {
 
     const executeCase = vi
       .fn<EvalCaseRunner<string>['executeCase']>()
-      .mockReturnValue(Effect.fail(new Error('failed before abort')));
+      .mockReturnValue(Effect.fail(new TestFailure({ message: 'failed before abort' })));
 
     const execution = Effect.runPromise(
       executeCases(
@@ -283,7 +285,7 @@ describe('case scheduling', () => {
               secondStart.resolve();
               yield* Effect.tryPromise({
                 try: () => releaseSecondStart.promise,
-                catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+                catch: toTestFailure,
               });
             }
           }),

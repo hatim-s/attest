@@ -112,7 +112,7 @@ const verifyJUnitPayload = Effect.fn('verifyJUnitPayload')(function* (payload: E
       hash: createHash('sha256').update(payload.contents, 'utf8').digest('hex'),
     }),
     catch: (cause) =>
-      cause instanceof Error ? cause : new Error('Invalid JUnit payload.', { cause }),
+      new LocalError('output_write_failed', 'JUnit integrity metadata is invalid.', { cause }),
   });
 
   if (bytes !== payload.byte_length || hash !== payload.sha256) {

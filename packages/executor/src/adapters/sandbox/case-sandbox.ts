@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
 import { foreign } from '../../isolation/operation.js';
+import { EnvironmentOperationError } from '../../isolation/environment-error.js';
 import type { VercelSandboxCredentials } from './credentials.js';
 import type { VercelSandboxCreateParams, VercelSandboxFactory, VercelSandboxSdk } from './types.js';
 
@@ -62,9 +63,7 @@ const stopCaseSandbox = Effect.fn('stopCaseSandbox')(function* (
   );
 
   if (Option.isNone(stopped))
-    return yield* Effect.fail(
-      new Error('Sandbox stop was not confirmed before cleanup timed out.'),
-    );
+    return yield* new EnvironmentOperationError({ reason: 'sandbox_stop_unconfirmed' });
 });
 
 export { DEFAULT_CLEANUP_TIMEOUT_MS, createCaseSandbox, stopCaseSandbox };

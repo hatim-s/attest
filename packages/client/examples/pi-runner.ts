@@ -8,8 +8,9 @@ const program = Effect.scoped(
   Effect.gen(function* () {
     const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
 
+    // A missing token is a deployment mistake, so stop the process instead of recovering.
     if (triggerToken === undefined)
-      return yield* Effect.fail(new Error('Set ATTEST_TRIGGER_TOKEN.'));
+      return yield* Effect.die(new Error('Set ATTEST_TRIGGER_TOKEN.'));
 
     const runner = yield* createAgentRunner({
       handler: createPiHandler({

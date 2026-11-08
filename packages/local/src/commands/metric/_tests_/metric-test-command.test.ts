@@ -22,6 +22,7 @@ import { writeFixtureProject } from '../../../_tests_/support/project-transactio
 import { REDACTED } from '../../../internal/redaction.js';
 import { runMetricMutationCommand } from '../metric-mutation-command.js';
 import { runMetricTestCommand } from '../metric-test-command.js';
+import { LocalError } from '../../../errors/index.js';
 
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
 
@@ -67,7 +68,7 @@ const addMetric = (root: string, metric: MetricResource) =>
     runMetricMutationCommand({
       interactive: false,
       project: root,
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      readStdin: () => Promise.reject(new LocalError('cli_usage', 'stdin must not be read')),
       request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'metric.add', metric },
       workingDirectory: root,
     }),

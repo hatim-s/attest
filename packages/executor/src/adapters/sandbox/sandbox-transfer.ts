@@ -2,6 +2,7 @@ import * as Cause from 'effect/Cause';
 import * as Exit from 'effect/Exit';
 import * as Effect from 'effect/Effect';
 import { foreign, withRelease } from '../../isolation/operation.js';
+import { EnvironmentOperationError } from '../../isolation/environment-error.js';
 import { constants } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, posix, relative, resolve, sep } from 'node:path';
@@ -30,7 +31,7 @@ const assertNoSymlinkComponents = Effect.fn(function* (
   allowMissing: boolean,
 ) {
   if (!isContained(root, path))
-    return yield* Effect.fail(new TypeError(`Host path escapes its root: ${path}`));
+    return yield* new EnvironmentOperationError({ reason: 'host_path_escape', path });
   const fromRoot = relative(root, path);
   let current = root;
 
@@ -39,7 +40,7 @@ const assertNoSymlinkComponents = Effect.fn(function* (
 
     const stats = yield* foreign(() => lstat(current)).pipe(
       Effect.catchIf(
-        (error) => allowMissing && errnoCode(error) === 'ENOENT',
+        (error) => allowMissing && errnoCode(error.cause) === 'ENOENT',
         () => Effect.succeed(undefined),
       ),
     );
@@ -47,7 +48,7 @@ const assertNoSymlinkComponents = Effect.fn(function* (
     if (stats === undefined) return;
 
     if (stats.isSymbolicLink())
-      return yield* Effect.fail(new TypeError(`Host path contains a symbolic link: ${current}`));
+      return yield* new EnvironmentOperationError({ reason: 'host_path_symlink', path: current });
   }
 }, Effect.uninterruptible);
 
@@ -68,11 +69,9 @@ const readBoundedHostFile = Effect.fn(function* (
     bytes += read.bytesRead;
 
     if (bytes > responseBytes) {
-      return yield* Effect.fail(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'Sandbox upload grew beyond limits.response_bytes while reading.',
-        ),
+      return yield* new AgentInvocationError(
+        'output_cap_exceeded',
+        'Sandbox upload grew beyond limits.response_bytes while reading.',
       );
     }
 
@@ -99,16 +98,15 @@ const loadExplicitUploads = Effect.fn(function* (
         const stats = yield* foreign(() => handle.stat());
 
         if (!stats.isFile())
-          return yield* Effect.fail(
-            new TypeError(`Sandbox upload is not a regular file: ${upload.source}`),
-          );
+          return yield* new EnvironmentOperationError({
+            reason: 'upload_not_regular_file',
+            path: upload.source,
+          });
 
         if (stats.size > responseBytes) {
-          return yield* Effect.fail(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              `Sandbox upload exceeds limits.response_bytes: ${upload.source}`,
-            ),
+          return yield* new AgentInvocationError(
+            'output_cap_exceeded',
+            `Sandbox upload exceeds limits.response_bytes: ${upload.source}`,
           );
         }
 
@@ -116,11 +114,9 @@ const loadExplicitUploads = Effect.fn(function* (
         totalBytes += content.length;
 
         if (totalBytes > responseBytes) {
-          return yield* Effect.fail(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              'Sandbox uploads exceed limits.response_bytes in aggregate.',
-            ),
+          return yield* new AgentInvocationError(
+            'output_cap_exceeded',
+            'Sandbox uploads exceed limits.response_bytes in aggregate.',
           );
         }
 
@@ -175,21 +171,17 @@ const assertRemoteRegularFile = Effect.fn(function* (
     current = posix.join(current, segment);
 
     if (yield* runFileTest(sandbox, '-L', current, timeoutMs, signal)) {
-      return yield* Effect.fail(
-        new AgentInvocationError(
-          'network',
-          `Sandbox artifact path contains a symbolic link: ${path}`,
-        ),
+      return yield* new AgentInvocationError(
+        'network',
+        `Sandbox artifact path contains a symbolic link: ${path}`,
       );
     }
   }
 
   if (!(yield* runFileTest(sandbox, '-f', path, timeoutMs, signal))) {
-    return yield* Effect.fail(
-      new AgentInvocationError(
-        'network',
-        `Sandbox artifact is missing or not a regular file: ${path}`,
-      ),
+    return yield* new AgentInvocationError(
+      'network',
+      `Sandbox artifact is missing or not a regular file: ${path}`,
     );
   }
 }, Effect.uninterruptible);
@@ -227,11 +219,9 @@ const readRemoteFile = Effect.fn(function* (
         bytes += buffer.length;
 
         if (bytes > responseBytes)
-          return yield* Effect.fail(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              `Sandbox artifact exceeds limits.response_bytes: ${path}`,
-            ),
+          return yield* new AgentInvocationError(
+            'output_cap_exceeded',
+            `Sandbox artifact exceeds limits.response_bytes: ${path}`,
           );
         chunks.push(buffer);
       }
@@ -266,9 +256,10 @@ const publishTerminalArtifacts = Effect.fn(function* (
   const configuredRoot = resolve(configuredArtifactRoot);
 
   if (!isContained(configuredProjectRoot, configuredRoot)) {
-    return yield* Effect.fail(
-      new TypeError(`Artifact root escapes the project root: ${configuredArtifactRoot}`),
-    );
+    return yield* new EnvironmentOperationError({
+      reason: 'artifact_root_escape',
+      path: configuredArtifactRoot,
+    });
   }
 
   const artifactRoot = resolve(root, relative(configuredProjectRoot, configuredRoot));
@@ -282,29 +273,24 @@ const publishTerminalArtifacts = Effect.fn(function* (
         const content = yield* readRemoteFile(sandbox, source, responseBytes, signal);
 
         if (content === null) {
-          return yield* Effect.fail(
-            new AgentInvocationError(
-              'network',
-              `Sandbox artifact disappeared before download: ${artifact.source}`,
-            ),
+          return yield* new AgentInvocationError(
+            'network',
+            `Sandbox artifact disappeared before download: ${artifact.source}`,
           );
         }
 
         totalBytes += content.length;
 
         if (totalBytes > responseBytes) {
-          return yield* Effect.fail(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              'Sandbox artifacts exceed limits.response_bytes in aggregate.',
-            ),
+          return yield* new AgentInvocationError(
+            'output_cap_exceeded',
+            'Sandbox artifacts exceed limits.response_bytes in aggregate.',
           );
         }
 
         const destination = yield* Effect.try({
           try: () => resolveArtifactDestination(artifactRoot, artifact.destination),
-          catch: (cause) =>
-            cause instanceof Error ? cause : new Error('Invalid artifact destination.', { cause }),
+          catch: (cause) => EnvironmentOperationError.from(cause, 'artifact_destination_invalid'),
         });
 
         yield* assertNoSymlinkComponents(root, destination, true);
@@ -313,9 +299,10 @@ const publishTerminalArtifacts = Effect.fn(function* (
         yield* assertNoSymlinkComponents(root, parent, false);
 
         if (!isContained(root, yield* foreign(() => realpath(parent)))) {
-          return yield* Effect.fail(
-            new TypeError(`Artifact parent escapes the project root: ${artifact.destination}`),
-          );
+          return yield* new EnvironmentOperationError({
+            reason: 'artifact_parent_escape',
+            path: artifact.destination,
+          });
         }
 
         const directory = yield* foreign(() => mkdtemp(resolve(parent, '.attest-stage-')));
@@ -333,7 +320,7 @@ const publishTerminalArtifacts = Effect.fn(function* (
         Effect.exit(foreign(() => rm(artifact.directory, { recursive: true, force: true }))),
       );
 
-      let cause: Cause.Cause<Error> = Cause.empty;
+      let cause: Cause.Cause<EnvironmentOperationError> = Cause.empty;
 
       for (const exit of exits) if (Exit.isFailure(exit)) cause = Cause.combine(cause, exit.cause);
 

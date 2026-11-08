@@ -101,7 +101,10 @@ it('retains two equal release failures as two cleanup observations', async () =>
   const release = Effect.failCause(Cause.fail(cleanup));
 
   const exit = await Effect.runPromiseExit(
-    withRelease(withRelease(Effect.fail(new Error('primary')), release), release),
+    withRelease(
+      withRelease(Effect.fail(new Cause.UnknownError(undefined, 'primary')), release),
+      release,
+    ),
   );
 
   if (Exit.isSuccess(exit)) throw new Error('Expected failure.');
@@ -251,7 +254,9 @@ it('cwd cleanup failure retains redacted completed metric evidence and the full 
     });
 
     if (!(error instanceof MetricCleanupError)) throw new Error('Expected metric cleanup error.');
-    expect(error.cleanupCause.reasons.find(Cause.isFailReason)?.error).toBe(cleanupFailure);
+    expect(error.cleanupCause.reasons.find(Cause.isFailReason)?.error).toMatchObject({
+      cause: cleanupFailure,
+    });
     expect(inspect(exit, { depth: null })).not.toContain(secret);
   } finally {
     spy.mockRestore();

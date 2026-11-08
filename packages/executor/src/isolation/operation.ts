@@ -3,6 +3,7 @@ import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
+import { EnvironmentOperationError } from './environment-error.js';
 
 /** Retains cleanup evidence without replacing a primary failure or defect. */
 class EnvironmentCleanupDiagnostics extends Context.Service<
@@ -21,18 +22,19 @@ class EnvironmentCleanupError<A = unknown> extends Error {
   }
 }
 
-/** Adapts one foreign SDK or filesystem operation, preserving its original Error identity. */
-const foreign = <A>(operation: (signal: AbortSignal) => PromiseLike<A>): Effect.Effect<A, Error> =>
+/** Adapts one foreign SDK or filesystem operation, keeping the rejection as the error's cause. */
+const foreign = <A>(
+  operation: (signal: AbortSignal) => PromiseLike<A>,
+): Effect.Effect<A, EnvironmentOperationError> =>
   Effect.tryPromise({
     try: (signal) => operation(signal),
-    catch: (cause) =>
-      cause instanceof Error ? cause : new Error('Foreign operation failed.', { cause }),
+    catch: (cause) => EnvironmentOperationError.from(cause, 'foreign_operation_failed'),
   });
 
 /** Keeps the completed child Exit when cancellation wins the caller's wait. */
 class EnvironmentOperationEvidence extends Context.Service<
   EnvironmentOperationEvidence,
-  { exit: Exit.Exit<unknown, Error> }
+  { exit: Exit.Exit<unknown, unknown> }
 >()('attest/EnvironmentOperationEvidence') {}
 
 /** Reads release failures without exposing environment annotation keys to consumers. */
@@ -62,9 +64,9 @@ const getEnvironmentCleanupCause = (
 };
 
 /** Turns fiber cancellation into an owner input and joins evidence before returning interruption. */
-const ownOperation = <A>(
-  operation: (signal: AbortSignal) => Effect.Effect<A, Error>,
-): Effect.Effect<A, Error> =>
+const ownOperation = <A, E>(
+  operation: (signal: AbortSignal) => Effect.Effect<A, E>,
+): Effect.Effect<A, E> =>
   Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
       const controller = new AbortController();

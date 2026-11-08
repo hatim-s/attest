@@ -7,7 +7,7 @@ import type { MetricDefinition } from '@attest/contracts';
 import type { StoredMetricEvaluation } from '@attest/core';
 
 import { evaluateAssertionMetric } from './assertion-engine.js';
-import { AttestMetricError } from './errors.js';
+import { AttestMetricError, MetricOperationError } from './errors.js';
 import { buildEvaluationDocument } from './evaluation-document.js';
 import { executeExecutableMetric, type ExecMetricOptions } from './exec-metric.js';
 import type { JudgeClient } from './judge/judge-client.js';
@@ -42,7 +42,10 @@ const evaluateMetric = (
         try: () => evaluateAssertionMetric(definition, buildEvaluationDocument(context)),
         catch: (cause) => {
           // Authored regex and schema configuration failures are metric diagnostics. Other throws are defects.
-          if (cause instanceof SyntaxError || cause instanceof AttestMetricError) return cause;
+          if (cause instanceof AttestMetricError) return cause;
+
+          if (cause instanceof SyntaxError)
+            return new MetricOperationError({ reason: 'foreign', cause });
           throw cause;
         },
       });

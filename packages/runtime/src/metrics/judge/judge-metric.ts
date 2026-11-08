@@ -1,6 +1,6 @@
 import { mustPropagateMetricCause } from '../internal/operation.js';
 import * as Effect from 'effect/Effect';
-import { parseWithSchemaSync } from '@attest/contracts';
+import { foreignMessage, parseWithSchemaSync } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import { performance } from 'node:perf_hooks';
 
@@ -8,7 +8,7 @@ import type { JsonValue } from '@attest/contracts';
 import { canonicalStringify, type StoredMetricEvaluation } from '@attest/core';
 
 import { buildEvaluationDocument } from '../evaluation-document.js';
-import { AttestMetricError } from '../errors.js';
+import { AttestMetricError, judgeCancelled } from '../errors.js';
 import type { JudgeMetricDefinition } from '../metric-definitions.js';
 import {
   evaluatedMetric,
@@ -72,13 +72,14 @@ const judgeFailure = (cause: unknown, signal: AbortSignal | undefined): MetricEr
   }
 
   if (signal?.aborted === true) {
-    return { code: 'metric_cancelled', message: 'Judge evaluation was cancelled.' };
+    const cancelled = judgeCancelled();
+
+    return { code: cancelled.code, message: cancelled.message };
   }
 
   return {
     code: 'judge_provider_error',
-    message:
-      cause instanceof Error ? cause.message : 'Judge provider call failed for an unknown reason.',
+    message: foreignMessage(cause, 'Judge provider call failed for an unknown reason.'),
   };
 };
 
@@ -113,8 +114,7 @@ const evaluateJudgeMetric = (
     };
 
     return yield* Effect.gen(function* () {
-      if (options.signal?.aborted)
-        return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
+      if (options.signal?.aborted) return yield* judgeCancelled();
 
       if (options.cache === undefined) {
         const outcome = yield* options.client.scoreRubric(request, scope);

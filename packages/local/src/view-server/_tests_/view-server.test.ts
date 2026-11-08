@@ -111,12 +111,7 @@ const startFixtureServer = async (
 
   const server = await startOwnedServer({
     catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
-    close: () =>
-      Effect.tryPromise({
-        try: () => store.close(),
-        catch: (error) =>
-          error instanceof Error ? error : new Error('Test store close failed.', { cause: error }),
-      }),
+    close: () => Effect.tryPromise(() => store.close()),
     control,
     indexHtml: dashboardHtml,
   });

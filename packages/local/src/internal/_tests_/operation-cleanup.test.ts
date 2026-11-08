@@ -3,6 +3,7 @@ import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import { describe, expect, it } from 'vitest';
+import { ReleaseFailure } from '../../_tests_/support/release-failure.js';
 import { LocalError } from '../../errors/local-error.js';
 import { OperationCleanup, withOperationCleanup } from '../operation-cleanup.js';
 
@@ -27,7 +28,10 @@ describe('operation cleanup precedence', () => {
     const defect = new Error('Primary defect');
 
     const exit = await Effect.runPromiseExit(
-      withOperationCleanup(Effect.die(defect), Effect.fail(new Error('Release'))),
+      withOperationCleanup(
+        Effect.die(defect),
+        Effect.fail(new ReleaseFailure({ message: 'Release' })),
+      ),
     );
 
     if (Exit.isSuccess(exit)) throw new Error('Expected defect');
@@ -59,7 +63,7 @@ describe('operation cleanup precedence', () => {
     const exit = await Effect.runPromiseExit(
       withOperationCleanup(
         Effect.succeed(value),
-        Effect.fail(new Error('Release')),
+        Effect.fail(new ReleaseFailure({ message: 'Release' })),
         'registry_write_failed',
       ),
     );
@@ -75,8 +79,11 @@ it('accumulates nested release failures on the original primary Cause', async ()
 
   const exit = await Effect.runPromiseExit(
     withOperationCleanup(
-      withOperationCleanup(Effect.fail(primary), Effect.fail(new Error('Inner release'))),
-      Effect.fail(new Error('Outer release')),
+      withOperationCleanup(
+        Effect.fail(primary),
+        Effect.fail(new ReleaseFailure({ message: 'Inner release' })),
+      ),
+      Effect.fail(new ReleaseFailure({ message: 'Outer release' })),
     ),
   );
 

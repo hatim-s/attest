@@ -1,4 +1,4 @@
-import { Effect, Exit, Scope } from 'effect';
+import { Cause, Data, Effect, Exit, Scope } from 'effect';
 import { isString } from '@attest/contracts';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
@@ -11,13 +11,39 @@ type ServeAgentRunnerOptions = {
   port: number;
 };
 
-type ListenerCleanup = { exit?: Exit.Exit<void, Error> };
+type RunnerServerOperation = 'listen' | 'bind' | 'close' | 'join';
+
+const RUNNER_SERVER_MESSAGES = {
+  listen: 'Runner listen failed.',
+  bind: 'The runner server did not bind a TCP port.',
+  close: 'Runner listener close failed.',
+  join: 'Runner request roots failed to join.',
+} as const satisfies Record<RunnerServerOperation, string>;
+
+/**
+ * Binding, closing or joining the runner's `node:http` listener failed. `bind` has no cause because
+ * the listener started but reported no TCP address.
+ */
+class RunnerServerError extends Data.TaggedError('RunnerServerError')<{
+  operation: RunnerServerOperation;
+  cause?: unknown;
+}> {
+  override readonly message = RUNNER_SERVER_MESSAGES[this.operation];
+}
+
+/**
+ * Why `close()` failed: the listener close or request-root join failed, or both together ran past
+ * their 12 second bound.
+ */
+type ListenerCloseError = RunnerServerError | Cause.TimeoutError;
+
+type ListenerCleanup = { exit?: Exit.Exit<void, ListenerCloseError> };
 
 type ServedAgentRunner = {
   /** Origin such as `http://127.0.0.1:8790`, without a trailing slash. */
   url: string;
   /** Stops listening. Accepted invocations keep running; call `runner.drain()` to wait. */
-  close: () => Effect.Effect<void, Error>;
+  close: () => Effect.Effect<void, ListenerCloseError>;
   /** Retained listener and request-root release evidence. Never serialize Causes. */
   cleanup: ListenerCleanup;
 };
@@ -97,7 +123,7 @@ const writeWebResponse = async (response: Response, outgoing: ServerResponse): P
 const serveAgentRunner = (
   runner: AgentRunner,
   { host = '127.0.0.1', port }: ServeAgentRunnerOptions,
-): Effect.Effect<ServedAgentRunner, Error, Scope.Scope> =>
+): Effect.Effect<ServedAgentRunner, RunnerServerError, Scope.Scope> =>
   Effect.gen(function* () {
     let origin = '';
     const requests = new Set<Promise<void>>();
@@ -137,12 +163,12 @@ const serveAgentRunner = (
             server.close((error) => (error === undefined ? resolve() : reject(error)));
             server.closeAllConnections();
           }),
-        catch: (cause) => new Error('Runner listener close failed.', { cause }),
+        catch: (cause) => new RunnerServerError({ operation: 'close', cause }),
       }).pipe(
         Effect.andThen(
           Effect.tryPromise({
             try: () => Promise.all([...requests]),
-            catch: (cause) => new Error('Runner request roots failed to join.', { cause }),
+            catch: (cause) => new RunnerServerError({ operation: 'join', cause }),
           }),
         ),
         Effect.asVoid,
@@ -162,13 +188,13 @@ const serveAgentRunner = (
           server.once('error', reject);
           server.listen(port, host, resolve);
         }),
-      catch: (cause) => new Error('Runner listen failed.', { cause }),
+      catch: (cause) => new RunnerServerError({ operation: 'listen', cause }),
     });
 
     const address = server.address();
 
     if (address === null || isString(address)) {
-      return yield* Effect.fail(new Error('The runner server did not bind a TCP port.'));
+      return yield* new RunnerServerError({ operation: 'bind' });
     }
 
     origin = `http://${address.family === 'IPv6' ? `[${address.address}]` : address.address}:${String(address.port)}`;
@@ -180,4 +206,10 @@ const serveAgentRunner = (
     };
   });
 
-export { serveAgentRunner, type ServeAgentRunnerOptions, type ServedAgentRunner };
+export {
+  serveAgentRunner,
+  RunnerServerError,
+  type ListenerCloseError,
+  type ServeAgentRunnerOptions,
+  type ServedAgentRunner,
+};

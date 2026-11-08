@@ -5,6 +5,7 @@ import * as Deferred from 'effect/Deferred';
 import * as Fiber from 'effect/Fiber';
 import * as Exit from 'effect/Exit';
 import { describe, expect, it } from 'vitest';
+import { ReleaseFailure } from '../../../_tests_/support/release-failure.js';
 import { LocalError } from '../../../errors/index.js';
 import { CommandCleanup, withCommandCleanup } from '../command-cleanup.js';
 import { readCommandRequest } from '../command-request.js';
@@ -30,7 +31,7 @@ describe('native command failure and cleanup precedence', () => {
           Effect.sync(() => {
             released.push('second');
           }),
-          Effect.fail(new Error('second close failed')),
+          Effect.fail(new ReleaseFailure({ message: 'second close failed' })),
         ]),
       ),
     );

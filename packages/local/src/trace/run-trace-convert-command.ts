@@ -1,4 +1,4 @@
-import { AttestError } from '@attest/contracts';
+import { AttestError, tryClassify } from '@attest/contracts';
 import * as Effect from 'effect/Effect';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -39,17 +39,15 @@ const runTraceConvertCommand = Effect.fn('runTraceConvertCommand')(function* (
     catch: readError,
   });
 
-  const trace = yield* Effect.try({
-    try: () => selectConvertedTrace(convertOtlpJson(JSON.parse(text)), options.traceId),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof AttestError
-        ? Effect.fail(cause)
-        : cause instanceof SyntaxError
-          ? Effect.fail(readError(cause))
-          : Effect.die(cause),
-    ),
+  // Converter AttestErrors keep their code and malformed JSON is a read failure; any other
+  // throw is a defect.
+  const trace = yield* tryClassify(
+    () => selectConvertedTrace(convertOtlpJson(JSON.parse(text)), options.traceId),
+    (cause) => {
+      if (cause instanceof AttestError) return cause;
+
+      return cause instanceof SyntaxError ? readError(cause) : undefined;
+    },
   );
 
   const json = `${JSON.stringify(trace, null, 2)}\n`;

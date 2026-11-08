@@ -12,7 +12,7 @@ import { createOpenaiChat, openaiText, type OpenAIChatModel } from '@tanstack/ai
 
 import type { JsonValue } from '@attest/contracts';
 
-import { AttestMetricError, type AttestMetricErrorCode } from '../errors.js';
+import { AttestMetricError, MetricOperationError, type AttestMetricErrorCode } from '../errors.js';
 import { abortReasonOf, composeAbortSignal } from '../internal/abort-signal.js';
 import type { JudgeCallOptions, JudgeClient, JudgeRequest } from './judge-client.js';
 import type {
@@ -23,7 +23,6 @@ import type {
 } from './judge-outcome-schema.js';
 import {
   executeStructuredChat,
-  isUnparseableResponse,
   type JudgeAttemptObservation,
   type StructuredChatExecutor,
 } from './internal/structured-output.js';
@@ -152,7 +151,7 @@ const recordAttempt = (
 
 /** Maps a failed attempt to its terminal error, or undefined when the metric contract allows a retry. */
 const classifyProviderFailure = (
-  cause: unknown,
+  cause: Error,
   signal: AbortSignal,
   timeoutMs: number | undefined,
 ): { code: AttestMetricErrorCode; message: string } | undefined => {
@@ -162,13 +161,11 @@ const classifyProviderFailure = (
       : { code: 'judge_provider_error', message: `Judge request exceeded ${timeoutMs} ms.` };
   }
 
-  if (isUnparseableResponse(cause)) {
+  if (cause instanceof AttestMetricError && cause.code === 'judge_unparseable_response') {
     return undefined;
   }
 
-  const message = cause instanceof Error ? cause.message : String(cause);
-
-  return { code: 'judge_provider_error', message: `Judge provider call failed: ${message}` };
+  return { code: 'judge_provider_error', message: `Judge provider call failed: ${cause.message}` };
 };
 
 /** Runs the structured chat, retrying malformed structured output exactly once. */
@@ -210,27 +207,23 @@ const scoreWithTanStack = ({
         if (Exit.isFailure(called)) {
           // A typed branch must not hide another branch's defect or interruption.
           if (mustPropagateMetricCause(called.cause)) return yield* Effect.failCause(called.cause);
-          const error = called.cause.reasons.find((reason) => reason._tag === 'Fail');
+          const failed = called.cause.reasons.find((reason) => reason._tag === 'Fail');
 
-          if (error === undefined) return yield* Effect.failCause(called.cause);
-          const cause = error.error;
-
-          const message = cause instanceof Error ? cause.message : String(cause);
+          if (failed === undefined) return yield* Effect.failCause(called.cause);
+          const cause = failed.error;
           recordAttempt(
             attempts,
             observation,
-            observation.rawResponse ?? { error: message },
-            message,
+            observation.rawResponse ?? { error: cause.message },
+            cause.message,
           );
           const failure = classifyProviderFailure(cause, signal, callOptions.timeoutMs);
 
           if (failure !== undefined)
-            return yield* Effect.fail(
-              new AttestMetricError(failure.code, failure.message, {
-                cause,
-                details: buildJudgeRecord(request, attempts),
-              }),
-            );
+            return yield* new AttestMetricError(failure.code, failure.message, {
+              cause,
+              details: buildJudgeRecord(request, attempts),
+            });
           continue;
         }
 
@@ -270,7 +263,11 @@ const createTanstackJudgeClient = (options: TanstackJudgeClientOptions = {}): Ju
       Effect.gen(function* () {
         const adapter = yield* Effect.try({
           try: () => selectAdapter(parseJudgeModel(request.model), options),
-          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+          catch: (cause) =>
+            // Model-form errors keep their metric code; SDK adapter construction failures keep their message.
+            cause instanceof AttestMetricError
+              ? cause
+              : new MetricOperationError({ reason: 'foreign', cause }),
         });
 
         return yield* scoreWithTanStack({ adapter, request, callOptions, executeChat });

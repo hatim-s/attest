@@ -460,7 +460,7 @@ const effectRoots = [
   },
   {
     file: 'packages/contracts/src/_tests_/error.test.ts',
-    operations: ['Effect.runSyncExit'],
+    operations: ['Effect.runSyncExit', 'Effect.runPromiseExit'],
     owner: 'contracts owned-error invariant tests',
   },
   {

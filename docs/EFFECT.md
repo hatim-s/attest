@@ -270,6 +270,36 @@ The root client entry stays Web-standard. `/node` owns HTTP/process integration
 and `/pi` owns Pi integration. Browser-safe imports do not establish a hosted
 Workers deployment or private host acceptance.
 
+## Language service
+
+Every package `typecheck` and `build`, conformance `typecheck` and the root
+`typecheck:scripts` run `effect-tsgo tsc@7.0.2` from `@effect/tsgo`. The
+platform package for the host (for example `@effect/tsgo-darwin-arm64` or
+`@effect/tsgo-linux-x64`) ships a TypeScript 7.0.2 build with the Effect
+diagnostics compiled in, so the check needs no network. `tsconfig.base.json`
+registers the `@effect/language-service` plugin. Effect errors and warnings
+fail the tsc exit code. Suggestions do not print (`includeSuggestionsInTsc:
+false`). ESLint still uses the separate `typescript@5.9.3` package and does not
+see these diagnostics.
+
+We do not run `effect-tsgo patch`. It rewrites the TypeScript binary inside
+`node_modules`. Bun on the dev machine links packages from a global store, so
+a patch would change the compiler for every project that shares that store.
+`effect-tsgo tsc@7.0.2` leaves the installed `typescript7` package untouched.
+
+To see the same diagnostics in an editor, point a TypeScript 7 language server
+setting at `effect-tsgo tsc@7.0.2 --lsp --stdio`. The tsgo README documents
+that command and asks you to use `effect-tsgo` as the only TypeScript language
+server. It does not document editor-specific settings. `npx @effect/tsgo setup`
+prints hints for the editor configuration it detects. Without this, the editor
+runs stock TypeScript 7 from `typescript7` and only `typecheck` reports Effect
+diagnostics.
+
+Fix a reported diagnostic in the code. Do not lower its severity or ignore it
+in the exit code to get a green run. A per-check exception goes in the plugin's
+`diagnosticSeverity` in `tsconfig.base.json`, with a JSON comment there that
+says why the check does not apply. There are none today.
+
 ## Verification and security
 
 Keep loopback binding, origin checks, callback tokens, duplicate keys, secret

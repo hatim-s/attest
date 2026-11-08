@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect';
+import { AgentInvocationError } from '../../errors.js';
 import { withHttpCleanup } from '../http/http-effects.js';
 import { openGuardedResponse, type GuardedHttpFetch } from '../http/guarded-response.js';
 import type { MaterializedHttpRequest } from '../http/request-template.js';
@@ -25,7 +26,8 @@ const openWebStream = Effect.fn('stream.webHeaders')(function* (
         return yield* withHttpCleanup(Effect.failCause(acquired.cause), [
           Effect.tryPromise({
             try: () => opened.response.body?.cancel() ?? Promise.resolve(),
-            catch: (cause) => cause,
+            catch: (cause) =>
+              new AgentInvocationError('network', 'Streaming body cancel failed.', { cause }),
           }).pipe(Effect.interruptible, Effect.timeout(100)),
           Effect.sync(opened.release),
         ]);
@@ -39,10 +41,11 @@ const openWebStream = Effect.fn('stream.webHeaders')(function* (
         ...(reader === undefined
           ? []
           : [
-              Effect.tryPromise({ try: () => reader.cancel(), catch: (cause) => cause }).pipe(
-                Effect.interruptible,
-                Effect.timeout(100),
-              ),
+              Effect.tryPromise({
+                try: () => reader.cancel(),
+                catch: (cause) =>
+                  new AgentInvocationError('network', 'Streaming body cancel failed.', { cause }),
+              }).pipe(Effect.interruptible, Effect.timeout(100)),
               owner.awaitRead,
               Effect.sync(() => reader.releaseLock()),
             ]),

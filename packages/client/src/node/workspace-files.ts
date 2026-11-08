@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Data, Effect } from 'effect';
 import { withCleanup } from '../runner/lifetime.js';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -12,6 +12,31 @@ const MAX_LISTED_FILES = 10_000;
 // Dependency and VCS trees are never the artifacts an eval wants and dwarf everything else.
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules']);
 
+type WorkspaceFileOperation = 'list' | 'hash' | 'stat' | 'read' | 'remove';
+
+const WORKSPACE_FILE_MESSAGES = {
+  list: 'Workspace listing failed.',
+  hash: 'Workspace hashing failed.',
+  stat: 'Artifact stat failed.',
+  read: 'Artifact read failed.',
+  remove: 'Pi workspace removal failed.',
+} as const satisfies Record<WorkspaceFileOperation, string>;
+
+/**
+ * A workspace filesystem operation failed, or a listing found too many files; `path` names the
+ * root or file it touched.
+ */
+class WorkspaceFileError extends Data.TaggedError('WorkspaceFileError')<{
+  operation: WorkspaceFileOperation | 'too_many_files';
+  path: string;
+  cause?: unknown;
+}> {
+  override readonly message =
+    this.operation === 'too_many_files'
+      ? `${this.path} holds more than ${String(MAX_LISTED_FILES)} files.`
+      : WORKSPACE_FILE_MESSAGES[this.operation];
+}
+
 /**
  * Lists regular files under `root` as sorted forward-slash paths relative to it. Symlinks are
  * skipped, so a link cannot pull a file from outside the root into the artifact set.
@@ -24,7 +49,8 @@ const listFiles = (root: string) =>
     for (let directory = pending.pop(); directory !== undefined; directory = pending.pop()) {
       const entries = yield* Effect.tryPromise({
         try: () => readdir(join(root, directory), { withFileTypes: true }),
-        catch: (cause) => new Error('Workspace listing failed.', { cause }),
+        catch: (cause) =>
+          new WorkspaceFileError({ operation: 'list', path: join(root, directory), cause }),
       });
 
       for (const entry of entries) {
@@ -36,9 +62,7 @@ const listFiles = (root: string) =>
         files.push(path);
 
         if (files.length > MAX_LISTED_FILES) {
-          return yield* Effect.fail(
-            new Error(`${root} holds more than ${String(MAX_LISTED_FILES)} files.`),
-          );
+          return yield* new WorkspaceFileError({ operation: 'too_many_files', path: root });
         }
       }
     }
@@ -59,7 +83,8 @@ const hashFiles = (root: string) =>
       yield* withCleanup(
         Effect.tryPromise({
           try: () => finished(stream),
-          catch: (cause) => new Error('Workspace hashing failed.', { cause }),
+          catch: (cause) =>
+            new WorkspaceFileError({ operation: 'hash', path: join(root, path), cause }),
         }),
         Effect.sync(() => {
           stream.destroy();
@@ -72,4 +97,4 @@ const hashFiles = (root: string) =>
     return hashes;
   });
 
-export { hashFiles, listFiles };
+export { hashFiles, listFiles, WorkspaceFileError };

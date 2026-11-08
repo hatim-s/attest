@@ -6,8 +6,9 @@ import { StandardSchemaValidationError } from '@tanstack/ai';
 import { describe, expect, it } from 'vitest';
 
 import type { JudgeCallOptions, JudgeRequest } from '../judge-client.js';
-import type { StructuredChatExecutor } from '../internal/structured-output.js';
+import { callStructuredChat, type StructuredChatExecutor } from '../internal/structured-output.js';
 import { createTanstackJudgeClient } from '../tanstack-judge-client.js';
+import { TestFailure } from '../../../_tests_/support/test-failure.js';
 
 const request: JudgeRequest = {
   model: 'anthropic/claude-sonnet-5',
@@ -18,7 +19,13 @@ const request: JudgeRequest = {
 const malformed = (message: string): StandardSchemaValidationError =>
   Object.assign(new StandardSchemaValidationError([{ message }]), { message });
 
-/** Scripts structured-chat results; observations mirror the raw provider bytes. */
+/** An SDK finalization error that carries a retryable structured-output code and other fields. */
+class StructuredOutputError extends Error {
+  readonly code = 'structured-output-parse-failed';
+  readonly extra = 1;
+}
+
+/** Scripts structured-chat results; Errors reject through the production SDK classifier. */
 const scriptedExecutor = (scripts: (JsonValue | Error)[]): StructuredChatExecutor => {
   return (chatRequest) => {
     const script = scripts.shift();
@@ -26,7 +33,7 @@ const scriptedExecutor = (scripts: (JsonValue | Error)[]): StructuredChatExecuto
     if (script instanceof Error) {
       chatRequest.observation.rawResponse = `error:${script.message}`;
 
-      return Effect.fail(script);
+      return callStructuredChat(() => Promise.reject(script));
     }
 
     if (script === undefined) throw new Error('The judge requested an unscripted response.');
@@ -51,14 +58,14 @@ const pendingUntilAbort: StructuredChatExecutor = (chatRequest) =>
         chatRequest.observation.rawResponse = 'partial provider bytes';
 
         if (chatRequest.signal.aborted) {
-          reject(new Error('aborted provider call'));
+          reject(new TestFailure({ message: 'aborted provider call' }));
 
           return;
         }
 
         chatRequest.signal.addEventListener(
           'abort',
-          () => reject(new Error('aborted provider call')),
+          () => reject(new TestFailure({ message: 'aborted provider call' })),
           {
             once: true,
           },
@@ -95,7 +102,8 @@ describe('createTanstackJudgeClient', () => {
   });
 
   it('records both malformed attempts on judge_unparseable_response', async () => {
-    const execute = scriptedExecutor([malformed('first'), malformed('second')]);
+    // Both retryable SDK shapes: a schema validation error and an Error with a structured-output code.
+    const execute = scriptedExecutor([malformed('first'), new StructuredOutputError('second')]);
 
     await expect(Effect.runPromiseExit(score(execute)).then(valueFromExit)).rejects.toMatchObject({
       code: 'judge_unparseable_response',
@@ -113,11 +121,26 @@ describe('createTanstackJudgeClient', () => {
     expect(outcome.record.attempts[0]?.error).toBe('first');
   });
 
+  it('fails a non-Error rejection as a provider error without retrying', async () => {
+    const execute: StructuredChatExecutor = () =>
+      callStructuredChat(() =>
+        // The SDK boundary must handle non-Error rejections, so this test sends one on purpose.
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+        Promise.reject({ code: 'structured-output-parse-failed' }),
+      );
+
+    await expect(Effect.runPromiseExit(score(execute)).then(valueFromExit)).rejects.toMatchObject({
+      code: 'judge_provider_error',
+      message: 'Judge provider call failed: Foreign operation failed.',
+      details: { attempts: [{ error: 'Foreign operation failed.' }] },
+    });
+  });
+
   it('retains the attempted record when the provider fails', async () => {
     await expect(
-      Effect.runPromiseExit(score(scriptedExecutor([new Error('provider unavailable')]))).then(
-        valueFromExit,
-      ),
+      Effect.runPromiseExit(
+        score(scriptedExecutor([new TestFailure({ message: 'provider unavailable' })])),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({
       code: 'judge_provider_error',
       details: {

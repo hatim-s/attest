@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Exit } from 'effect';
+import { Cause, Data, Deferred, Effect, Exit } from 'effect';
 import { execFile, spawn } from 'node:child_process';
 import { withCleanup } from '../runner/lifetime.js';
 import { createLineFramer } from './line-framer.js';
@@ -24,6 +24,31 @@ type PiProcessOutcome =
   | { kind: 'timeout' }
   | { kind: 'cancelled' };
 
+type PiProcessReason =
+  | 'spawn_failed'
+  | 'terminate_failed'
+  | 'verify_failed'
+  | 'snapshot_empty'
+  | 'snapshot_malformed'
+  | 'cleanup_unconfirmed';
+
+const PI_PROCESS_MESSAGES = {
+  spawn_failed: 'Pi spawn failed.',
+  terminate_failed: 'Pi process-group termination failed.',
+  verify_failed: 'Pi process-group verification failed.',
+  snapshot_empty: 'Pi process-group snapshot was empty.',
+  snapshot_malformed: 'Pi process-group snapshot was malformed.',
+  cleanup_unconfirmed: 'Pi process-group cleanup unconfirmed.',
+} as const satisfies Record<PiProcessReason, string>;
+
+/** Spawning, signalling or verifying the Pi process group failed. */
+class PiProcessError extends Data.TaggedError('PiProcessError')<{
+  reason: PiProcessReason;
+  cause?: unknown;
+}> {
+  override readonly message = PI_PROCESS_MESSAGES[this.reason];
+}
+
 /** Owns one process group. Callback leaves publish observations; native flow owns deadlines and teardown. */
 const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: PiProcessInput) =>
   Effect.uninterruptibleMask((restore) =>
@@ -36,7 +61,7 @@ const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: 
       const child = yield* Effect.try({
         try: () =>
           spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true }),
-        catch: (cause) => new Error('Pi spawn failed.', { cause }),
+        catch: (cause) => new PiProcessError({ reason: 'spawn_failed', cause }),
       });
 
       let concluded = false;
@@ -129,7 +154,7 @@ const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: 
                 throw error;
             }
           },
-          catch: (cause) => new Error('Pi process-group termination failed.', { cause }),
+          catch: (cause) => new PiProcessError({ reason: 'terminate_failed', cause }),
         });
 
       const cleanup = Effect.gen(function* () {
@@ -158,11 +183,11 @@ const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: 
                           : reject(new Error('Pi group snapshot failed.', { cause: error })),
                     );
                   }),
-                catch: (cause) => new Error('Pi process-group verification failed.', { cause }),
+                catch: (cause) => new PiProcessError({ reason: 'verify_failed', cause }),
               });
 
               if (rows.trim() === '')
-                return yield* Effect.fail(new Error('Pi process-group snapshot was empty.'));
+                return yield* new PiProcessError({ reason: 'snapshot_empty' });
 
               // A zombie has exited and cannot execute tools. Signal 0 alone still finds it.
               let live = false;
@@ -176,7 +201,7 @@ const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: 
                   state === undefined ||
                   extra.length > 0
                 )
-                  return yield* Effect.fail(new Error('Pi process-group snapshot was malformed.'));
+                  return yield* new PiProcessError({ reason: 'snapshot_malformed' });
 
                 if (Number(group) === child.pid && !state.startsWith('Z')) live = true;
               }
@@ -185,13 +210,18 @@ const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: 
               yield* Effect.sleep(25);
             }
 
-            return yield* Effect.fail(new Error('Pi process-group cleanup unconfirmed.'));
+            return yield* new PiProcessError({ reason: 'cleanup_unconfirmed' });
           }),
         );
 
-        const failures = [killed, joined, verified].flatMap((exit) =>
-          Exit.isFailure(exit) ? [exit.cause] : [],
-        );
+        // Inference cannot widen the three exits' error channels to one union, so state it once.
+        const exits: readonly Exit.Exit<void, PiProcessError | Cause.TimeoutError>[] = [
+          killed,
+          joined,
+          verified,
+        ];
+
+        const failures = exits.flatMap((exit) => (Exit.isFailure(exit) ? [exit.cause] : []));
 
         if (failures.length > 0) return yield* Effect.failCause(failures.reduce(Cause.combine));
       });

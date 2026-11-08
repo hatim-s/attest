@@ -48,6 +48,69 @@ const request = (caseId: string, delay: number): AgentRequest => ({
 });
 
 describe('native process ownership', () => {
+  it('keeps a readiness cleanup failure a ProcessCleanupError with startup evidence', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-readiness-cleanup-'));
+    await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+
+    // The probe answers once stderr has had time to arrive; its body refuses cancellation.
+    const probe = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            throw new Error('readiness body cancel failed');
+          },
+        }),
+      );
+    });
+
+    const configured: BackgroundAgentResource = {
+      schema: AGENT_RESOURCE_SCHEMA_ID,
+      id: 'background',
+      name: 'Background',
+      transport: {
+        kind: 'background_cli',
+        lifecycle: 'per_run',
+        start_argv: [
+          process.execPath,
+          '-e',
+          "process.stderr.write('boom\\n'); setInterval(() => {}, 1000)",
+        ],
+        readiness: { kind: 'http', url: 'http://127.0.0.1:9/ready' },
+        invoke: { method: 'POST', url: 'http://127.0.0.1:9/invoke', body: '{{request}}' },
+        extraction: { result_pointer: '/output' },
+        stop_timeout_ms: 500,
+      },
+      timeouts: { connect_ms: 2000 },
+    };
+
+    try {
+      vi.stubEnv('PATH', directory);
+      vi.stubGlobal('fetch', probe);
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(startBackgroundAgent(configured, { cwd: directory, env: {} })),
+      );
+
+      if (Exit.isSuccess(exit)) throw new Error('Expected readiness cleanup failure');
+      const failure = Cause.squash(exit.cause);
+      expect(failure).toBeInstanceOf(ProcessCleanupError);
+
+      if (!(failure instanceof ProcessCleanupError))
+        throw new Error('Expected process cleanup error');
+      expect(failure.exits.some(Exit.isFailure)).toBe(true);
+      expect(failure.diagnostics).toEqual({ stderrExcerpt: 'boom\n' });
+      expect(failure.cause).toMatchObject({
+        cleanupFailure: { code: 'network', message: failure.message },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('retains background cleanup after its first close observer is interrupted', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-background-close-'));
     await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });

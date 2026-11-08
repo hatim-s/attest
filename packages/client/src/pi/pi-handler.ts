@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
 
 import { collectArtifacts } from '../node/collect-artifacts.js';
-import { hashFiles } from '../node/workspace-files.js';
+import { hashFiles, WorkspaceFileError } from '../node/workspace-files.js';
 import type { AgentHandler, AgentInvocation, HandlerOutcome } from '../runner/agent-runner.js';
+import { AgentHandlerError } from '../runner/runner-errors.js';
 import { runPiProcess, type PiProcessOutcome } from './pi-process.js';
 import { assistantText, type PiAssistantMessage } from './pi-records.js';
 import { createPiTraceBuilder } from './pi-trace.js';
@@ -38,7 +39,7 @@ type PiHandlerOptions = {
   /** Passed as `--system-prompt` (text or a file path). */
   systemPrompt?: string;
   /** Picks the working directory. Defaults to a fresh temporary directory, removed afterwards. */
-  workspace?: (invocation: AgentInvocation) => Effect.Effect<string, Error>;
+  workspace?: (invocation: AgentInvocation) => Effect.Effect<string, AgentHandlerError>;
   /**
    * Variables Pi gets on top of `PATH`, `HOME`, `TMPDIR` and `LC_ALL`, such as a provider API key.
    * Undefined values are left out, so `{ KEY: process.env.KEY }` works.
@@ -77,6 +78,10 @@ const promptOf = (input: JsonValue): string | undefined => {
 
   return undefined;
 };
+
+/** The runner reports only the message; the original typed failure stays as the cause. */
+const toHandlerError = (error: { message: string }): AgentHandlerError =>
+  new AgentHandlerError({ message: error.message, cause: error });
 
 const describeExit = (outcome: Extract<PiProcessOutcome, { kind: 'exited' }>): string => {
   const status = outcome.signal ?? `code ${String(outcome.code)}`;
@@ -170,7 +175,8 @@ const createPiHandler = ({
           workspace === undefined
             ? yield* Effect.tryPromise({
                 try: () => mkdtemp(join(tmpdir(), 'attest-pi-')),
-                catch: (cause) => new Error('Pi workspace creation failed.', { cause }),
+                catch: (cause) =>
+                  new AgentHandlerError({ message: 'Pi workspace creation failed.', cause }),
               })
             : yield* workspace(invocation);
 
@@ -222,11 +228,14 @@ const createPiHandler = ({
           workspace === undefined
             ? Effect.tryPromise({
                 try: () => rm(cwd, { recursive: true, force: true }),
-                catch: (cause) => new Error('Pi workspace removal failed.', { cause }),
+                catch: (cause) => new WorkspaceFileError({ operation: 'remove', path: cwd, cause }),
               })
             : Effect.void,
           // Local removal must settle before its workspace ownership ends.
           undefined,
+        ).pipe(
+          // Effect.mapError keeps Fail annotations, so the ClientCleanup diagnostics survive.
+          Effect.mapError(toHandlerError),
         );
       }),
     );

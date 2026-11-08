@@ -2,7 +2,7 @@ import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import { CLI_EVENT_SCHEMA_ID, type CliError, type EvalEvent } from '@attest/contracts';
-import { safeErrorMessage } from '../errors.js';
+import { EvalEngineError, safeErrorMessage } from '../errors.js';
 import { observe, ordinaryError } from '../lifecycle.js';
 import type { ExecuteEvalOptions } from '../types.js';
 
@@ -35,7 +35,7 @@ const createEventCollector = (
   const emit = (event: EvalEventBody) =>
     Effect.gen(function* () {
       if (events.length >= MAXIMUM_EVENTS)
-        return yield* Effect.fail(new Error('Eval event count cap was exceeded.'));
+        return yield* new EvalEngineError({ reason: 'event_count_cap' });
 
       const completeEvent: EvalEvent = {
         ...event,
@@ -45,7 +45,7 @@ const createEventCollector = (
       };
 
       if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > MAXIMUM_EVENT_BYTES)
-        return yield* Effect.fail(new Error('Eval event byte cap was exceeded.'));
+        return yield* new EvalEngineError({ reason: 'event_byte_cap' });
       events.push(completeEvent);
 
       if (onEvent === undefined || deliveryFailure !== undefined) return;

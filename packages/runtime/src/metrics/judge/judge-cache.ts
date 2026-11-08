@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 
 import { canonicalStringify } from '@attest/core';
 
+import { judgeCancelled } from '../errors.js';
+
 import type { JudgeClient, JudgeRequest } from './judge-client.js';
 import type { JudgeOutcome } from './judge-outcome-schema.js';
 import { buildJudgePrompt, JUDGE_PROMPT_VERSION, JUDGE_REQUEST_PARAMS } from './rubric-prompt.js';
@@ -57,12 +59,10 @@ const callThroughCache = Effect.fn('callThroughCache')(function* (
   request: JudgeRequest,
   scope: JudgeCallScope,
 ) {
-  if (scope.signal?.aborted)
-    return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
+  if (scope.signal?.aborted) return yield* judgeCancelled();
   const cached = yield* cache.get(key);
 
-  if (scope.signal?.aborted)
-    return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
+  if (scope.signal?.aborted) return yield* judgeCancelled();
 
   if (cached !== undefined) return { outcome: cached, source: 'hit' as const };
 
@@ -71,8 +71,7 @@ const callThroughCache = Effect.fn('callThroughCache')(function* (
     signal: scope.signal,
   });
 
-  if (scope.signal?.aborted)
-    return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
+  if (scope.signal?.aborted) return yield* judgeCancelled();
   // A storage failure cannot invalidate a completed verdict. Defects and interruption still propagate.
   yield* cache
     .set(key, outcome)

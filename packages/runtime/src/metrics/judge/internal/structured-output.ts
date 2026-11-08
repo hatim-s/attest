@@ -1,7 +1,11 @@
 import * as Effect from 'effect/Effect';
-import { foreign, ownOperation, withRelease } from '../../internal/operation.js';
-import { stripStruct } from '@attest/contracts';
-import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
+import { ownOperation, withRelease } from '../../internal/operation.js';
+import {
+  parseWithSchema,
+  parseWithSchemaSync,
+  stripStruct,
+  tryPromiseClassify,
+} from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
 import {
   chat,
@@ -11,6 +15,7 @@ import {
 } from '@tanstack/ai';
 import * as Schema from 'effect/Schema';
 
+import { AttestMetricError, MetricOperationError } from '../../errors.js';
 import { judgeResponseSchema } from '../rubric-prompt.js';
 
 /** Adapts the verdict owner for SDK validation and provider JSON Schema generation. */
@@ -72,11 +77,22 @@ type StructuredChatRequest = {
 /** Executes one schema-constrained chat call; injected by tests to avoid provider network calls. */
 type StructuredChatExecutor = (request: StructuredChatRequest) => Effect.Effect<JsonValue, Error>;
 
-/** Identifies SDK structured-output failures the metric contract permits retrying exactly once. */
+/** Identifies SDK structured-output Errors the metric contract permits retrying exactly once. */
 // BOUNDARY: SDK thrown values may carry a structured-output failure code.
-const isUnparseableResponse = (cause: unknown): boolean =>
+const isUnparseableResponse = (cause: unknown): cause is Error =>
   cause instanceof StandardSchemaValidationError ||
-  parseWithSchema(unparseableResponseSchema, cause).ok;
+  (cause instanceof Error && parseWithSchema(unparseableResponseSchema, cause).ok);
+
+/**
+ * Calls the structured chat SDK and classifies its rejection at the call: unparseable output
+ * becomes a retryable `judge_unparseable_response`, anything else a foreign operation failure.
+ */
+const callStructuredChat = <A>(evaluate: (signal: AbortSignal) => PromiseLike<A>) =>
+  tryPromiseClassify(evaluate, (cause) =>
+    isUnparseableResponse(cause)
+      ? new AttestMetricError('judge_unparseable_response', cause.message, { cause })
+      : new MetricOperationError({ reason: 'foreign', cause }),
+  );
 
 /** Captures one attempt's provider bytes and token deltas without exposing SDK objects to persistence. */
 const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddleware => ({
@@ -115,7 +131,7 @@ const executeStructuredChat: StructuredChatExecutor = (request) =>
 
       return yield* withRelease(
         Effect.gen(function* () {
-          const response = yield* foreign(() =>
+          const response = yield* callStructuredChat(() =>
             chat({
               adapter: request.adapter,
               systemPrompts: [request.system],
@@ -136,9 +152,9 @@ const executeStructuredChat: StructuredChatExecutor = (request) =>
   );
 
 export {
+  callStructuredChat,
   executeStructuredChat,
   judgeOutputSchema,
-  isUnparseableResponse,
   type JudgeAttemptObservation,
   type StructuredChatExecutor,
 };

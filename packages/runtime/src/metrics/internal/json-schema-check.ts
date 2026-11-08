@@ -1,4 +1,4 @@
-import { isBoolean } from '@attest/contracts';
+import { foreignMessage, isBoolean } from '@attest/contracts';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js';
 
 import type { PathResolution } from '../evaluation-document.js';
@@ -30,7 +30,7 @@ const compileSchemaValidator = (
       formatErrors: (errors) => ajv.errorsText(errors, { separator: '; ' }),
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = foreignMessage(error, String(error));
     throw new AttestMetricError(
       'invalid_json_schema',
       `JSON Schema could not be compiled: ${message}`,

@@ -70,7 +70,10 @@ const invokeHttpAgent = Effect.fn('http.invokeAttempt')(function* (
               const cancellation = yield* Effect.exit(
                 Effect.tryPromise({
                   try: () => response.body?.cancel() ?? Promise.resolve(),
-                  catch: (cause) => cause,
+                  catch: (cause) =>
+                    new AgentInvocationError('network', 'HTTP response body cancel failed.', {
+                      cause,
+                    }),
                 }).pipe(Effect.interruptible, Effect.timeoutOption(100)),
               );
 

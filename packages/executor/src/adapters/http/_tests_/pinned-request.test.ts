@@ -124,10 +124,14 @@ it('retains every nested cleanup diagnostic on a primary defect', async () => {
   }
 });
 
-it('captures deadline-owner cleanup defects without replacing the primary failure', async () => {
+it('captures deadline-owner cleanup defects while keeping the primary failure', async () => {
   const first = new AbortController();
   const second = new AbortController();
-  const primary = new AgentInvocationError('network', 'primary transport failure');
+
+  const primary = new AgentInvocationError('network', 'primary transport failure', {
+    cause: new Error('socket reset'),
+  });
+
   const cleanup = new Error('listener release failed');
 
   const removeFirst = vi.spyOn(first.signal, 'removeEventListener').mockImplementation(() => {
@@ -146,7 +150,14 @@ it('captures deadline-owner cleanup defects without replacing the primary failur
 
     if (Exit.isFailure(outcome)) {
       expect(Cause.hasDies(outcome.cause)).toBe(false);
-      expect(Cause.squash(outcome.cause)).toBe(primary);
+      const failure = Cause.squash(outcome.cause);
+      expect(failure).toBeInstanceOf(AgentInvocationError);
+      expect(failure).toMatchObject({
+        code: 'network',
+        applicationStarted: true,
+        cause: { primary: primary.cause },
+      });
+      expect(failure).toHaveProperty('message', primary.message);
       const diagnostics = Context.getOrUndefined(Cause.annotations(outcome.cause), HttpCleanup);
       expect(diagnostics?.filter(Exit.isFailure).map((exit) => Cause.squash(exit.cause))).toContain(
         cleanup,
@@ -301,8 +312,9 @@ it('closes the pinned socket when native header observation expires after dispat
   }
 });
 
-it('prohibits replay after primary failure plus cleanup failure without replacing the primary', async () => {
+it('prohibits replay after primary failure plus cleanup failure while keeping the primary evidence', async () => {
   const primary = new AgentInvocationError('network', 'body failed', {
+    cause: new Error('body reset'),
     rawExcerpt: { text: 'partial', truncated: false, sha256: 'hash' },
   });
 
@@ -315,11 +327,14 @@ it('prohibits replay after primary failure plus cleanup failure without replacin
   expect(Exit.isFailure(outcome)).toBe(true);
 
   if (Exit.isFailure(outcome)) {
-    expect(Cause.squash(outcome.cause)).toBe(primary);
-    expect(primary).toMatchObject({
+    const failure = Cause.squash(outcome.cause);
+    expect(failure).toBeInstanceOf(AgentInvocationError);
+    expect(failure).toHaveProperty('message', primary.message);
+    expect(failure).toMatchObject({
+      code: 'network',
       applicationStarted: true,
       rawExcerpt: { text: 'partial' },
-      cause: { cleanup: [expect.objectContaining({ _tag: 'Failure' })] },
+      cause: { primary: primary.cause, cleanup: [expect.objectContaining({ _tag: 'Failure' })] },
     });
   }
 });

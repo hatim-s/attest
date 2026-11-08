@@ -5,7 +5,7 @@ import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { AttestError } from '../errors/attest-error.js';
-import { tryOwned } from '../errors/try-owned.js';
+import { tryOwned, tryPromiseClassify } from '../errors/try-owned.js';
 
 class ExampleError extends AttestError {
   declare readonly code: 'EXAMPLE_CODE';
@@ -83,6 +83,7 @@ describe('tryOwned', () => {
     );
 
     expect(plain).toEqual(Exit.fail(owned));
+    expect(Exit.isFailure(plain) && Cause.squash(plain.cause)).toBe(owned);
     expect(mapped).toEqual(Exit.fail('EXAMPLE_CODE'));
   });
 
@@ -99,5 +100,37 @@ describe('tryOwned', () => {
 
     expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(foreign);
     expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
+    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+  });
+});
+
+describe('tryPromiseClassify', () => {
+  const owned = new ExampleError('owned failure');
+  const foreign = new TypeError('programming error');
+  const claim = (cause: unknown) => (cause instanceof ExampleError ? cause.code : undefined);
+
+  it('fails with the value the classifier claims', async () => {
+    const exit = await Effect.runPromiseExit(
+      tryPromiseClassify(() => Promise.reject(owned), claim),
+    );
+
+    expect(exit).toEqual(Exit.fail('EXAMPLE_CODE'));
+  });
+
+  it('dies with the original value for an unclaimed rejection or synchronous throw', async () => {
+    const rejected = await Effect.runPromiseExit(
+      tryPromiseClassify(() => Promise.reject(foreign), claim),
+    );
+
+    const thrown = await Effect.runPromiseExit(
+      tryPromiseClassify(() => {
+        throw foreign;
+      }, claim),
+    );
+
+    for (const exit of [rejected, thrown]) {
+      expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(foreign);
+    }
   });
 });

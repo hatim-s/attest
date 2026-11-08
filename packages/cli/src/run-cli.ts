@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect';
 import * as Cause from 'effect/Cause';
 import * as Exit from 'effect/Exit';
+import { tryPromiseClassify } from '@attest/contracts';
 import { withEvalApplication } from '@attest/local/eval';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -207,15 +208,14 @@ const runCliApplication = (
         services: options.services,
         interaction: { ...interaction, prompt },
         io,
-        ...(yield* Effect.tryPromise({
-          try: () =>
-            resolveAttestPaths({
-              attestHome: process.env.ATTEST_HOME,
-              homeDirectory: homedir(),
-              workingDirectory,
-            }),
-          catch: (error) => error,
-        })),
+        // Path resolution never rejects, so a rejection is a defect.
+        ...(yield* Effect.promise(() =>
+          resolveAttestPaths({
+            attestHome: process.env.ATTEST_HOME,
+            homeDirectory: homedir(),
+            workingDirectory,
+          }),
+        )),
         workingDirectory,
       },
       (message) => commanderErrors.push(message),
@@ -251,10 +251,13 @@ const runCliApplication = (
 
     try {
       const parsed = yield* Effect.exit(
-        Effect.tryPromise({
-          try: () => program.parseAsync(argv, { from: 'user' }),
-          catch: (error) => error,
-        }),
+        // Parsing rejects with Commander usage errors and option validation; anything else is a
+        // defect. Both reach the same report through `Cause.squash`.
+        tryPromiseClassify(
+          () => program.parseAsync(argv, { from: 'user' }),
+          (error) =>
+            error instanceof CommanderError || error instanceof AttestCliError ? error : undefined,
+        ),
       );
 
       const cancelled = Effect.callback<never, AttestCliError>((resume) => {

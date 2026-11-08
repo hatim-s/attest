@@ -1,6 +1,12 @@
 export { AttestError } from './errors/attest-error.js';
 
-export { tryOwned } from './errors/try-owned.js';
+export {
+  foreignMessage,
+  tryClassify,
+  tryOwned,
+  tryPromiseClassify,
+  type Classify,
+} from './errors/try-owned.js';
 
 export type { Result } from './result.js';
 

@@ -3,6 +3,7 @@ import type { BashOptions } from 'just-bash';
 import * as Effect from 'effect/Effect';
 import * as Semaphore from 'effect/Semaphore';
 import { foreign } from './operation.js';
+import { EnvironmentOperationError } from './environment-error.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
 import type { CaseEnvironmentFactory } from './types.js';
 import {
@@ -26,21 +27,16 @@ type JustBashIsolationOptions = {
 const justBashIsolation = (options: JustBashIsolationOptions = {}): CaseEnvironmentFactory =>
   Effect.fn(function* ({ signal }) {
     if (signal.aborted)
-      return yield* Effect.fail(
-        signal.reason instanceof Error ? signal.reason : new Error('Case acquisition aborted.'),
-      );
+      return yield* EnvironmentOperationError.from(signal.reason, 'case_acquisition_aborted');
     // The portable build avoids Node-only global patching and exposes no host command adapters.
     const { Bash } = yield* foreign(() => import('just-bash/browser'));
 
     if (signal.aborted)
-      return yield* Effect.fail(
-        signal.reason instanceof Error ? signal.reason : new Error('Case acquisition aborted.'),
-      );
+      return yield* EnvironmentOperationError.from(signal.reason, 'case_acquisition_aborted');
 
     const files = yield* Effect.try({
       try: () => resolveJustBashFiles(options.files ?? {}),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error('Invalid seed files.', { cause }),
+      catch: (cause) => EnvironmentOperationError.from(cause, 'seed_files_invalid'),
     });
 
     const shell = new Bash({
@@ -76,10 +72,9 @@ const justBashIsolation = (options: JustBashIsolationOptions = {}): CaseEnvironm
             });
 
             if (admitted.aborted)
-              return yield* Effect.fail(
-                admitted.reason instanceof Error
-                  ? admitted.reason
-                  : new Error('Case operation aborted.'),
+              return yield* EnvironmentOperationError.from(
+                admitted.reason,
+                'case_operation_aborted',
               );
 
             return value;

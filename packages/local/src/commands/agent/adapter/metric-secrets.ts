@@ -1,12 +1,26 @@
+import * as Data from 'effect/Data';
 import * as Effect from 'effect/Effect';
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, resolve } from 'node:path';
 import type { SecretReference } from '@attest/contracts';
 import { LocalError } from '../../../errors/index.js';
-import { openAnchored } from '../../../internal/open-anchored.js';
+import { anchoredCall, openAnchored } from '../../../internal/open-anchored.js';
 import { isLiteralTemplateValue } from '../../../internal/template-value.js';
 import { isProjectPath } from '../../../project/project-path.js';
-import { foreign, withRelease } from './metric-operation.js';
+import { withRelease } from './metric-operation.js';
+
+const secretFileFailureMessages = {
+  cleanup_failed: 'Secret file descriptor cleanup failed.',
+  unsafe_mode: 'secret file must not be readable by group or others',
+} as const;
+
+/** Internal cause for an unavailable secret file; callers only see the mapped LocalError. */
+class SecretFileFailure extends Data.TaggedError('LocalSecretFileFailure')<{
+  readonly reason: keyof typeof secretFileFailureMessages;
+  readonly cause?: unknown;
+}> {
+  override readonly message = secretFileFailureMessages[this.reason];
+}
 
 /** Reads a secret reference at invocation time without returning its source path or value. */
 const readSecretReference = (
@@ -48,22 +62,20 @@ const readSecretReference = (
           restore(
             Effect.gen(function* () {
               if ((opened.identity.mode & 0o077n) !== 0n)
-                return yield* Effect.fail(
-                  new Error('secret file must not be readable by group or others'),
-                );
+                return yield* new SecretFileFailure({ reason: 'unsafe_mode' });
 
-              return yield* foreign(() => opened.handle.readFile('utf8'));
+              return yield* anchoredCall('readFile', opened.path, () =>
+                opened.handle.readFile('utf8'),
+              );
             }),
           ),
-          foreign(() => opened.handle.close()),
+          anchoredCall('close', opened.path, () => opened.handle.close()),
         );
       }),
     ).pipe(
       // A failed secret read never joins the redaction list, so its value cannot be error evidence.
       Effect.catchTag('LocalMetricCleanupError', (error) =>
-        Effect.fail(
-          new Error('Secret file descriptor cleanup failed.', { cause: error.cleanupCause }),
-        ),
+        Effect.fail(new SecretFileFailure({ reason: 'cleanup_failed', cause: error.cleanupCause })),
       ),
       Effect.mapError(
         (cause) =>

@@ -1,4 +1,4 @@
-import { foreign, MetricCleanupError, withRelease } from '../agent/adapter/metric-operation.js';
+import { MetricCleanupError, withRelease } from '../agent/adapter/metric-operation.js';
 import * as Effect from 'effect/Effect';
 /**
  * The local metric bridge. `attest metric test` and eval both dispatch metrics through it, so
@@ -50,7 +50,7 @@ import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
-import { openAnchored, type AnchoredEntry } from '../../internal/open-anchored.js';
+import { anchoredCall, openAnchored, type AnchoredEntry } from '../../internal/open-anchored.js';
 import { resolveContainedPath } from '../../project/project-path.js';
 import { redactMetricEvaluation, redactProbeValue } from '../agent/adapter/evidence-redaction.js';
 import { resolveHttpSecrets, resolveProcessEnvironment } from '../agent/adapter/metric-secrets.js';
@@ -135,7 +135,7 @@ const openMetricDirectory = (
 ): Effect.Effect<AnchoredEntry, Error> =>
   Effect.gen(function* () {
     const projectPath = relative(projectRoot, resolve(projectRoot, cwd ?? '.'));
-    const root = yield* foreign(() => realpath(projectRoot));
+    const root = yield* anchoredCall('realpath', projectRoot, () => realpath(projectRoot));
 
     const path =
       projectPath === ''
@@ -159,9 +159,9 @@ const assertMetricDirectoryIdentity = (
   cwd: string | undefined,
 ): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
-    const current = yield* foreign(() => lstat(directory.path, { bigint: true })).pipe(
-      Effect.mapError((error) => unsafeMetricDirectory(cwd ?? '.', error)),
-    );
+    const current = yield* anchoredCall('lstat', directory.path, () =>
+      lstat(directory.path, { bigint: true }),
+    ).pipe(Effect.mapError((error) => unsafeMetricDirectory(cwd ?? '.', error)));
 
     if (
       current.isSymbolicLink() ||
@@ -262,7 +262,7 @@ const evaluateMetricResource = ({
               return { evaluation, secrets };
             }),
           ),
-          foreign(() => directory.handle.close()),
+          anchoredCall('close', directory.path, () => directory.handle.close()),
         ).pipe(
           // Cleanup failures cross the caller boundary as evidence. Keep the scored result and
           // full cleanup Cause, but neither its plaintext metric secrets nor unredacted output.

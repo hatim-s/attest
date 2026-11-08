@@ -5,7 +5,6 @@ import {
   EnvironmentCleanupError,
 } from '../../../isolation/operation.js';
 import { run } from '../../../_tests_/support/run-effect.js';
-import { AgentInvocationError } from '../../../errors.js';
 import { createHash } from 'node:crypto';
 import { mkdtemp, open, readFile, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -119,7 +118,9 @@ describe('Vercel sandbox lifecycle', () => {
       expect(error).toBeInstanceOf(EnvironmentCleanupError);
 
       if (!(error instanceof EnvironmentCleanupError)) throw new Error('Expected cleanup evidence');
-      expect(error.cleanupCause.reasons.find(Cause.isFailReason)?.error).toBe(closeFailure);
+      expect(error.cleanupCause.reasons.find(Cause.isFailReason)?.error).toMatchObject({
+        cause: closeFailure,
+      });
       expect(sdk.runCommand).not.toHaveBeenCalled();
       expect(sdk.writeFiles).not.toHaveBeenCalled();
       expect(sdk.stop).toHaveBeenCalledOnce();
@@ -189,19 +190,14 @@ describe('Vercel sandbox lifecycle', () => {
           outcome === 'completed' ? 'output_cap_exceeded' : 'nonzero_exit',
         );
 
-        const artifactError: unknown =
-          outcome === 'completed'
-            ? result.error
-            : Object.getOwnPropertyDescriptor(result.error, 'sandboxPostRunError')?.value;
+        const artifactError =
+          outcome === 'completed' ? result.error : result.error.sandboxPostRunError;
 
-        expect(artifactError).toBeInstanceOf(AgentInvocationError);
-
-        if (!(artifactError instanceof AgentInvocationError))
-          throw new Error('Expected artifact failure.');
+        if (artifactError === undefined) throw new Error('Expected artifact failure.');
         expect(artifactError.code).toBe('output_cap_exceeded');
-        const cause: unknown = Object.getOwnPropertyDescriptor(artifactError, 'effectCause')?.value;
+        const cause = artifactError.effectCause;
 
-        if (!Cause.isCause(cause)) throw new Error('Artifact failure lost its Cause.');
+        if (cause === undefined) throw new Error('Artifact failure lost its Cause.');
 
         const cleanup = Context.getOrUndefined(
           Cause.annotations(cause),
@@ -211,13 +207,12 @@ describe('Vercel sandbox lifecycle', () => {
         expect(cleanup?.cause.reasons.find(Cause.isDieReason)?.defect).toBe(destroyFailure);
 
         if (stopFails) {
-          const stopped: unknown = Object.getOwnPropertyDescriptor(
-            result.error,
-            'sandboxCleanupCause',
-          )?.value;
+          const stopped = result.error.sandboxCleanupCause;
 
-          if (!Cause.isCause(stopped)) throw new Error('VM cleanup lost its Cause.');
-          expect(stopped.reasons.find(Cause.isFailReason)?.error).toBe(stopFailure);
+          if (stopped === undefined) throw new Error('VM cleanup lost its Cause.');
+          expect(stopped.reasons.find(Cause.isFailReason)?.error).toMatchObject({
+            cause: stopFailure,
+          });
           expect(result.diagnostics.sandboxCleanupConfirmed).toBe(false);
         }
 
@@ -648,7 +643,7 @@ describe('Vercel sandbox lifecycle', () => {
       EnvironmentCleanupDiagnostics,
     );
 
-    expect(release?.cause.reasons[0]).toMatchObject({ _tag: 'Fail', error: cleanup });
+    expect(release?.cause.reasons[0]).toMatchObject({ _tag: 'Fail', error: { cause: cleanup } });
     expect(sdk.writeFiles).not.toHaveBeenCalled();
     expect(sdk.runCommand).toHaveBeenCalledOnce();
     expect(sdk.stop).toHaveBeenCalledOnce();

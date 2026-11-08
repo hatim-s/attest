@@ -108,14 +108,9 @@ const readRemoteJson = Effect.fn('readRemoteJson')(function* (source: string, pa
           });
         }),
         [
-          Effect.tryPromise({ try: () => reader.cancel(), catch: (cause) => cause }).pipe(
+          Effect.tryPromise(() => reader.cancel()).pipe(
             Effect.interruptible,
-            Effect.timeoutOption('1 second'),
-            Effect.flatMap((result) =>
-              result._tag === 'None'
-                ? Effect.fail(new Error('Remote reader cleanup timed out.'))
-                : Effect.void,
-            ),
+            Effect.timeout('1 second'),
           ),
           Effect.sync(() => reader.releaseLock()),
         ],

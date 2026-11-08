@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import type { JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
+import { anchoredCall } from '../../internal/open-anchored.js';
 import { parseJsonText, readSourceText } from '../../internal/source-text.js';
 import { openStore, withStoreScope } from '../../store/index.js';
 import { loadCommandProject } from '../project/load-command-project.js';
@@ -83,10 +84,9 @@ const runAgentTestCommand = Effect.fn('runAgentTestCommand')(function* (
       ? yield* probe()
       : yield* withStoreScope((owner) =>
           Effect.gen(function* () {
-            yield* Effect.tryPromise({
-              try: () => mkdir(join(loaded.root, '.attest'), { recursive: true }),
-              catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-            });
+            yield* anchoredCall('mkdir', join(loaded.root, '.attest'), () =>
+              mkdir(join(loaded.root, '.attest'), { recursive: true }),
+            );
             const store = yield* openStore(join(loaded.root, '.attest', 'runs.db'), owner);
 
             return yield* Effect.uninterruptibleMask((restore) =>

@@ -1,4 +1,6 @@
-import { AttestError, type JsonValue } from '@attest/contracts';
+import * as Data from 'effect/Data';
+
+import { AttestError, foreignMessage, type JsonValue } from '@attest/contracts';
 
 import type { MetricErrorCode } from './metric-evaluation.js';
 
@@ -30,4 +32,30 @@ class AttestMetricError extends AttestError {
   }
 }
 
-export { AttestMetricError, type AttestMetricErrorCode };
+type MetricOperationReason = 'owner_interrupted' | 'process_cleanup_unconfirmed';
+
+const METRIC_OPERATION_MESSAGES = {
+  owner_interrupted: 'Metric owner interrupted.',
+  process_cleanup_unconfirmed: 'Metric process cleanup is unconfirmed.',
+} as const satisfies Record<MetricOperationReason, string>;
+
+/**
+ * A metric failure without a stable metric code, reported as `internal_error`. `foreign` repeats
+ * the message of a rejected foreign call or uncompilable regex; the owner abort reason uses
+ * `owner_interrupted`.
+ */
+class MetricOperationError extends Data.TaggedError('MetricOperationError')<{
+  readonly reason: 'foreign' | MetricOperationReason;
+  readonly cause?: unknown;
+}> {
+  override readonly message =
+    this.reason === 'foreign'
+      ? foreignMessage(this.cause, 'Foreign operation failed.')
+      : METRIC_OPERATION_MESSAGES[this.reason];
+}
+
+/** Ends one judge evaluation because its caller cancelled it. */
+const judgeCancelled = (): AttestMetricError =>
+  new AttestMetricError('metric_cancelled', 'Judge evaluation was cancelled.');
+
+export { AttestMetricError, MetricOperationError, judgeCancelled, type AttestMetricErrorCode };

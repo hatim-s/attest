@@ -11,6 +11,7 @@ import type { JudgeCache } from '../judge-cache.js';
 import type { JudgeClient } from '../judge-client.js';
 import type { JudgeOutcome, JudgeRecord } from '../judge-outcome-schema.js';
 import { evaluateJudgeMetric } from '../judge-metric.js';
+import { TestFailure } from '../../../_tests_/support/test-failure.js';
 
 const definition: JudgeMetricDefinition = {
   name: 'correctness',
@@ -46,16 +47,20 @@ const verdict = (score: number): JudgeOutcome => ({
   record,
 });
 
-/** Returns scripted outcomes in order; an Error entry rejects that call. */
-const scriptedClient = (scripts: Array<JudgeOutcome | Error>): JudgeClient & { calls: number } => {
+/** Returns scripted outcomes in order; an error entry fails that call. */
+const scriptedClient = (
+  scripts: Array<JudgeOutcome | AttestMetricError>,
+): JudgeClient & { calls: number } => {
   const client = {
     calls: 0,
     scoreRubric: () =>
-      foreign(() => {
+      Effect.suspend(() => {
         client.calls += 1;
-        const script = scripts.shift() ?? new Error('No scripted judge outcome remains.');
 
-        return script instanceof Error ? Promise.reject(script) : Promise.resolve(script);
+        const script =
+          scripts.shift() ?? new TestFailure({ message: 'No scripted judge outcome remains.' });
+
+        return script instanceof Error ? Effect.fail(script) : Effect.succeed(script);
       }),
   };
 
@@ -74,14 +79,15 @@ const memoryCache = (options: { failFirstRead?: boolean; failWrites?: boolean } 
         cache.reads += 1;
 
         if (options.failFirstRead === true && cache.reads === 1) {
-          return Promise.reject(new Error('cache offline'));
+          return Promise.reject(new TestFailure({ message: 'cache offline' }));
         }
 
         return Promise.resolve(entries.get(key));
       }),
     set: (key, outcome) =>
       foreign(() => {
-        if (options.failWrites === true) return Promise.reject(new Error('cache offline'));
+        if (options.failWrites === true)
+          return Promise.reject(new TestFailure({ message: 'cache offline' }));
         cache.writes += 1;
         entries.set(key, outcome);
 
@@ -252,9 +258,13 @@ describe('evaluateJudgeMetric', () => {
           calls += 1;
 
           return new Promise((_resolve, reject) => {
-            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-              once: true,
-            });
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(new TestFailure({ message: 'aborted' })),
+              {
+                once: true,
+              },
+            );
           });
         }),
     };

@@ -6,7 +6,7 @@ import { StoreError, type ProjectCatalog, type RunSource } from '@attest/core';
 
 import { storeDecode } from '../store/internal/store-effect.js';
 import { activityBounds } from '@attest/core/records';
-import { errnoCode } from '../internal/errno-code.js';
+import { anchoredCall } from '../internal/open-anchored.js';
 import { openReadonlyRunStore, type StoreScope } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';
 
@@ -83,16 +83,15 @@ const createRegistryCatalog = (
       const path = join(entry.root, '.attest', 'runs.db');
 
       // Only absence observed before opening is empty. Failed opens retain schema and release evidence.
-      const exists = yield* Effect.tryPromise({
-        try: () => lstat(path),
-        catch: (cause) => cause,
-      }).pipe(
+      const exists = yield* anchoredCall('lstat', path, () => lstat(path)).pipe(
         Effect.map(() => true),
-        Effect.catch((cause) =>
-          errnoCode(cause) === 'ENOENT'
+        Effect.catch((failure) =>
+          failure.code === 'ENOENT'
             ? Effect.succeed(false)
             : Effect.fail(
-                new StoreError('READ_FAILED', 'Could not inspect the project store.', { cause }),
+                new StoreError('READ_FAILED', 'Could not inspect the project store.', {
+                  cause: failure.cause,
+                }),
               ),
         ),
       );

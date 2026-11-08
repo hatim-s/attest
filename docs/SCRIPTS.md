@@ -19,21 +19,21 @@ Run workspace commands from the repository root. To run one package script, use
 
 ## Application packages
 
-| Script            | Packages                                                    | Behavior                                                                                                                                                |
-| ----------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`           | contracts, core, api, executor, client, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Core, api, client, runtime, and local use `tsc --build` to build referenced packages first. |
-| `typecheck`       | contracts, core, api, executor, client, runtime, local, cli | Checks source and test types without emitting files.                                                                                                    |
-| `test`            | contracts                                                   | Runs protocol and schema tests.                                                                                                                         |
-| `test`            | core                                                        | Runs domain comparison, import, trace, and record tests.                                                                                                |
-| `test`            | api                                                         | Runs API contract, server, client, and dashboard bootstrap tests.                                                                                       |
-| `test`            | executor                                                    | Runs invocation, transport, and process-cleanup tests with one worker.                                                                                  |
-| `test`            | client                                                      | Runs the callback runner, artifact collection, and mock Pi handler tests with one worker.                                                               |
-| `test:node`       | executor                                                    | Runs compiled executor acceptance checks on Node. Build executor first.                                                                                 |
-| `test:bun`        | executor                                                    | Runs the same compiled executor checks on Bun. Build executor first.                                                                                    |
-| `test`            | runtime                                                     | Runs scheduling, lifecycle hooks, metric, and cancellation tests with one worker. Executor owns isolation providers.                                    |
-| `test`            | local                                                       | Runs project, transaction, SQLite, application, and local server tests with one worker.                                                                 |
-| `test`            | cli                                                         | Runs terminal command tests with one worker, excluding `src/acceptance/**`.                                                                             |
-| `test:acceptance` | cli                                                         | Runs packed-install journeys separately from package `test`.                                                                                            |
+| Script            | Packages                                                    | Behavior                                                                                                                                                          |
+| ----------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`           | contracts, core, api, executor, client, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Core, api, executor, client, runtime, and local use `tsc --build` to build referenced packages first. |
+| `typecheck`       | contracts, core, api, executor, client, runtime, local, cli | Checks source and test types without emitting files.                                                                                                              |
+| `test`            | contracts                                                   | Runs protocol and schema tests.                                                                                                                                   |
+| `test`            | core                                                        | Runs domain comparison, import, trace, and record tests.                                                                                                          |
+| `test`            | api                                                         | Runs API contract, server, client, and dashboard bootstrap tests.                                                                                                 |
+| `test`            | executor                                                    | Runs invocation, transport, and process-cleanup tests with one worker.                                                                                            |
+| `test`            | client                                                      | Runs the callback runner, artifact collection, and mock Pi handler tests with one worker.                                                                         |
+| `test:node`       | executor                                                    | Runs compiled executor acceptance checks on Node. Build executor first.                                                                                           |
+| `test:bun`        | executor                                                    | Runs the same compiled executor checks on Bun. Build executor first.                                                                                              |
+| `test`            | runtime                                                     | Runs scheduling, lifecycle hooks, metric, and cancellation tests with one worker. Executor owns isolation providers.                                              |
+| `test`            | local                                                       | Runs project, transaction, SQLite, application, and local server tests with one worker.                                                                           |
+| `test`            | cli                                                         | Runs terminal command tests with one worker, excluding `src/acceptance/**`.                                                                                       |
+| `test:acceptance` | cli                                                         | Runs packed-install journeys separately from package `test`.                                                                                                      |
 
 ## Supporting packages
 
@@ -69,10 +69,14 @@ Runtime also provides `test:node` and `test:bun`. They run the same compiled eva
 
 ## Compiler and cache ownership
 
-Every TypeScript build and typecheck, including conformance and `typecheck:scripts`,
-invokes `node_modules/typescript7/bin/tsc` explicitly. `typescript7` is an exact npm
-alias for `typescript@7.0.2`. The ordinary `typescript@5.9.3` package supplies
-ESLint's type-aware JavaScript API. Explicit paths avoid their colliding `tsc` binaries.
+Every `typecheck` script, the eight package `build` scripts and `typecheck:scripts`
+run `effect-tsgo tsc@7.0.2`. Effect language service errors and warnings fail
+these scripts; [EFFECT.md](EFFECT.md#language-service) describes the setup. The web
+build bundles with Bun and the site build copies a file, so neither runs tsc.
+`effect-tsgo` runs the TypeScript 7.0.2 build from its platform package and
+ignores any `tsc` binary on PATH. `typescript7`, an exact npm alias for
+`typescript@7.0.2`, stays installed for editors. The ordinary `typescript@5.9.3`
+package supplies ESLint's type-aware JavaScript API.
 
 `lint` uses ESLint's content cache at `node_modules/.cache/eslint/`; its type-aware
 rules and project configuration are unchanged. `generate:schemas` runs Turbo's

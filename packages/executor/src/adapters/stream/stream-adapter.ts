@@ -7,7 +7,7 @@ import {
   type AgentResource,
 } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, type AgentInvocationErrorOptions } from '../../errors.js';
 import { DEFAULT_ATTEMPT_MS, DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createFailedAttempt } from '../../internal/failed-attempt.js';
@@ -23,13 +23,19 @@ class StreamCleanupError extends AgentInvocationError {
   constructor(
     readonly cleanupError: AgentInvocationError,
     readonly result: InvocationResult,
+    options?: AgentInvocationErrorOptions,
   ) {
     super(cleanupError.code, cleanupError.message, {
       cause: cleanupError.cause,
       applicationStarted: true,
       httpStatus: cleanupError.httpStatus,
       rawExcerpt: cleanupError.rawExcerpt,
+      ...options,
     });
+  }
+
+  protected override rebuild(options: AgentInvocationErrorOptions): StreamCleanupError {
+    return new StreamCleanupError(this.cleanupError, this.result, options);
   }
 }
 

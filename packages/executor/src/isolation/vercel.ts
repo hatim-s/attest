@@ -17,6 +17,7 @@ import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbo
 import { readRemoteFile } from '../adapters/sandbox/sandbox-transfer.js';
 import type { VercelSandboxFactory } from '../adapters/sandbox/types.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
+import { EnvironmentOperationError } from './environment-error.js';
 import type { CaseEnvironment, CaseEnvironmentFactory } from './types.js';
 import { normalizeWorkspacePath } from './workspace-path.js';
 
@@ -94,20 +95,16 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
 
   return Effect.fn(function* ({ signal }) {
     if (signal.aborted)
-      return yield* Effect.fail(
-        signal.reason instanceof Error ? signal.reason : new Error('Case acquisition aborted.'),
-      );
+      return yield* EnvironmentOperationError.from(signal.reason, 'case_acquisition_aborted');
 
     const credentials = yield* Effect.try({
       try: () => resolveVercelSandboxCredentials(credentialEnv ?? process.env),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error('Sandbox credentials failed.', { cause }),
+      catch: (cause) => EnvironmentOperationError.from(cause, 'sandbox_credentials_failed'),
     });
 
     const files = yield* Effect.try({
       try: () => resolveSeedFiles(options.files, cap),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error('Sandbox seed failed.', { cause }),
+      catch: (cause) => EnvironmentOperationError.from(cause, 'sandbox_seed_failed'),
     });
 
     return yield* ownOperation((cancelled) =>
@@ -122,16 +119,16 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
           signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),
         });
 
-        let poisonReason: Error | undefined;
+        let poisonReason: EnvironmentOperationError | SandboxCleanupError | undefined;
 
         const lifecycle = createEnvironmentLifecycle({
           signal,
           finalizationTimeoutMs,
-          poisonedError: () => poisonReason ?? new Error('Case environment has been poisoned.'),
+          poisonedError: () => poisonReason,
         });
 
         const stopLock = yield* Semaphore.make(1);
-        let stopped: Exit.Exit<void, Error> | undefined;
+        let stopped: Exit.Exit<void, EnvironmentOperationError> | undefined;
 
         /** Every caller observes the same stop receipt, including failed confirmation. */
         const stop = () =>
@@ -144,7 +141,7 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
           );
 
         /** A rejected command cannot be retried or reused until the VM has been stopped. */
-        const poison = (error: Error): Effect.Effect<never, Error> => {
+        const poison = (error: EnvironmentOperationError) => {
           poisonReason ??= error;
           lifecycle.poison(error);
 
@@ -173,9 +170,7 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
         if (signal.aborted)
           return yield* withRelease(
             Effect.fail(
-              signal.reason instanceof Error
-                ? signal.reason
-                : new Error('Sandbox acquisition aborted.'),
+              EnvironmentOperationError.from(signal.reason, 'sandbox_acquisition_aborted'),
             ),
             stop(),
           );
@@ -194,7 +189,7 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
             );
 
             if (ready.exitCode !== 0)
-              return yield* Effect.fail(new Error('Could not prepare case sandbox.'));
+              return yield* new EnvironmentOperationError({ reason: 'sandbox_prepare_failed' });
 
             if (files.length > 0)
               yield* foreign((foreignSignal) =>
@@ -206,16 +201,14 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
         if (signal.aborted && Exit.isSuccess(setup))
           return yield* withRelease(
             Effect.fail(
-              signal.reason instanceof Error
-                ? signal.reason
-                : new Error('Sandbox acquisition aborted.'),
+              EnvironmentOperationError.from(signal.reason, 'sandbox_acquisition_aborted'),
             ),
             stop(),
           );
 
         if (Exit.isFailure(setup)) return yield* withRelease(Effect.failCause(setup.cause), stop());
         const disposeLock = yield* Semaphore.make(1);
-        let disposal: Exit.Exit<void, Error> | undefined;
+        let disposal: Exit.Exit<void, SandboxCleanupError> | undefined;
 
         const environment: CaseEnvironment = {
           exec: (script, execution = {}) =>
@@ -249,7 +242,9 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
                 ).pipe(Effect.catch(poison));
 
                 if (stdout.exceeded || stderr.exceeded)
-                  return yield* poison(new Error('Sandbox command output exceeds outputBytes.'));
+                  return yield* poison(
+                    new EnvironmentOperationError({ reason: 'command_output_too_large' }),
+                  );
 
                 return {
                   stdout: stdout.buffer().toString('utf8'),
@@ -269,7 +264,7 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
                 );
 
                 if (contents === null)
-                  return yield* Effect.fail(new Error(`Sandbox file does not exist: ${path}`));
+                  return yield* new EnvironmentOperationError({ reason: 'file_missing', path });
 
                 return contents.toString('utf8');
               }),
@@ -278,7 +273,7 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
             lifecycle.track((admitted) =>
               Effect.gen(function* () {
                 if (Buffer.byteLength(content) > cap)
-                  return yield* Effect.fail(new Error('Sandbox file exceeds outputBytes.'));
+                  return yield* new EnvironmentOperationError({ reason: 'file_too_large' });
                 yield* foreign((foreignSignal) =>
                   sdk.writeFiles(
                     [{ path: resolveRemotePath(normalizeWorkspacePath(path)), content }],
@@ -311,12 +306,12 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
                         { concurrency: 'unbounded' },
                       );
 
-                      const failed = releases.filter((exit): exit is Exit.Failure<unknown, Error> =>
-                        Exit.isFailure<unknown, Error>(exit),
-                      );
+                      const [drained, stopReceipt] = releases;
+                      const errors: unknown[] = [];
 
-                      const drained = releases[0];
-                      const errors: unknown[] = failed.map((exit) => exit.cause);
+                      if (Exit.isFailure(drained)) errors.push(drained.cause);
+
+                      if (Exit.isFailure(stopReceipt)) errors.push(stopReceipt.cause);
 
                       if (Exit.isSuccess(drained) && Option.isNone(drained.value))
                         errors.push(

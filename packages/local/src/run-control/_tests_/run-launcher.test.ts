@@ -42,6 +42,7 @@ import * as Schema from 'effect/Schema';
 import { writeFixtureProject } from '../../_tests_/support/project-transaction.js';
 import { runTestMutationCommand } from '../../commands/test/test-mutation-command.js';
 import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
+import { LocalError } from '../../errors/index.js';
 import { createRunLauncher } from '../create-run-launcher.js';
 import { toEvalRunDocument } from '../eval-run-document.js';
 import { spawnEvalRun } from '../spawn-eval-run.js';
@@ -336,9 +337,9 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
       runTestMutationCommand({
         project: root,
         readImportStdin: () => {
-          throw new Error('stdin must not be read');
+          throw new LocalError('cli_usage', 'stdin must not be read');
         },
-        readStdin: () => Promise.reject(new Error('stdin must not be read')),
+        readStdin: () => Promise.reject(new LocalError('cli_usage', 'stdin must not be read')),
         request: {
           schema: COMMAND_REQUEST_SCHEMA_ID,
           command: 'test.add',

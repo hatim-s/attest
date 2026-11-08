@@ -1,5 +1,13 @@
 {
   "compilerOptions": {
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false,
+        "includeSuggestionsInTsc": false
+      }
+    ],
     "strict": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",

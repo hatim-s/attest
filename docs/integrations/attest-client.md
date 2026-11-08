@@ -18,8 +18,9 @@ const program = Effect.scoped(
   Effect.gen(function* () {
     const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
 
+    // A missing token is a deployment mistake, so stop the process instead of recovering.
     if (triggerToken === undefined)
-      return yield* Effect.fail(new Error('Set ATTEST_TRIGGER_TOKEN.'));
+      return yield* Effect.die(new Error('Set ATTEST_TRIGGER_TOKEN.'));
 
     const runner = yield* createAgentRunner({
       handler: createPiHandler({
@@ -158,8 +159,17 @@ Drain observes accepted fibers for at most 35 seconds and fails if work remains.
 remaining fibers. Terminal Exits and delivery cleanup Causes remain in `runner.receipts`, an internal
 in-memory diagnostic map that contains tokens and must never be logged or serialized.
 Defects remain defects and do not become `handler_failed` completions. Wrap foreign operations
-with `Effect.tryPromise` to classify expected failures. `Effect.promise` turns every rejection into
-a defect. Drain and close report failures from all receipts still retained, including earlier calls.
+with `Effect.tryPromise` to classify expected failures:
+
+```ts
+Effect.tryPromise({
+  try: () => callMyAgent(input),
+  catch: (cause) => new AgentHandlerError({ message: 'The agent call failed.', cause }),
+});
+```
+
+`Effect.promise` turns every rejection into a defect. Drain and close report failures from all
+receipts still retained, including earlier calls.
 Scope shutdown evidence is in `runner.shutdown`, separate from invocation tokens.
 
 Admission allows 64 concurrent invocations and retains at most 10,000 token receipts. When full,
@@ -178,7 +188,7 @@ retain cleanup receipts; explicitly call `close()` before scope disposal to obse
 through E.
 
 The native API deliberately replaces Promise handler and operation signatures. Handlers return
-`Effect.Effect<HandlerResult, Error>`; constructors require an explicit Scope. A host must retain
+`Effect.Effect<HandlerResult, AgentHandlerError>`; constructors require an explicit Scope. A host must retain
 that scope across all requests and close admission and drain before disposal. Never run
 `Effect.scoped(createAgentRunner(...))` and return the handle: its owner would already be closed.
 At the host callback, run `runner.fetch(request)` through the host's Effect execution root. Bun's
@@ -211,7 +221,7 @@ createPiHandler({
   argv, // default ['pi']; extra arguments such as '-e', './extension.ts' go here
   model, // passed as --model
   systemPrompt, // passed as --system-prompt
-  workspace, // (invocation) => Effect.Effect<string, Error>; default: a fresh temp dir, removed afterwards
+  workspace, // (invocation) => Effect.Effect<string, AgentHandlerError>; default: a fresh temp dir, removed afterwards
   env, // extra variables for Pi, such as a provider key; undefined values are left out
   timeoutMs, // default 15 minutes
 });

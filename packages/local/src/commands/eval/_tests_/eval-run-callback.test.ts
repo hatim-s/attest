@@ -29,6 +29,7 @@ import { loadProject } from '../../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../../project/transaction/transactional-writer.js';
 import { runConfiguration } from '../../../run/run-configuration.js';
 import { openTestStore as openStore, run as executeB2 } from '../../../store/_tests_/b1-fixture.js';
+import { LocalError } from '../../../errors/index.js';
 import { runAgentImportCommand } from '../../agent/import.js';
 import { validateNativeAgentResource } from '../../agent/authoring/resource-validation.js';
 import { runAgentTestCommand } from '../../agent/test.js';
@@ -169,7 +170,7 @@ const createCallbackProject = async (origin: string): Promise<string> => {
     runAgentImportCommand({
       interactive: false,
       project: root,
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      readStdin: () => Promise.reject(new LocalError('cli_usage', 'stdin must not be read')),
       request: {
         schema: COMMAND_REQUEST_SCHEMA_ID,
         command: 'agent.import',

@@ -4,7 +4,7 @@ import {
   ownOperation,
   EnvironmentCleanupError,
 } from '../../isolation/operation.js';
-import { parseWithSchemaSync } from '@attest/contracts';
+import { parseWithSchemaSync, tryOwned } from '@attest/contracts';
 import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
 import * as Data from 'effect/Data';
@@ -349,17 +349,13 @@ const exportArtifacts = Effect.fn('exportArtifacts')(function* (
           return yield* Effect.failCause(cause);
         const error = yield* Effect.flip(Effect.failCause(cause));
 
-        const projected =
-          error instanceof AgentInvocationError
-            ? error
-            : new AgentInvocationError('network', 'Sandbox artifact export failed', {
-                cause: error,
-              });
-
         // Artifact cleanup is attached to the Cause, not necessarily to its typed error.
-        Object.defineProperty(projected, 'effectCause', { value: cause, configurable: true });
-
-        return projected;
+        return error instanceof AgentInvocationError
+          ? error.copyWith({ effectCause: cause })
+          : new AgentInvocationError('network', 'Sandbox artifact export failed', {
+              cause: error,
+              effectCause: cause,
+            });
       }),
     ),
   );
@@ -383,11 +379,9 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
         return yield* Effect.die(new TypeError('Sandbox artifacts require an output directory.'));
       }
 
-      const credentials = yield* Effect.try({
-        try: () => resolveVercelSandboxCredentials(options.credentialEnv ?? process.env),
-        catch: (cause) =>
-          cause instanceof Error ? cause : new Error('Sandbox credentials failed.', { cause }),
-      });
+      const credentials = yield* tryOwned(AgentInvocationError, () =>
+        resolveVercelSandboxCredentials(options.credentialEnv ?? process.env),
+      );
 
       let result: InvocationResult | undefined;
       let postRunError: AgentInvocationError | undefined;
@@ -503,10 +497,8 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
             )
           ) {
             // Nested setup cleanup has no attempt yet; keep its Cause instead of treating it as VM-stop evidence.
-            postRunError = setupError(reason.error, options.signal, setupTimeout);
-            Object.defineProperty(postRunError, 'effectCause', {
-              value: primary.cause,
-              configurable: true,
+            postRunError = setupError(reason.error, options.signal, setupTimeout).copyWith({
+              effectCause: primary.cause,
             });
           }
         }
@@ -515,23 +507,23 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
       if (postRunError === undefined && result !== undefined) return result;
       const cleanupDiagnostics = cleanupConfirmed ? {} : { sandboxCleanupConfirmed: false };
 
-      const recordedError = result?.status === 'invocation_error' ? result.error : postRunError;
-
-      if (cleanupCause && recordedError)
-        Object.defineProperty(recordedError, 'sandboxCleanupCause', {
-          value: cleanupCause,
-          configurable: true,
-        });
-
       if (result?.status === 'invocation_error') {
-        if (postRunError)
-          Object.defineProperty(result.error, 'sandboxPostRunError', {
-            value: postRunError,
-            configurable: true,
-          });
+        const terminal = result.error;
+
+        const error = terminal.copyWith({
+          sandboxCleanupCause: cleanupCause,
+          sandboxPostRunError: postRunError,
+        });
 
         return {
           ...result,
+          error,
+          // The terminal attempt shares the terminal error, so it records the same evidence.
+          attempts: result.attempts.map((attempt) =>
+            attempt.status === 'invocation_error' && attempt.error === terminal
+              ? { ...attempt, error }
+              : attempt,
+          ),
           diagnostics: {
             ...result.diagnostics,
             sandboxError: postRunError?.message ?? 'Sandbox execution did not produce a result.',
@@ -545,7 +537,7 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
       if (postRunError !== undefined) diagnostics.sandboxError = postRunError.message;
 
       const attempt = createFailedAttempt(
-        postRunError ??
+        postRunError?.copyWith({ sandboxCleanupCause: cleanupCause }) ??
           new AgentInvocationError('network', 'Sandbox execution did not produce a result.'),
         {
           diagnostics,

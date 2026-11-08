@@ -4,6 +4,7 @@ import type { CaseEnvironment } from '@attest/executor';
 import { describe, expect, it } from 'vitest';
 
 import { createEnvironmentMetricTransport } from '../environment-transport.js';
+import { TestFailure, toTestFailure } from '../../_tests_/support/test-failure.js';
 
 type ExecResult = Effect.Success<ReturnType<CaseEnvironment['exec']>>;
 
@@ -23,11 +24,10 @@ const fakeEnvironment = (command: (script: string) => Promise<ExecResult>) => {
         ? Effect.succeed({ stdout: '/vercel/sandbox/workspace\n', stderr: '', exitCode: 0 })
         : Effect.tryPromise({
             try: () => command(script),
-            catch: (cause) =>
-              cause instanceof Error ? cause : new Error('fake command failed', { cause }),
+            catch: toTestFailure,
           });
     },
-    readFile: () => Effect.fail(new Error('not used')),
+    readFile: () => Effect.fail(new TestFailure({ message: 'not used' })),
     writeFile: (path, contents) => {
       writes.set(path, contents);
 

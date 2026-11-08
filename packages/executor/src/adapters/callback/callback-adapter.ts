@@ -11,7 +11,11 @@ import {
   type ReferenceArtifact,
 } from '@attest/contracts';
 
-import { AgentInvocationError, abortedError } from '../../errors.js';
+import {
+  AgentInvocationError,
+  abortedError,
+  type AgentInvocationErrorOptions,
+} from '../../errors.js';
 import { withHttpSignal, withHttpCleanup } from '../http/http-effects.js';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
@@ -63,13 +67,19 @@ class CallbackCleanupError extends AgentInvocationError {
   constructor(
     readonly cleanupError: AgentInvocationError,
     readonly result: InvocationResult,
+    options?: AgentInvocationErrorOptions,
   ) {
     super(cleanupError.code, cleanupError.message, {
       cause: cleanupError.cause,
       applicationStarted: true,
       httpStatus: cleanupError.httpStatus,
       rawExcerpt: cleanupError.rawExcerpt,
+      ...options,
     });
+  }
+
+  protected override rebuild(options: AgentInvocationErrorOptions): CallbackCleanupError {
+    return new CallbackCleanupError(this.cleanupError, this.result, options);
   }
 }
 

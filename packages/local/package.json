@@ -67,9 +67,9 @@
     "@libsql/client": "^0.17.4"
   },
   "scripts": {
-    "build": "node ../../node_modules/typescript7/bin/tsc --build tsconfig.build.json",
+    "build": "effect-tsgo tsc@7.0.2 --build tsconfig.build.json",
     "test": "vitest run --maxWorkers=1",
-    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit -p tsconfig.json",
+    "typecheck": "effect-tsgo tsc@7.0.2 --noEmit -p tsconfig.json",
     "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
   "devDependencies": {

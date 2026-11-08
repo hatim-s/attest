@@ -1,4 +1,5 @@
 import { serve, type ServerType } from '@hono/node-server';
+import { tryClassify } from '@attest/contracts';
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -33,8 +34,8 @@ const startViewServer = Effect.fn('startViewServer')(function* (options: StartVi
 
       const listening = Deferred.makeUnsafe<void, Error>();
 
-      const candidate = yield* Effect.try({
-        try: () =>
+      const candidate = yield* tryClassify(
+        () =>
           serve(
             {
               hostname: '127.0.0.1',
@@ -58,17 +59,15 @@ const startViewServer = Effect.fn('startViewServer')(function* (options: StartVi
               Deferred.doneUnsafe(listening, Effect.void);
             },
           ),
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.catch((cause) => {
-          // Bun throws bind errors synchronously; Node emits the same codes from the listener.
+        // Bun throws bind errors synchronously; Node emits the same codes from the listener.
+        (cause) => {
           const code = errnoCode(cause);
 
           return cause instanceof Error &&
             (code === 'EADDRINUSE' || code === 'EACCES' || code === 'EADDRNOTAVAIL')
-            ? Effect.fail(cause)
-            : Effect.die(cause);
-        }),
+            ? cause
+            : undefined;
+        },
       );
 
       server = candidate;

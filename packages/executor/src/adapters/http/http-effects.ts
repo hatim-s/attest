@@ -71,6 +71,15 @@ class HttpCleanup extends Context.Service<HttpCleanup, readonly Exit.Exit<unknow
   'attest/http/cleanup',
 ) {}
 
+/**
+ * Marks an invocation failure unsafe to replay after its cleanup failed, keeping its class, every
+ * fact and the primary cause beside the cleanup exits.
+ */
+const prohibitReplay = (
+  error: AgentInvocationError,
+  cleanup: readonly Exit.Exit<unknown, unknown>[],
+) => error.copyWith({ applicationStarted: true, cause: { primary: error.cause, cleanup } });
+
 /** Joins masked cleanup and keeps the primary failure, interruption or defect authoritative. */
 const withHttpCleanup = <A, E, R, R2>(
   primary: Effect.Effect<A, E, R>,
@@ -88,29 +97,18 @@ const withHttpCleanup = <A, E, R, R2>(
         const previous =
           Context.getOrUndefined(Cause.annotations(outcome.cause), HttpCleanup) ?? [];
 
-        if (failed) {
-          const primaryCause: Cause.Cause<unknown> = outcome.cause;
+        const failure: Cause.Cause<E | AgentInvocationError> = failed
+          ? Cause.annotate(
+              // Other failures pass through unchanged.
+              Cause.map(outcome.cause, (error) =>
+                error instanceof AgentInvocationError ? prohibitReplay(error, diagnostics) : error,
+              ),
+              Context.make(HttpCleanup, [...previous, ...diagnostics]),
+              { overwrite: true },
+            )
+          : outcome.cause;
 
-          for (const reason of primaryCause.reasons) {
-            if (reason._tag === 'Fail' && reason.error instanceof AgentInvocationError) {
-              // Preserve the primary instance and all its evidence while prohibiting replay.
-              Object.assign(reason.error, { applicationStarted: true });
-              reason.error.cause = { primary: reason.error.cause, cleanup: diagnostics };
-            }
-          }
-        }
-
-        return yield* Effect.failCause(
-          failed
-            ? Cause.annotate(
-                outcome.cause,
-                Context.make(HttpCleanup, [...previous, ...diagnostics]),
-                {
-                  overwrite: true,
-                },
-              )
-            : outcome.cause,
-        );
+        return yield* Effect.failCause(failure);
       }
 
       if (failed)

@@ -23,13 +23,12 @@ class MetricCleanupError<A = unknown> extends Data.TaggedError('LocalMetricClean
   override readonly message = 'Metric cleanup failed.';
 }
 
-/** Adapts one foreign SDK or filesystem operation, preserving its original Error identity. */
-const foreign = <A>(operation: (signal: AbortSignal) => PromiseLike<A>): Effect.Effect<A, Error> =>
-  Effect.tryPromise({
-    try: (signal) => operation(signal),
-    catch: (cause) =>
-      cause instanceof Error ? cause : new Error('Foreign operation failed.', { cause }),
-  });
+/** Reports a release that did not settle within the bound, so cleanup is unconfirmed. */
+class MetricCleanupUnconfirmed extends Data.TaggedError('LocalMetricCleanupUnconfirmed')<{
+  readonly timeoutMs: number;
+}> {
+  override readonly message = `Metric cleanup is unconfirmed after ${this.timeoutMs} ms.`;
+}
 
 /** Captures every release Exit and selects the outcome according to R1 through R3. */
 const withRelease = <A, E>(
@@ -45,7 +44,7 @@ const withRelease = <A, E>(
           const bounded = yield* Effect.timeoutOption(Effect.interruptible(release), 5_000);
 
           if (Option.isNone(bounded))
-            return yield* Effect.fail(new Error('Metric cleanup is unconfirmed after 5000 ms.'));
+            return yield* new MetricCleanupUnconfirmed({ timeoutMs: 5_000 });
         }),
       );
 
@@ -85,4 +84,4 @@ const withRelease = <A, E>(
     }),
   );
 
-export { foreign, withRelease, MetricCleanupError, MetricCleanupDiagnostics };
+export { withRelease, MetricCleanupError, MetricCleanupDiagnostics };

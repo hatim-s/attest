@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { EnvironmentOperationError } from '../../../isolation/environment-error.js';
 import { SANDBOX_WORKSPACE, resolveRemotePath } from '../sandbox-paths.js';
 import { loadExplicitUploads, publishTerminalArtifacts } from '../sandbox-transfer.js';
 import type { VercelSandboxSdk } from '../types.js';
@@ -66,7 +67,7 @@ describe('sandbox file transfers', () => {
           ),
         ),
         destination,
-      ).rejects.toThrow(TypeError);
+      ).rejects.toBeInstanceOf(EnvironmentOperationError);
     }
   });
 

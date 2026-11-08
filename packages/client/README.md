@@ -14,8 +14,9 @@ const program = Effect.scoped(
   Effect.gen(function* () {
     const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
 
+    // A missing token is a deployment mistake, so stop the process instead of recovering.
     if (triggerToken === undefined)
-      return yield* Effect.fail(new Error('Set ATTEST_TRIGGER_TOKEN.'));
+      return yield* Effect.die(new Error('Set ATTEST_TRIGGER_TOKEN.'));
 
     const runner = yield* createAgentRunner({
       handler: createPiHandler({
@@ -49,6 +50,24 @@ await Effect.runPromise(program);
 - `@attest/client/node`: `serveAgentRunner` over `node:http` and `collectArtifacts` for a directory.
 - `@attest/client/pi`: `createPiHandler`, which drives `pi --mode rpc` and returns the final text,
   an `attest.trace` and the files Pi changed.
+
+A handler's failure type is `AgentHandlerError`. Handlers written against the earlier contract
+failed with `Error`, and they no longer typecheck. Fail with
+`new AgentHandlerError({ message, cause })` instead, and map your own tagged errors with
+`Effect.mapError((e) => new AgentHandlerError({ message: e.message, cause: e }))`. Only `message` is
+sent to attest, as a `handler_failed` completion; `cause` stays local in `runner.receipts`. The Pi
+`workspace` option follows the same rule.
+
+```ts
+import { Effect } from 'effect';
+import { AgentHandlerError, type AgentHandler } from '@attest/client';
+
+const handler: AgentHandler = (invocation) =>
+  Effect.tryPromise({
+    try: () => callMyAgent(invocation.input),
+    catch: (cause) => new AgentHandlerError({ message: 'The agent call failed.', cause }),
+  }).pipe(Effect.map((output) => ({ output })));
+```
 
 The Pi handler requires `pi` and `ps` on `PATH`. Its process-group cleanup check uses
 `ps -axo pgid=,stat=`; install procps on Linux. Missing or unsupported `ps` makes cleanup

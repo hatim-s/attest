@@ -1,3 +1,4 @@
+import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize } from 'node:path';
@@ -8,6 +9,7 @@ import {
   type CaseEnvironmentFactory,
 } from '@attest/executor';
 
+import { anchoredCall } from '../../internal/open-anchored.js';
 import { resolveContainedPath } from '../../project/project-path.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 
@@ -16,14 +18,11 @@ const readProjectFile = Effect.fn(function* (projectRoot: string, path: string) 
   return yield* Effect.gen(function* () {
     const resolved = yield* resolveContainedPath(projectRoot, path, {
       expect: 'file',
-      problem: (problem) => new Error(problem),
+      // Any unsafe path reads as absent, like a missing file.
+      problem: (problem) => new Cause.NoSuchElementError(problem),
     });
 
-    return yield* Effect.tryPromise({
-      try: () => readFile(resolved, 'utf8'),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error('Project file read failed.', { cause }),
-    });
+    return yield* anchoredCall('readFile', resolved, () => readFile(resolved, 'utf8'));
   }).pipe(Effect.catch(() => Effect.succeed(undefined)));
 });
 

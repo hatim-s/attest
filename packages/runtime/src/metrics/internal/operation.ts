@@ -6,6 +6,10 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Option from 'effect/Option';
 
+import { MetricOperationError } from '../errors.js';
+
+const CLEANUP_TIMEOUT_MS = 5_000;
+
 /** Retains cleanup evidence without replacing a primary failure or defect. */
 class MetricCleanupDiagnostics extends Context.Service<
   MetricCleanupDiagnostics,
@@ -24,16 +28,22 @@ class MetricCleanupError<A = unknown> extends Data.TaggedError('MetricCleanupErr
   override readonly message = 'Metric cleanup failed.';
 }
 
+/** Reports a release that did not finish within its bound, so cleanup cannot be confirmed. */
+class MetricCleanupUnconfirmed extends Data.TaggedError('MetricCleanupUnconfirmed')<{
+  readonly timeoutMs: number;
+}> {
+  override readonly message = `Metric cleanup is unconfirmed after ${this.timeoutMs} ms.`;
+}
+
 /** Keeps defects, interruptions and resource-release receipts out of metric-result conversion. */
 const mustPropagateMetricCause = <E>(cause: Cause.Cause<E>): boolean =>
   Cause.hasDies(cause) || Cause.hasInterrupts(cause) || hasMetricCleanupFailure(cause);
 
-/** Adapts one foreign SDK or filesystem operation, preserving its original Error identity. */
-const foreign = <A>(operation: (signal: AbortSignal) => PromiseLike<A>): Effect.Effect<A, Error> =>
+/** Adapts one foreign SDK or filesystem operation, retaining the rejection as `cause` and its message. */
+const foreign = <A>(operation: (signal: AbortSignal) => PromiseLike<A>) =>
   Effect.tryPromise({
     try: (signal) => operation(signal),
-    catch: (cause) =>
-      cause instanceof Error ? cause : new Error('Foreign operation failed.', { cause }),
+    catch: (cause) => new MetricOperationError({ reason: 'foreign', cause }),
   });
 
 /** Keeps the completed child Exit when cancellation wins the caller's wait. */
@@ -74,7 +84,7 @@ const ownOperation = <A>(
       if (Exit.isSuccess(waiting)) return waiting.value;
 
       if (!Cause.hasInterrupts(waiting.cause)) return yield* Effect.failCause(waiting.cause);
-      controller.abort(new Error('Metric owner interrupted.'));
+      controller.abort(new MetricOperationError({ reason: 'owner_interrupted' }));
       const completed = yield* Fiber.await(child);
 
       return yield* Effect.failCause(
@@ -138,10 +148,13 @@ const releaseAll = (releases: readonly Effect.Effect<unknown, Error>[]) =>
     for (const release of releases) {
       const exit = yield* Effect.exit(
         Effect.gen(function* () {
-          const bounded = yield* Effect.timeoutOption(Effect.interruptible(release), 5_000);
+          const bounded = yield* Effect.timeoutOption(
+            Effect.interruptible(release),
+            CLEANUP_TIMEOUT_MS,
+          );
 
           if (Option.isNone(bounded))
-            return yield* Effect.fail(new Error('Metric cleanup is unconfirmed after 5000 ms.'));
+            return yield* new MetricCleanupUnconfirmed({ timeoutMs: CLEANUP_TIMEOUT_MS });
         }),
       );
 
