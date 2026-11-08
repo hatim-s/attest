@@ -59,11 +59,12 @@ const responseExtractionSchema = Schema.Struct({
 }).annotate({ identifier: 'ResponseExtraction' });
 
 /**
- * A process argv with at least an executable. The refinement never rejects past the length
- * check; it only gives the decoded value a non-empty tuple type so spawners need no empty case.
+ * A process argv with at least an executable. The length check aborts on failure, so the
+ * refinement only runs on a non-empty array; it gives the decoded value a non-empty tuple type
+ * so spawners need no empty case and an empty argv reports one issue.
  */
 const argvSchema = Schema.Array(Schema.String)
-  .check(Schema.isMinLength(1))
+  .check(Schema.isMinLength(1).abort())
   .pipe(Schema.refine((argv): argv is readonly [string, ...string[]] => argv.length > 0));
 
 const processEnvironmentSchema = Schema.Record(Schema.String, secretReferenceSchema);
