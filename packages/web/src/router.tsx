@@ -19,12 +19,12 @@ import {
   type ErrorComponentProps,
 } from '@tanstack/react-router';
 import * as Schema from 'effect/Schema';
-import { projectsQueryOptions, runsQueryOptions } from './api/queries.js';
+import { runsQueryOptions } from './api/queries.js';
 import { projectOverviewQueryOptions } from './api/queries/projects.js';
 import type { DashboardSource } from './api/dashboard-source.js';
 import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
-import { ProjectsPage } from './routes/projects-page.js';
+import { DirectoryPage } from './routes/directory/directory-page.js';
 import { RunsLayout } from './routes/runs-layout.js';
 import { DashboardFrame } from './routes/frame/dashboard-frame.js';
 import { NewestRun } from './routes/newest-run.js';
@@ -56,29 +56,11 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
   notFoundComponent: () => <div className="empty-compact">This dashboard page does not exist.</div>,
 });
 
-/** A catalog with one project opens it directly; any other catalog starts at the project list. */
+/** Every project in the catalog; a single-project catalog lists its one row too. */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: async ({ context }) => {
-    const projects = await context.queryClient.fetchQuery(
-      projectsQueryOptions(context.source.client),
-    );
-
-    const [only] = projects;
-
-    if (projects.length === 1 && only !== undefined) {
-      return redirect({ to: '/projects/$projectKey/runs', params: { projectKey: only.key } });
-    }
-
-    return redirect({ to: '/projects' });
-  },
-});
-
-const projectsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/projects',
-  component: ProjectsPage,
+  component: DirectoryPage,
 });
 
 const projectRoute = createRoute({
@@ -190,7 +172,6 @@ const evalRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  projectsRoute,
   projectRoute.addChildren([
     projectIndexRoute,
     workspaceRoute.addChildren([

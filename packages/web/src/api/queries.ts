@@ -5,7 +5,6 @@ import {
   queryOptions,
   useInfiniteQuery,
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -13,19 +12,9 @@ import {
 import type { RunStartRequest, RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
 
-/** Lists the catalog once; the `/` redirect and the projects page share it. */
-const projectsQueryOptions = (client: ApiClient) =>
-  queryOptions({
-    queryKey: ['projects'],
-    queryFn: async ({ signal }) => (await Effect.runPromise(client.listProjects({ signal }))).items,
-  });
-
-/** Lets the projects page reuse the catalog the `/` redirect already loaded. */
-const useProjects = () => useQuery(projectsQueryOptions(useApiClient()));
-
 /**
- * Shares the newest-first page between the index redirect, the polling sidebar and the projects
- * index. The page keeps its cursor so callers can tell a full page from a short one.
+ * Shares the newest-first page between the runs index redirect and the run list. The page keeps
+ * its cursor so callers can tell a full page from a short one.
  */
 const runsQueryOptions = (client: ApiClient, projectKey: string) =>
   queryOptions({
@@ -41,13 +30,6 @@ const runsQueryOptions = (client: ApiClient, projectKey: string) =>
 
 /** Keeps the sidebar current without polling file-based reports. */
 const useRuns = (projectKey: string) => useQuery(runsQueryOptions(useApiClient(), projectKey));
-
-/** One runs query per project, sharing cache entries with `useRuns`; results follow `projectKeys`. */
-const useRunsForProjects = (projectKeys: readonly string[]) => {
-  const client = useApiClient();
-
-  return useQueries({ queries: projectKeys.map((key) => runsQueryOptions(client, key)) });
-};
 
 /** Loads one run and keeps polling only while it is still executing. */
 const useRun = (projectKey: string, runId: string) => {
@@ -217,7 +199,7 @@ const useTests = (projectKey: string) => {
   });
 };
 
-/** Starts a run, then refreshes the project's runs page so the sidebar and projects table list it. */
+/** Starts a run, then refreshes the project's runs page so the run list shows it. */
 const useStartRun = (projectKey: string) => {
   const client = useApiClient();
   const queryClient = useQueryClient();
@@ -245,8 +227,6 @@ const useCancelRun = (projectKey: string, runId: string) => {
 };
 
 export {
-  projectsQueryOptions,
-  useProjects,
   newestCompletedRunQueryOptions,
   evalRunsQueryOptions,
   useNewestCompletedRun,
@@ -261,7 +241,6 @@ export {
   useDiff,
   useRun,
   useRuns,
-  useRunsForProjects,
   useTests,
   useStartRun,
   useCancelRun,

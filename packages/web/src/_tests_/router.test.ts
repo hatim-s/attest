@@ -115,21 +115,6 @@ it('encodes suite segments and restores their raw route identity', async () => {
   }
 });
 
-it('opens the only project from / and lists projects otherwise', async () => {
-  const other: ProjectRecord = { key: 'other', name: 'Other' };
-
-  await loadAt(httpClient([project], [run]), '/', (router) => {
-    expect(router.state.location.pathname).toBe(`/projects/demo/runs/${run.id}`);
-  });
-
-  for (const projects of [[project, other], []]) {
-    await loadAt(httpClient(projects, []), '/', (router) => {
-      expect(router.state.location.pathname).toBe('/projects');
-      expect(router.state.matches.at(-1)?.routeId).toBe('/projects');
-    });
-  }
-});
-
 it('redirects a project to its newest run and leaves an empty project at its runs index', async () => {
   for (const runs of [[run, { ...run, id: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }], []]) {
     await loadAt(httpClient([project], runs), '/projects/demo/runs?branch=main', (router) => {

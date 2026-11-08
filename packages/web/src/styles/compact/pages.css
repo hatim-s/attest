@@ -1,0 +1,213 @@
+/* Page layout shared by the compact directory and project pages. Every rule is scoped to the
+   shell so the legacy stylesheet's element rules cannot reach in, and its class names cannot
+   collide with legacy ones. */
+.attest-compact .attest-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 32px;
+  padding: 4px 0 24px;
+}
+.attest-compact .attest-page-title {
+  min-width: 0;
+  flex: 1 1 420px;
+}
+.attest-compact .attest-page-title h1 {
+  margin: 0;
+  font: 600 28px/1.15 var(--tight);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.attest-compact .attest-sub {
+  color: var(--muted);
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  max-width: 72ch;
+}
+.attest-compact .attest-sub code {
+  color: var(--text);
+  font: 12.5px var(--mono);
+}
+.attest-compact .attest-page-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.attest-compact .attest-sec-h {
+  font: 600 17px/1.3 var(--tight);
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 40px 0 12px;
+}
+.attest-compact .attest-search {
+  height: 32px;
+  width: 280px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px var(--sans);
+}
+.attest-compact .attest-search::placeholder {
+  color: var(--faint);
+}
+.attest-compact .attest-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  overflow-x: auto;
+}
+.attest-compact .attest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.attest-compact .attest-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 14px 7px 0;
+  border-bottom: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+.attest-compact .attest-table td {
+  padding: 13px 14px 13px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.attest-compact .attest-table :is(th, td):first-child {
+  padding-left: 12px;
+}
+.attest-compact .attest-table :is(th, td):last-child {
+  padding-right: 12px;
+}
+.attest-compact .attest-table tbody tr:last-child > td {
+  border-bottom: 0;
+}
+.attest-compact .attest-table tbody tr:hover > td {
+  background: var(--hover);
+}
+.attest-compact .attest-table .attest-num {
+  text-align: right;
+  white-space: nowrap;
+}
+.attest-compact .attest-table .attest-nw {
+  white-space: nowrap;
+}
+.attest-compact .attest-dim {
+  color: var(--muted);
+}
+.attest-compact .attest-hot {
+  color: var(--fail-text);
+}
+.attest-compact .attest-rowlink {
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+.attest-compact .attest-rowlink:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.attest-compact .attest-go {
+  width: 1%;
+  padding-left: 0;
+  color: var(--faint);
+}
+.attest-compact .attest-go svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.attest-compact .attest-table tr:hover .attest-go {
+  color: var(--ink);
+}
+.attest-compact .attest-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.attest-compact .attest-status[data-tone='failing'] {
+  color: var(--fail-text);
+  font-weight: 500;
+}
+.attest-compact .attest-status[data-tone='none'] {
+  color: var(--muted);
+}
+/* Squares for verdicts, circles for lifecycle. Orange only for a failure or an error. */
+.attest-compact .attest-mark {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--ink);
+}
+.attest-compact .attest-mark[data-tone='failing'] {
+  background: var(--fail);
+}
+.attest-compact .attest-mark[data-tone='running'] {
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.attest-compact .attest-mark[data-tone='stopped'] {
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+.attest-compact .attest-mark[data-tone='run-failed'] {
+  border-radius: 50%;
+  background: var(--fail);
+}
+.attest-compact .attest-nores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  color: var(--muted);
+}
+.attest-compact .attest-chip-x {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--line-2);
+  background: var(--bg);
+  color: var(--text);
+  font: 12px var(--sans);
+  cursor: pointer;
+}
+.attest-compact .attest-chip-x:hover {
+  border-color: var(--ink);
+}
+.attest-compact .attest-loading {
+  color: var(--muted);
+  margin: 0;
+}
+
+@media (max-width: 800px) {
+  .attest-compact .attest-page-head {
+    padding-top: 0;
+  }
+  .attest-compact .attest-page-end {
+    width: 100%;
+  }
+  .attest-compact .attest-search {
+    width: 100%;
+  }
+  .attest-compact .attest-hide-narrow {
+    display: none;
+  }
+}
