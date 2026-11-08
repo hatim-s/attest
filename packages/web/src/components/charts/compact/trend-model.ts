@@ -1,49 +1,33 @@
-import type { RunStatus } from '@attest/core/records';
-import type { VerdictCounts } from '../../meters/proportions.js';
-
-/** Mapper input: at most 200 eval slices from one source-aware query window.
- * Mapper owns unique IDs, finite epoch timestamps, and finite rates in [0, 1].
- * startedAt uses epoch milliseconds. Complete slices carry the supplied per-eval rate;
- * aggregate counts never imply actual case identities or known full coverage.
- * The integration owner exposes server truncation and decodes DTOs before mapping. */
-type TrendRun = {
-  id: string;
-  /** Epoch milliseconds, mapped from the decoded API timestamp. */
-  startedAt: number;
-  /** Optional human label or branch, separate from the canonical run ID. */
-  label?: string;
-  runStatus: RunStatus;
-  counts: VerdictCounts & { planned: number | null; recorded: number };
-} & ({ state: 'complete'; passRate: number } | { state: 'running' | 'incomplete' });
+import type { EvalSlice } from '@attest/core/records';
 
 type TrendAxis = 'run' | 'date';
 
 const TREND_LIMIT = 200;
 
-/** The complete slice uses its recorded denominator, independent of run-wide status. */
-function passRate(run: TrendRun) {
-  return run.state === 'complete' ? run.passRate : null;
-}
-
-/** Sort a bounded server window, resolving timestamp ties by real run identity. */
-function prepareTrend(runs: readonly TrendRun[], axis: TrendAxis) {
+/**
+ * Orders at most 200 eval slices from one source-aware window, breaking timestamp ties by run id.
+ * Only a complete slice carries a pass rate (the slice union enforces it), so running and
+ * incomplete slices get `rate: null` and sit on the rail instead of joining the line. Rates
+ * compare against the previous complete slice only.
+ */
+function prepareTrend(runs: readonly EvalSlice[], axis: TrendAxis) {
   if (runs.length > TREND_LIMIT) throw new RangeError(`Trend window exceeds ${TREND_LIMIT} slices`);
 
-  const visible = [...runs].sort(
-    (a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id, 'en'),
-  );
+  const visible = runs
+    .map((run) => ({ run, startedAt: Date.parse(run.createdAt) }))
+    .sort((a, b) => a.startedAt - b.startedAt || a.run.runId.localeCompare(b.run.runId, 'en'));
 
   const first = visible[0]?.startedAt ?? 0;
   const last = visible.at(-1)?.startedAt ?? first;
-  let previous: { run: TrendRun; rate: number } | undefined;
+  let previous: { run: EvalSlice; rate: number } | undefined;
 
-  return visible.map((run, index) => {
-    const rate = passRate(run);
+  return visible.map(({ run, startedAt }, index) => {
+    const rate = run.passRate;
 
     const comparison =
       rate !== null && previous
         ? {
-            previousId: previous.run.id,
+            previousId: previous.run.runId,
             points: (rate - previous.rate) * 100,
             selectionChanged:
               run.counts.planned !== previous.run.counts.planned ||
@@ -57,13 +41,13 @@ function prepareTrend(runs: readonly TrendRun[], axis: TrendAxis) {
       axis === 'date'
         ? last === first
           ? 0.5
-          : (run.startedAt - first) / (last - first)
+          : (startedAt - first) / (last - first)
         : visible.length > 1
           ? index / (visible.length - 1)
           : 0.5;
 
-    return { run, rate, comparison, x };
+    return { run, startedAt, rate, comparison, x };
   });
 }
 
-export { passRate, prepareTrend, TREND_LIMIT, type TrendRun, type TrendAxis };
+export { prepareTrend, TREND_LIMIT, type TrendAxis };

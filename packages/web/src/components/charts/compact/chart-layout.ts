@@ -42,14 +42,9 @@ function resolveActive<T>(
   return undefined;
 }
 
-/** Format both charts in the caller's explicit fixed-offset calendar timezone. */
-function calendarDate(timestamp: number, utcOffsetMinutes: number) {
-  return new Date(timestamp + utcOffsetMinutes * 60_000).toISOString().slice(0, 10);
-}
-
-/** Name the fixed offset used for every calendar label. */
-function timezoneLabel(utcOffsetMinutes: number) {
-  return `UTC${utcOffsetMinutes < 0 ? '-' : '+'}${String(Math.floor(Math.abs(utcOffsetMinutes) / 60)).padStart(2, '0')}:${String(Math.abs(utcOffsetMinutes) % 60).padStart(2, '0')}`;
+/** Both charts label calendar days in UTC, the zone the backend buckets activity in. */
+function calendarDate(timestamp: number) {
+  return new Date(timestamp).toISOString().slice(0, 10);
 }
 
 /** Inspection survives Tab to the associated action, but ends on departure or new controlled data. */
@@ -175,11 +170,8 @@ function axisIdentity(id: string) {
 }
 
 /** Include milliseconds so adjacent same-day runs remain distinguishable. */
-function calendarTime(timestamp: number, utcOffsetMinutes: number) {
-  return new Date(timestamp + utcOffsetMinutes * 60_000)
-    .toISOString()
-    .replace('T', ' ')
-    .slice(0, -1);
+function calendarTime(timestamp: number) {
+  return `${new Date(timestamp).toISOString().replace('T', ' ').slice(0, -1)} UTC`;
 }
 
 export {
@@ -190,7 +182,6 @@ export {
   resolveActive,
   calendarDate,
   calendarTime,
-  timezoneLabel,
   useInspection,
   plotPointer,
   axisIdentity,

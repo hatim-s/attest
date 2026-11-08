@@ -6,20 +6,22 @@ import {
   focusChartAction,
   useDenseFocus,
   resolveActive,
-  timezoneLabel,
   useInspection,
   plotPointer,
 } from './chart-layout.js';
 import './compact-charts.css';
 
 type DailyActivityProps = {
-  /** Sparse daily aggregates in the declared calendar window, at most 92 buckets. */
+  /** Sparse UTC daily aggregates in the window, at most 92 buckets. */
   days: readonly ActivityDay[];
   window: ActivityWindow;
   selectedDay?: string;
   onSelectDay: (day: string) => void;
   label?: string;
 };
+
+/** A slice is one eval inside one run, so a day counts eval runs, not whole runs. */
+const evalRuns = (count: number) => `${count} eval ${count === 1 ? 'run' : 'runs'}`;
 
 /** Hosts key this component by project/source/calendar-window/filter context.
  * Selecting a real calendar day lets the caller load its bounded run list.
@@ -50,8 +52,8 @@ function DailyActivity({
 
   const inspection = useInspection(
     selectedDay,
-    `${label}:${window.from}:${window.to}:${window.utcOffsetMinutes}`,
-    ordered.filter((day) => day.runCount > 0).map((day) => day.day),
+    `${label}:${window.from}:${window.to}`,
+    ordered.filter((day) => day.slices > 0).map((day) => day.day),
   );
 
   const { ref, width: chartWidth } = useChartWidth();
@@ -75,7 +77,7 @@ function DailyActivity({
 
   /** One guard owns every activation path, including controlled host updates. */
   const selectDay = (day: ActivityDay) => {
-    if (day.runCount > 0 && day.day !== selectedDay) onSelectDay(day.day);
+    if (day.slices > 0 && day.day !== selectedDay) onSelectDay(day.day);
   };
 
   const actionDay = resolveActive(ordered, (day) => day.day, [inspection.id, selectedDay]);
@@ -111,7 +113,7 @@ function DailyActivity({
     return ordered[Math.floor((pointer.x - 44) / slot)];
   };
 
-  const dayLabel = `${active?.day ?? 'Window total'}, ${counts.runCount} ${counts.runCount === 1 ? 'run' : 'runs'}. ${timezoneLabel(window.utcOffsetMinutes)}.`;
+  const dayLabel = `${active?.day ?? 'Window total'}, ${evalRuns(counts.slices)}. UTC.`;
   const countLabel = `${counts.passed} passed, ${counts.failed} failed, ${counts.errored} errored, ${counts.skipped} skipped. Skipped cases are excluded from bars.`;
 
   return (
@@ -133,7 +135,7 @@ function DailyActivity({
               value={actionDay?.day ?? ''}
               onFocus={() => {
                 const next =
-                  ordered.find((day) => day.day === focused && day.runCount > 0) ?? actionDay;
+                  ordered.find((day) => day.day === focused && day.slices > 0) ?? actionDay;
 
                 if (next) inspection.inspect(next.day);
               }}
@@ -146,9 +148,9 @@ function DailyActivity({
                 Choose a day
               </option>
               {ordered.map((day) => (
-                <option key={day.day} value={day.day} disabled={day.runCount === 0}>
-                  {day.day}: {day.runCount} {day.runCount === 1 ? 'run' : 'runs'}, {day.passed}{' '}
-                  passed, {day.failed} failed, {day.errored} errored, {day.skipped} skipped
+                <option key={day.day} value={day.day} disabled={day.slices === 0}>
+                  {day.day}: {evalRuns(day.slices)}, {day.passed} passed, {day.failed} failed,{' '}
+                  {day.errored} errored, {day.skipped} skipped
                 </option>
               ))}
             </select>
@@ -158,7 +160,7 @@ function DailyActivity({
             type="button"
             onPointerDown={focusChartAction}
             onMouseDown={focusChartAction}
-            aria-disabled={!actionDay || actionDay.runCount === 0 || actionDay.day === selectedDay}
+            aria-disabled={!actionDay || actionDay.slices === 0 || actionDay.day === selectedDay}
             onFocus={() => {
               if (actionDay) inspection.inspect(actionDay.day);
             }}
@@ -166,7 +168,7 @@ function DailyActivity({
               if (actionDay) selectDay(actionDay);
             }}
           >
-            {actionDay && actionDay.runCount > 0
+            {actionDay && actionDay.slices > 0
               ? `${actionDay.day === selectedDay ? 'Selected day' : 'Select day'} ${actionDay.day}`
               : 'Choose a day to select'}
           </button>
@@ -232,7 +234,7 @@ function DailyActivity({
         }
         style={{
           cursor:
-            dense && ordered.some((day) => day.day === hovered && day.runCount > 0)
+            dense && ordered.some((day) => day.day === hovered && day.slices > 0)
               ? 'pointer'
               : undefined,
         }}
@@ -256,7 +258,7 @@ function DailyActivity({
         )}
         {ordered.map((day, index) => {
           const cx = 44 + slot * (index + 0.5);
-          const inert = dense || day.runCount === 0;
+          const inert = dense || day.slices === 0;
 
           return (
             <g key={day.day}>
@@ -268,8 +270,8 @@ function DailyActivity({
                 data-chart-mark={inert ? undefined : ''}
                 data-day={day.day}
                 aria-pressed={inert ? undefined : selectedDay === day.day}
-                className={`${dense ? 'attest-chart-dense-mark' : day.runCount > 0 ? 'attest-chart-mark' : 'attest-chart-static-mark'} ${active === day ? 'is-active' : ''}`}
-                aria-label={`${day.day}: ${day.runCount} ${day.runCount === 1 ? 'run' : 'runs'}, ${day.passed} passed, ${day.failed} failed, ${day.errored} errored, ${day.skipped} skipped.${day.runCount > 0 ? ' Select day.' : ' No runs to select.'}`}
+                className={`${dense ? 'attest-chart-dense-mark' : day.slices > 0 ? 'attest-chart-mark' : 'attest-chart-static-mark'} ${active === day ? 'is-active' : ''}`}
+                aria-label={`${day.day}: ${evalRuns(day.slices)}, ${day.passed} passed, ${day.failed} failed, ${day.errored} errored, ${day.skipped} skipped.${day.slices > 0 ? ' Select day.' : ' No runs to select.'}`}
                 onClick={inert ? undefined : () => selectDay(day)}
                 onKeyDown={(event) => {
                   moveChartFocus(event);
@@ -327,7 +329,7 @@ function DailyActivity({
             </g>
           );
         })}
-        {totals.runCount === 0 && (
+        {totals.slices === 0 && (
           <text className="attest-chart-empty" x={chartWidth / 2} y="100" textAnchor="middle">
             No activity in this window
           </text>

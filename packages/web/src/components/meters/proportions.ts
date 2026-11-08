@@ -1,12 +1,12 @@
+import type { EvalSlice } from '@attest/core/records';
+
 const segmentOrder = ['error', 'fail', 'skipped', 'notRun', 'pass'] as const;
 
-type VerdictCounts = {
-  passed: number;
-  failed: number;
-  errored: number;
-  skipped: number;
-  notRun: number | null;
-};
+/** The verdict counts of an eval slice; `notRun` is null when the planned selection is unknown. */
+type VerdictCounts = Pick<
+  EvalSlice['counts'],
+  'passed' | 'failed' | 'errored' | 'skipped' | 'notRun'
+>;
 
 const countKeys = {
   error: 'errored',

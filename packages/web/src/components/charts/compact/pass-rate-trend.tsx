@@ -1,7 +1,8 @@
 import { useId, useMemo, useState } from 'react';
 import { countsLabel } from '../../meters/proportions.js';
 import { moveChartFocus } from './chart-keyboard.js';
-import { prepareTrend, type TrendAxis, type TrendRun } from './trend-model.js';
+import type { EvalSlice } from '@attest/core/records';
+import { prepareTrend, type TrendAxis } from './trend-model.js';
 import {
   useChartWidth,
   focusChartAction,
@@ -10,29 +11,25 @@ import {
   resolveActive,
   calendarDate,
   calendarTime,
-  timezoneLabel,
   useInspection,
   axisIdentity,
 } from './chart-layout.js';
 import './compact-charts.css';
 
 type PassRateTrendProps = {
-  /** At most 200 decoded eval summaries, scoped to one eval and source. */
-  runs: readonly TrendRun[];
+  /** At most 200 eval slices, scoped to one eval and source. */
+  runs: readonly EvalSlice[];
   axis: TrendAxis;
-  utcOffsetMinutes: number;
   onAxisChange: (axis: TrendAxis) => void;
-  runHref: (run: TrendRun) => string;
+  runHref: (run: EvalSlice) => string;
   /** Also allows a table row to drive the chart readout. */
   selectedRunId?: string;
   label: string;
 };
 
-/** Keep full canonical identity and optional display label consistent across inspection controls. */
-function runName(run: TrendRun) {
-  return run.label && run.label !== run.id && run.label !== `Run ${run.id}`
-    ? `${run.id}, ${run.label}`
-    : run.id;
+/** Keep the full run id and its branch consistent across inspection controls. */
+function runName(run: EvalSlice) {
+  return run.gitBranch === null ? run.runId : `${run.runId}, ${run.gitBranch}`;
 }
 
 const percent = (rate: number) => `${(rate * 100).toFixed(1)}%`;
@@ -43,7 +40,6 @@ const percent = (rate: number) => `${(rate * 100).toFixed(1)}%`;
 function PassRateTrend({
   runs,
   axis,
-  utcOffsetMinutes,
   onAxisChange,
   runHref,
   selectedRunId,
@@ -55,8 +51,8 @@ function PassRateTrend({
 
   const inspection = useInspection(
     selectedRunId,
-    JSON.stringify([label, axis, utcOffsetMinutes]),
-    points.map(({ run }) => run.id),
+    JSON.stringify([label, axis]),
+    points.map(({ run }) => run.runId),
   );
 
   const { ref, width } = useChartWidth();
@@ -66,17 +62,22 @@ function PassRateTrend({
   );
 
   const active =
-    resolveActive(points, ({ run }) => run.id, [hovered, focused, inspection.id, selectedRunId]) ??
+    resolveActive(points, ({ run }) => run.runId, [
+      hovered,
+      focused,
+      inspection.id,
+      selectedRunId,
+    ]) ??
     completed.at(-1) ??
     points.at(-1);
 
   // Readout follows transient input; activation follows explicit inspection or host selection.
   const action =
-    resolveActive(points, ({ run }) => run.id, [inspection.id, selectedRunId]) ??
+    resolveActive(points, ({ run }) => run.runId, [inspection.id, selectedRunId]) ??
     completed.at(-1) ??
     points.at(-1);
 
-  const selected = points.find(({ run }) => run.id === selectedRunId);
+  const selected = points.find(({ run }) => run.runId === selectedRunId);
   const right = Math.max(68, width - 22);
   const x = (value: number) => 44 + value * (right - 44);
   const minimum = Math.min(0.5, ...completed.map(({ rate }) => rate));
@@ -106,9 +107,7 @@ function PassRateTrend({
       .some((other) => Math.abs(center.x - other.x) < 24 && Math.abs(center.y - other.y) < 24),
   );
 
-  const timeLabel = active
-    ? `${calendarTime(active.run.startedAt, utcOffsetMinutes)} ${timezoneLabel(utcOffsetMinutes)}. ${active.run.runStatus}.`
-    : '';
+  const timeLabel = active ? `${calendarTime(active.startedAt)}. ${active.run.runStatus}.` : '';
 
   const comparisonLabel =
     !active || active.rate === null
@@ -167,22 +166,21 @@ function PassRateTrend({
           <label>
             Inspect run{' '}
             <select
-              value={action?.run.id ?? ''}
+              value={action?.run.runId ?? ''}
               onFocus={() => {
                 // A density transition carries the mark being inspected into this chooser.
-                const next = resolveActive(points, ({ run }) => run.id, [focused]) ?? action;
+                const next = resolveActive(points, ({ run }) => run.runId, [focused]) ?? action;
 
-                if (next) inspection.inspect(next.run.id);
+                if (next) inspection.inspect(next.run.runId);
               }}
               onChange={(event) => {
                 setHovered(null);
                 inspection.inspect(event.target.value);
               }}
             >
-              {points.map(({ run }) => (
-                <option key={run.id} value={run.id}>
-                  {calendarTime(run.startedAt, utcOffsetMinutes)} {timezoneLabel(utcOffsetMinutes)}{' '}
-                  · {runName(run)} · {run.state}, run {run.runStatus} ·{' '}
+              {points.map(({ run, startedAt }) => (
+                <option key={run.runId} value={run.runId}>
+                  {calendarTime(startedAt)} · {runName(run)} · {run.state}, run {run.runStatus} ·{' '}
                   {run.state === 'complete' ? percent(run.passRate) : 'no rate'} ·{' '}
                   {countsLabel(run.counts)}
                 </option>
@@ -193,12 +191,12 @@ function PassRateTrend({
             <a
               className="attest-chart-action"
               href={runHref(action.run)}
-              title={`Open run ${action.run.id}`}
+              title={`Open run ${action.run.runId}`}
               onPointerDown={focusChartAction}
               onMouseDown={focusChartAction}
-              onFocus={() => inspection.inspect(action.run.id)}
+              onFocus={() => inspection.inspect(action.run.runId)}
             >
-              Open run {action.run.id}
+              Open run {action.run.runId}
             </a>
           )}
         </div>
@@ -231,10 +229,10 @@ function PassRateTrend({
           const decline = point.comparison !== null && point.comparison.points < 0;
 
           const previous =
-            completed[completed.findIndex((item) => item.run.id === point.run.id) - 1];
+            completed[completed.findIndex((item) => item.run.runId === point.run.runId) - 1];
 
           return (
-            <g key={point.run.id}>
+            <g key={point.run.runId}>
               {decline && previous && (
                 <path
                   className="attest-chart-down-line"
@@ -250,15 +248,15 @@ function PassRateTrend({
                 aria-label={
                   dense
                     ? undefined
-                    : `Run ${runName(point.run)}, ${calendarTime(point.run.startedAt, utcOffsetMinutes)} ${timezoneLabel(utcOffsetMinutes)}, slice ${point.run.state}, run ${point.run.runStatus}, ${point.rate === null ? 'no pass rate' : percent(point.rate)}, ${countsLabel(point.run.counts)}. Open run.`
+                    : `Run ${runName(point.run)}, ${calendarTime(point.startedAt)}, slice ${point.run.state}, run ${point.run.runStatus}, ${point.rate === null ? 'no pass rate' : percent(point.rate)}, ${countsLabel(point.run.counts)}. Open run.`
                 }
-                onMouseEnter={() => setHovered(point.run.id)}
+                onMouseEnter={() => setHovered(point.run.runId)}
                 onMouseLeave={() => setHovered(null)}
-                onFocus={() => setFocused(point.run.id)}
+                onFocus={() => setFocused(point.run.runId)}
                 onBlur={() => setFocused(null)}
                 className={`${dense ? 'attest-chart-native-mark' : 'attest-chart-mark'} ${active === point ? 'is-active' : ''}`}
               >
-                <title>{point.run.id}</title>
+                <title>{point.run.runId}</title>
                 {dense ? (
                   <>
                     <clipPath id={`${hitId}-${index}`}>
@@ -302,9 +300,7 @@ function PassRateTrend({
               </a>
               {(index === 0 || (index === points.length - 1 && point.x !== points[0]?.x)) && (
                 <text x={cx} y="225" textAnchor={index === 0 ? 'start' : 'end'}>
-                  {axis === 'run'
-                    ? axisIdentity(point.run.id)
-                    : calendarDate(point.run.startedAt, utcOffsetMinutes)}
+                  {axis === 'run' ? axisIdentity(point.run.runId) : calendarDate(point.startedAt)}
                 </text>
               )}
             </g>

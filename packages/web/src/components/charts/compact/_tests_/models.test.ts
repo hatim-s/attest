@@ -1,23 +1,58 @@
+import type { EvalSlice } from '@attest/core/records';
 import { nativeHitRegions } from '../chart-layout.js';
 import { describe, expect, it } from 'vitest';
-import { prepareTrend, passRate, TREND_LIMIT, type TrendRun } from '../trend-model.js';
-import { prepareActivity, ACTIVITY_LIMIT, type ActivityDay } from '../daily-model.js';
+import { prepareTrend, TREND_LIMIT } from '../trend-model.js';
+import {
+  prepareActivity,
+  activityWindow,
+  ACTIVITY_LIMIT,
+  type ActivityDay,
+} from '../daily-model.js';
+
+const counts = {
+  planned: 10,
+  recorded: 10,
+  passed: 8,
+  failed: 2,
+  errored: 0,
+  skipped: 0,
+  metricErrors: 0,
+  scored: 0,
+  scoreSum: 0,
+  notRun: 0,
+};
+
+const at = (ms: number) => new Date(ms).toISOString();
 
 const complete = {
-  id: 'a',
-  label: 'a',
-  startedAt: 100,
+  runId: 'a',
+  suiteName: 'smoke',
+  createdAt: at(100),
+  finishedAt: null,
   runStatus: 'completed',
+  gitBranch: null,
+  gitSha: null,
+  counts,
+  meanScore: null,
   state: 'complete',
   passRate: 0.8,
-  counts: { planned: 10, recorded: 10, passed: 8, failed: 2, errored: 0, skipped: 0, notRun: 0 },
-} satisfies TrendRun;
+} satisfies EvalSlice;
 
-const window = { from: '2026-11-05', to: '2026-11-06', utcOffsetMinutes: 330 };
+/** A slice with no pass rate, as the store reports a running or incomplete eval. */
+const rail = (runId: string, state: 'running' | 'incomplete', createdAt: string): EvalSlice => ({
+  ...complete,
+  runId,
+  createdAt,
+  state,
+  passRate: null,
+  runStatus: state === 'running' ? 'running' : 'cancelled',
+});
+
+const window = { from: '2026-11-05', to: '2026-11-06' };
 
 const day = {
   day: '2026-11-06',
-  runCount: 2,
+  slices: 2,
   passed: 8,
   failed: 1,
   errored: 1,
@@ -25,40 +60,35 @@ const day = {
 } satisfies ActivityDay;
 
 describe('eval slice trend', () => {
-  it('plots a complete eval B when eval A caused the overall run to fail', () => {
-    const evalB = { ...complete, runStatus: 'failed' } satisfies TrendRun;
+  it('puts complete slices on the line and every other slice on the rail', () => {
+    // A complete eval slice keeps its rate even when another eval failed the enclosing run.
+    const failedRun = { ...complete, runStatus: 'failed' } satisfies EvalSlice;
 
-    const evalA = {
-      ...evalB,
-      state: 'incomplete',
-      counts: { ...complete.counts, passed: 7, errored: 1 },
-    } satisfies TrendRun;
+    const points = prepareTrend(
+      [failedRun, rail('r', 'running', at(300)), rail('c', 'incomplete', at(200))],
+      'run',
+    );
 
-    expect(passRate(evalB)).toBe(0.8);
-    expect(passRate(evalA)).toBeNull();
-    expect(prepareTrend([evalB], 'run')[0]?.rate).toBe(0.8);
-  });
-
-  it('keeps running/incomplete slices off the line', () => {
-    expect(passRate({ ...complete, state: 'running' })).toBeNull();
-    expect(passRate({ ...complete, state: 'incomplete', runStatus: 'cancelled' })).toBeNull();
+    expect(points.map(({ run, rate }) => [run.runId, rate])).toEqual([
+      ['a', 0.8],
+      ['c', null],
+      ['r', null],
+    ]);
+    expect(points.map(({ comparison }) => comparison)).toEqual([null, null, null]);
   });
 
   it('preserves unknown plans and compares recorded rates without claiming case regressions', () => {
     const smaller = {
       ...complete,
-      id: 'b',
+      runId: 'b',
       passRate: 0.6,
-      startedAt: 200,
-      counts: { ...complete.counts, planned: null, notRun: null, recorded: 5, passed: 3 },
-    } satisfies TrendRun;
+      createdAt: at(200),
+      counts: { ...counts, planned: null, notRun: null, recorded: 5, passed: 3 },
+    } satisfies EvalSlice;
 
-    const points = prepareTrend(
-      [smaller, { ...complete, id: 'rail', startedAt: 150, state: 'incomplete' }, complete],
-      'run',
-    );
+    const points = prepareTrend([smaller, rail('rail', 'incomplete', at(150)), complete], 'run');
 
-    expect(points.map((point) => point.run.id)).toEqual(['a', 'rail', 'b']);
+    expect(points.map((point) => point.run.runId)).toEqual(['a', 'rail', 'b']);
     expect(points[2]?.rate).toBe(0.6);
     expect(points[2]?.comparison?.previousId).toBe('a');
     expect(points[2]?.comparison?.points).toBeCloseTo(-20);
@@ -69,18 +99,18 @@ describe('eval slice trend', () => {
   it('orders timestamp ties by identity and places singleton and date points deterministically', () => {
     expect(prepareTrend([], 'date')).toEqual([]);
     expect(prepareTrend([complete], 'run')[0]?.x).toBe(0.5);
-    expect(prepareTrend([complete, { ...complete, id: 'z' }], 'date').map(({ x }) => x)).toEqual([
-      0.5, 0.5,
-    ]);
+    expect(prepareTrend([complete, { ...complete, runId: 'z' }], 'date').map(({ x }) => x)).toEqual(
+      [0.5, 0.5],
+    );
     expect(
-      prepareTrend([{ ...complete, id: 'z' }, complete], 'date').map(({ run }) => run.id),
+      prepareTrend([{ ...complete, runId: 'z' }, complete], 'date').map(({ run }) => run.runId),
     ).toEqual(['a', 'z']);
     expect(
       prepareTrend(
         [
-          { ...complete, id: 'b', startedAt: 200 },
+          { ...complete, runId: 'b', createdAt: at(200) },
           complete,
-          { ...complete, id: 'c', startedAt: 500 },
+          { ...complete, runId: 'c', createdAt: at(500) },
         ],
         'date',
       ).map(({ x }) => x),
@@ -105,7 +135,7 @@ describe('daily activity', () => {
     expect(activity.up).toBe(8);
     expect(activity.down).toBe(5);
     expect(activity.totals).toEqual({
-      runCount: 4,
+      slices: 4,
       passed: 10,
       failed: 4,
       errored: 3,
@@ -114,7 +144,7 @@ describe('daily activity', () => {
   });
 
   it('supports empty/single windows and enforces a bounded summary input', () => {
-    expect(prepareActivity([], window).totals.runCount).toBe(0);
+    expect(prepareActivity([], window).totals.slices).toBe(0);
     expect(prepareActivity([day], { ...window, from: day.day }).ordered).toEqual([day]);
     expect(() =>
       prepareActivity(
@@ -125,27 +155,34 @@ describe('daily activity', () => {
   });
 });
 
-it('fills sparse calendar gaps in the declared offset and bounds inclusive buckets', () => {
-  const filled = prepareActivity([day], {
-    from: '2026-11-04',
-    to: '2026-11-06',
-    utcOffsetMinutes: 330,
-  });
+it('fills sparse UTC calendar gaps and bounds inclusive buckets', () => {
+  const filled = prepareActivity([day], { from: '2026-11-04', to: '2026-11-06' });
 
-  expect(filled.ordered.map(({ day, runCount }) => [day, runCount])).toEqual([
+  expect(filled.ordered.map(({ day, slices }) => [day, slices])).toEqual([
     ['2026-11-04', 0],
     ['2026-11-05', 0],
     ['2026-11-06', 2],
   ]);
-  expect(
-    prepareActivity([], { from: '2026-01-01', to: '2026-04-02', utcOffsetMinutes: -480 }).ordered,
-  ).toHaveLength(92);
+  expect(prepareActivity([], { from: '2026-01-01', to: '2026-04-02' }).ordered).toHaveLength(92);
 
   for (const to of ['2026-04-03', 'invalid', '2025-12-31', '2026-02-30'])
-    expect(() => prepareActivity([], { from: '2026-01-01', to, utcOffsetMinutes: 0 })).toThrow(
-      RangeError,
-    );
-  expect(passRate({ ...complete, passRate: 0.123 })).toBe(0.123);
+    expect(() => prepareActivity([], { from: '2026-01-01', to })).toThrow(RangeError);
+});
+
+it('charts only the UTC days an activity read covers', () => {
+  expect(
+    activityWindow({
+      coveredFrom: '2026-10-26T00:00:00.000Z',
+      coveredTo: '2026-11-09T00:00:00.000Z',
+    }),
+  ).toEqual({ from: '2026-10-26', to: '2026-11-08' });
+  // A fully truncated read covers nothing, so there is no window to draw.
+  expect(
+    activityWindow({
+      coveredFrom: '2026-11-09T00:00:00.000Z',
+      coveredTo: '2026-11-09T00:00:00.000Z',
+    }),
+  ).toBeNull();
 });
 
 it('partitions native hit regions by nearest identity within bounded mark squares', () => {
