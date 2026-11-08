@@ -45,8 +45,8 @@ const EvalRunsTable = ({ projectKey, suiteName, runs, onInspect }: EvalRunsTable
             <td className="attest-nw">
               <Link
                 className="attest-rowlink attest-mono"
-                to="/projects/$projectKey/runs/$runId"
-                params={{ projectKey, runId: slice.runId }}
+                to="/projects/$projectKey/evals/$suiteName/runs/$runId"
+                params={{ projectKey, suiteName, runId: slice.runId }}
                 title={slice.runId}
               >
                 {shortRunId(slice.runId)}

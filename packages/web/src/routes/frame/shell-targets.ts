@@ -3,9 +3,9 @@ import type { ShellBreadcrumb, ShellTarget } from '../../shell/navigation.js';
 import { shortRunId } from '../../lib/format.js';
 
 /**
- * The router destination for every shell target. Runs open the existing run pages until the
- * compact run routes replace them. The Test cases tab and case page do not exist yet, so their
- * targets open the eval's Runs tab instead of a dead link.
+ * The router destination for every shell target. A case in a project-wide run opens in its eval.
+ * The Test cases tab and case page do not exist yet, so their targets open the eval's Runs tab
+ * instead of a dead link.
  */
 const targetLink = (target: ShellTarget) => {
   switch (target.kind) {
@@ -22,19 +22,23 @@ const targetLink = (target: ShellTarget) => {
         params: { projectKey: target.projectKey },
       });
     case 'project-run':
-    case 'run':
       return linkOptions({
         to: '/projects/$projectKey/runs/$runId',
         params: { projectKey: target.projectKey, runId: target.runId },
       });
+    case 'run':
+      return linkOptions({
+        to: '/projects/$projectKey/evals/$suiteName/runs/$runId',
+        params: { projectKey: target.projectKey, suiteName: target.evalId, runId: target.runId },
+      });
     case 'project-run-case':
     case 'run-case':
       return linkOptions({
-        to: '/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId',
+        to: '/projects/$projectKey/evals/$suiteName/runs/$runId/cases/$caseId',
         params: {
           projectKey: target.projectKey,
-          runId: target.runId,
           suiteName: target.evalId,
+          runId: target.runId,
           caseId: target.caseId,
         },
       });
@@ -118,8 +122,18 @@ const breadcrumbsFor = (current: ShellTarget, names: Names): ShellBreadcrumb[] =
             { label: `Run ${shortRunId(current.runId)}`, target: current },
           ];
         case 'case':
-        case 'run-case':
           return [all, project, evaluation, { label: current.caseId, target: current }];
+        case 'run-case':
+          return [
+            all,
+            project,
+            evaluation,
+            {
+              label: `Run ${shortRunId(current.runId)}`,
+              target: { ...scope, kind: 'run', evalId: current.evalId, runId: current.runId },
+            },
+            { label: current.caseId, target: current },
+          ];
       }
     }
   }

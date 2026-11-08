@@ -4,10 +4,9 @@ import { stripStruct, SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import {
   caseParamsSchema,
-  diffParamsSchema,
+  evalParamsSchema,
   projectParamsSchema,
   runParamsSchema,
-  evalParamsSchema,
 } from '@attest/api/contract';
 import type { QueryClient } from '@tanstack/react-query';
 import {
@@ -19,42 +18,53 @@ import {
   type ErrorComponentProps,
 } from '@tanstack/react-router';
 import * as Schema from 'effect/Schema';
-import { runsQueryOptions } from './api/queries.js';
 import { projectOverviewQueryOptions } from './api/queries/projects.js';
+import { runSuitesQueryOptions } from './api/queries/runs.js';
 import type { DashboardSource } from './api/dashboard-source.js';
-import { EvalRunsPage } from './routes/eval/eval-runs-page.js';
+import { EmptyState } from './components/empty/empty-state.js';
 import { DirectoryPage } from './routes/directory/directory-page.js';
+import { EvalRunsPage } from './routes/eval/eval-runs-page.js';
+import { EvalRunPage } from './routes/eval-run/eval-run-page.js';
+import { DashboardFrame } from './routes/frame/dashboard-frame.js';
 import { ProjectPage } from './routes/project/project-page.js';
 import { PROJECT_RANGES } from './routes/project/project-range.js';
-import { RunsLayout } from './routes/runs-layout.js';
-import { DashboardFrame } from './routes/frame/dashboard-frame.js';
-import { NewestRun } from './routes/newest-run.js';
-import { RunPage } from './routes/run-page.js';
-import { CaseDrawer } from './routes/case-drawer.js';
-import { ComparePage } from './routes/compare-page.js';
-import { ErrorNotice } from './components/shared/ui.js';
-import { runTabSchema } from './components/runs/run-tabs.js';
+import { AllRunsPage } from './routes/project-run/all-runs-page.js';
+import { ProjectRunPage } from './routes/project-run/project-run-page.js';
+import { runDestination } from './routes/project-run/run-destination.js';
+import { RunCasePage } from './routes/run-case/run-case-page.js';
 
 type RouterContext = { source: DashboardSource; queryClient: QueryClient };
 
-const runsSearchSchema = stripStruct({
-  branch: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
-    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
-  ),
-  label: Schema.optional(Schema.String.check(Schema.isPattern(/^[^=]+=.+$/))).pipe(
+/** Unknown search keys fail the URL instead of passing through silently. */
+const strictSearch = { parseOptions: { onExcessProperty: 'error', errors: 'all' } } as const;
+
+/** `range` is the period in days; `eval` picks the eval on the pass-rate chart. */
+const projectSearchSchema = stripStruct({
+  range: Schema.Literals(PROJECT_RANGES)
+    .pipe(Schema.withDecodingDefault(Effect.succeed(PROJECT_RANGES[0])))
+    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(PROJECT_RANGES[0])))),
+  eval: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
     Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
   ),
 });
 
-const runSearchSchema = stripStruct({
-  tab: runTabSchema
-    .pipe(Schema.withDecodingDefault(Effect.succeed('cases')))
-    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some('cases')))),
+/** `x` spaces the eval's pass-rate trend by run (equal slots) or by date. */
+const evalRunsSearchSchema = stripStruct({
+  x: Schema.Literals(['run', 'date'])
+    .pipe(Schema.withDecodingDefault(Effect.succeed('run')))
+    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some('run')))),
 });
+
+const NotFound = () => (
+  <EmptyState
+    title="This page does not exist"
+    description="The link may be out of date. Pick a project or eval from the sidebar."
+  />
+);
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: DashboardFrame,
-  notFoundComponent: () => <div className="empty-compact">This dashboard page does not exist.</div>,
+  notFoundComponent: NotFound,
 });
 
 /** Every project in the catalog; a single-project catalog lists its one row too. */
@@ -68,99 +78,50 @@ const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectKey',
   params: { parse: (params) => parseWithSchemaSync(projectParamsSchema, params) },
-  // An unknown key fails here, so the error notice replaces the page with the API message.
+  // An unknown key fails here, so the error state replaces the page with the API message.
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(
       projectOverviewQueryOptions(context.source, params.projectKey),
     ),
 });
 
-/** `range` is the period in days; `eval` picks the eval on the pass-rate chart. */
-const projectSearchSchema = stripStruct({
-  range: Schema.Literals(PROJECT_RANGES)
-    .pipe(Schema.withDecodingDefault(Effect.succeed(PROJECT_RANGES[0])))
-    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(PROJECT_RANGES[0])))),
-  eval: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
-    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
-  ),
-});
-
 const projectIndexRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/',
-  validateSearch: Schema.toStandardSchemaV1(projectSearchSchema, {
-    parseOptions: { onExcessProperty: 'error', errors: 'all' },
-  }),
+  validateSearch: Schema.toStandardSchemaV1(projectSearchSchema, strictSearch),
   component: ProjectPage,
 });
 
-/** The run list, run and comparison pages that the compact eval routes will replace. */
-const workspaceRoute = createRoute({
+/** Every run of the project, across its evals. */
+const projectRunsRoute = createRoute({
   getParentRoute: () => projectRoute,
-  id: 'workspace',
-  component: RunsLayout,
-  validateSearch: Schema.toStandardSchemaV1(runsSearchSchema, {
-    parseOptions: { onExcessProperty: 'error', errors: 'all' },
-  }),
-});
-
-const runsRoute = createRoute({
-  getParentRoute: () => workspaceRoute,
   path: 'runs',
+  component: AllRunsPage,
 });
 
-const runsIndexRoute = createRoute({
-  getParentRoute: () => runsRoute,
-  path: '/',
-  component: NewestRun,
-  beforeLoad: async ({ context, params, search }) => {
-    const page = await context.queryClient.fetchQuery(
-      runsQueryOptions(context.source.client, params.projectKey),
+/**
+ * Cloud upload responses link to `#/projects/<key>/runs/<id>`. A run with one eval opens that
+ * eval's run page; a run with several lists them.
+ */
+const projectRunRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'runs/$runId',
+  params: { parse: (params) => parseWithSchemaSync(runParamsSchema, params) },
+  beforeLoad: async ({ context, params }) => {
+    const { suites } = await context.queryClient.fetchQuery(
+      runSuitesQueryOptions(context.source, params.projectKey, params.runId, false),
     );
 
-    const newest = page.items[0];
+    const destination = runDestination(suites);
 
-    if (newest !== undefined) {
+    if (destination.kind === 'eval')
       return redirect({
-        to: '/projects/$projectKey/runs/$runId',
-        params: { projectKey: params.projectKey, runId: newest.id },
-        search,
+        to: '/projects/$projectKey/evals/$suiteName/runs/$runId',
+        params: { ...params, suiteName: destination.suiteName },
+        replace: true,
       });
-    }
   },
-});
-
-const runRoute = createRoute({
-  getParentRoute: () => runsRoute,
-  path: '$runId',
-  params: { parse: (params) => parseWithSchemaSync(runParamsSchema, params) },
-  validateSearch: Schema.toStandardSchemaV1(runSearchSchema, {
-    parseOptions: { onExcessProperty: 'error', errors: 'all' },
-  }),
-  component: RunPage,
-});
-
-const caseRoute = createRoute({
-  getParentRoute: () => runRoute,
-  path: 'cases/$suiteName/$caseId',
-  params: {
-    parse: (params) =>
-      parseWithSchemaSync(
-        stripStruct({
-          suiteName: caseParamsSchema.from.schema.fields.suiteName,
-          caseId: caseParamsSchema.from.schema.fields.caseId,
-        }),
-        params,
-      ),
-  },
-  component: CaseDrawer,
-});
-
-const compareRoute = createRoute({
-  getParentRoute: () => workspaceRoute,
-  path: 'compare/$baseRunId/$candidateRunId',
-  params: { parse: (params) => parseWithSchemaSync(diffParamsSchema, params) },
-  component: ComparePage,
+  component: ProjectRunPage,
 });
 
 const evalRoute = createRoute({
@@ -182,33 +143,60 @@ const evalIndexRoute = createRoute({
     }),
 });
 
-/** `x` spaces the eval's pass-rate trend by run (equal slots) or by date. */
-const evalRunsSearchSchema = stripStruct({
-  x: Schema.Literals(['run', 'date'])
-    .pipe(Schema.withDecodingDefault(Effect.succeed('run')))
-    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some('run')))),
-});
-
 const evalRunsRoute = createRoute({
   getParentRoute: () => evalRoute,
   path: 'runs',
-  validateSearch: Schema.toStandardSchemaV1(evalRunsSearchSchema, {
-    parseOptions: { onExcessProperty: 'error', errors: 'all' },
-  }),
+  validateSearch: Schema.toStandardSchemaV1(evalRunsSearchSchema, strictSearch),
   component: EvalRunsPage,
+});
+
+const evalRunRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: 'runs/$runId',
+  params: {
+    parse: (params) =>
+      parseWithSchemaSync(stripStruct({ runId: runParamsSchema.from.schema.fields.runId }), params),
+  },
+  component: EvalRunPage,
+});
+
+const runCaseRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: 'runs/$runId/cases/$caseId',
+  params: {
+    parse: (params) =>
+      parseWithSchemaSync(
+        stripStruct({
+          runId: caseParamsSchema.from.schema.fields.runId,
+          caseId: caseParamsSchema.from.schema.fields.caseId,
+        }),
+        params,
+      ),
+  },
+  component: RunCasePage,
 });
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   projectRoute.addChildren([
     projectIndexRoute,
-    workspaceRoute.addChildren([
-      runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
-      compareRoute,
-    ]),
-    evalRoute.addChildren([evalIndexRoute, evalRunsRoute]),
+    projectRunsRoute,
+    projectRunRoute,
+    evalRoute.addChildren([evalIndexRoute, evalRunsRoute, evalRunRoute, runCaseRoute]),
   ]),
 ]);
+
+/** A bad URL names the parameter that failed; any other error shows its own message. */
+const RouteError = ({ error }: ErrorComponentProps) => {
+  const description =
+    error instanceof Error && error.cause instanceof SchemaDecodeError
+      ? `Invalid dashboard URL. ${error.cause.issues.map((issue) => issue.message).join(' ')}`
+      : error instanceof Error
+        ? error.message
+        : 'Something went wrong.';
+
+  return <EmptyState title="This page could not load" description={description} />;
+};
 
 /** Uses hash history in the dashboard and accepts memory history for non-browser callers. */
 const createDashboardRouter = (history: RouterHistory, context: RouterContext) =>
@@ -216,30 +204,13 @@ const createDashboardRouter = (history: RouterHistory, context: RouterContext) =
     routeTree,
     history,
     context,
-    defaultErrorComponent: ({ error }: ErrorComponentProps) => (
-      <ErrorNotice
-        error={
-          error instanceof Error && error.cause instanceof SchemaDecodeError
-            ? new Error(
-                `Invalid dashboard URL. ${error.cause.issues.map((issue) => issue.message).join(' ')}`,
-              )
-            : error
-        }
-      />
-    ),
-    defaultNotFoundComponent: () => (
-      <div className="empty-compact">This dashboard page does not exist.</div>
-    ),
+    defaultErrorComponent: RouteError,
+    defaultNotFoundComponent: NotFound,
   });
 
 declare module '@tanstack/react-router' {
   interface Register {
     router: ReturnType<typeof createDashboardRouter>;
-  }
-
-  interface HistoryState {
-    /** Set by links on the run page, so the case drawer knows Back returns to that run. */
-    caseOpenedFromRun?: true;
   }
 }
 
