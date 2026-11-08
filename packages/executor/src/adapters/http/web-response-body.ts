@@ -103,10 +103,11 @@ const readWebJson = Effect.fn('http.webJson')(function* (
     reader === undefined
       ? []
       : [
-          Effect.tryPromise({ try: () => reader.cancel(), catch: (cause) => cause }).pipe(
-            Effect.interruptible,
-            Effect.timeout(100),
-          ),
+          Effect.tryPromise({
+            try: () => reader.cancel(),
+            catch: (cause) =>
+              new AgentInvocationError('network', 'HTTP response body cancel failed.', { cause }),
+          }).pipe(Effect.interruptible, Effect.timeout(100)),
           Effect.sync(() => reader.releaseLock()),
         ],
   );

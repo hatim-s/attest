@@ -5,12 +5,12 @@ import { AgentInvocationError } from '../../errors.js';
 const makeStreamReader = (next: () => Promise<IteratorResult<Uint8Array>>) => {
   let pending: Promise<IteratorResult<Uint8Array>> | undefined;
 
-  const read = Effect.gen(function* () {
-    // Synchronous host defects stay defects. Only foreign Promise rejection is a read failure.
-    const accepted = yield* Effect.sync(next);
+  const read = Effect.suspend(() => {
+    // A synchronous throw from `next` is a defect. Only foreign Promise rejection is a read failure.
+    const accepted = next();
     pending = accepted;
 
-    return yield* Effect.tryPromise({
+    return Effect.tryPromise({
       try: () => accepted,
       catch: (cause) => new AgentInvocationError('network', 'Streaming body failed.', { cause }),
     });
@@ -22,7 +22,10 @@ const makeStreamReader = (next: () => Promise<IteratorResult<Uint8Array>>) => {
     if (accepted === undefined) return Effect.void;
 
     // Either settlement confirms the read joined. A rejected read does not undo body release.
-    return Effect.tryPromise({ try: () => accepted, catch: (cause) => cause }).pipe(
+    return Effect.tryPromise({
+      try: () => accepted,
+      catch: (cause) => new AgentInvocationError('network', 'Streaming body failed.', { cause }),
+    }).pipe(
       Effect.match({ onSuccess: () => undefined, onFailure: () => undefined }),
       Effect.interruptible,
       Effect.timeout(100),

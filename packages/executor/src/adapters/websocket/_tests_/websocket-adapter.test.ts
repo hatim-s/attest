@@ -849,13 +849,13 @@ describe('WebSocket ownership under interruption and failed opening', () => {
         expect(b.error.applicationStarted).not.toBe(true);
         expect(a.attempts.at(-1)).toMatchObject({ error: a.error });
         expect(b.attempts.at(-1)).toMatchObject({ error: b.error });
-        const retained: unknown = Object.getOwnPropertyDescriptor(a.error, 'effectCause')?.value;
+        const retained = a.error.effectCause;
 
-        if (!Cause.isCause(retained)) throw new Error('Expected first opening Cause.');
+        if (retained === undefined) throw new Error('Expected first opening Cause.');
         expect(retained.reasons[0]).toMatchObject({ error: failures[0] });
         const releases = Context.getOrUndefined(Cause.annotations(retained), WebSocketCleanup);
         expect(releases?.[0]?.reasons[0]).toMatchObject({ error: cleanup });
-        expect(Object.hasOwn(failures[0]!, 'effectCause')).toBe(false);
+        expect(failures[0]?.effectCause).toBeUndefined();
       } finally {
         observation.mockRestore();
         await session.close();
@@ -991,14 +991,9 @@ describe('WebSocket ownership under interruption and failed opening', () => {
         expect(result.error.code).toBe(afterDeadline ? 'timeout' : 'network');
         expect(result.error.applicationStarted).toBe(true);
 
-        const retained: unknown = Object.getOwnPropertyDescriptor(
-          result.error,
-          'effectCause',
-        )?.value;
+        const retained = result.error.effectCause;
 
-        expect(Cause.isCause(retained)).toBe(true);
-
-        if (!Cause.isCause(retained)) throw new Error('Expected opening Cause.');
+        if (retained === undefined) throw new Error('Expected opening Cause.');
         const releases = Context.getOrUndefined(Cause.annotations(retained), WebSocketCleanup);
         expect(releases).toHaveLength(1);
         expect(releases?.[0]?.reasons[0]).toMatchObject({ _tag: 'Fail', error: cleanup });

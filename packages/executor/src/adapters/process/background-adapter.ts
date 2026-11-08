@@ -107,32 +107,23 @@ class BackgroundAgentSession {
 
     const primary = yield* Effect.exit(
       Effect.interruptible(session.waitForReadiness()).pipe(
-        Effect.mapError((error) => {
-          Object.defineProperty(error, 'diagnostics', {
-            value: session.startupDiagnostics(),
-            configurable: true,
-          });
-
-          return error;
-        }),
+        Effect.mapError((error) => error.copyWith({ diagnostics: session.startupDiagnostics() })),
       ),
     );
 
     if (Exit.isFailure(primary)) {
       const cleanup = yield* Effect.exit(session.close());
 
-      if (Exit.isFailure(cleanup)) {
-        for (const reason of primary.cause.reasons) {
-          if (Cause.isFailReason(reason))
-            reason.error.cause = {
-              primary: reason.error.cause,
-              cleanupFailure: Cause.squash(cleanup.cause),
-            };
-        }
-      }
-
+      // Each failure is replaced by a copy that keeps its class and adds the cleanup failure.
       const cause = Exit.isFailure(cleanup)
-        ? Cause.annotate(primary.cause, Context.make(ProcessCleanupDiagnostics, cleanup.cause))
+        ? Cause.annotate(
+            Cause.map(primary.cause, (error) =>
+              error.copyWith({
+                cause: { primary: error.cause, cleanupFailure: Cause.squash(cleanup.cause) },
+              }),
+            ),
+            Context.make(ProcessCleanupDiagnostics, cleanup.cause),
+          )
         : primary.cause;
 
       // Preserve the original runtime Cause, including defects and interruption.

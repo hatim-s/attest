@@ -210,19 +210,23 @@ class JsonlBridgeSession {
     }).pipe(Effect.interruptible, Effect.forkIn(scope));
 
     if (options.signal?.aborted) {
-      const failure = new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
-      const primary = Cause.fail(failure);
+      const message = 'JSONL bridge run was cancelled.';
       const cleanup = yield* Effect.exit(session.close());
 
       if (Exit.isFailure(cleanup)) {
-        failure.cause = { cleanupFailure: Cause.squash(cleanup.cause) };
+        const failure = new AgentInvocationError('cancelled', message, {
+          cause: { cleanupFailure: Cause.squash(cleanup.cause) },
+        });
 
         return yield* Effect.failCause(
-          Cause.annotate(primary, Context.make(ProcessCleanupDiagnostics, cleanup.cause)),
+          Cause.annotate(
+            Cause.fail(failure),
+            Context.make(ProcessCleanupDiagnostics, cleanup.cause),
+          ),
         );
       }
 
-      return yield* Effect.fail(failure);
+      return yield* new AgentInvocationError('cancelled', message);
     }
 
     return session;

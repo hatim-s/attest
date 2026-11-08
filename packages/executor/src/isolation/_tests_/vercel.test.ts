@@ -43,7 +43,7 @@ describe('Vercel case isolation', () => {
 
     if (!finish) throw new Error('SDK creation did not start');
     finish(sdk);
-    await expect(acquisition).rejects.toBe(cancelled);
+    await expect(acquisition).rejects.toMatchObject({ cause: cancelled });
     expect(sdk.runCommand).not.toHaveBeenCalled();
     expect(sdk.writeFiles).not.toHaveBeenCalled();
     expect(sdk.stop).toHaveBeenCalledOnce();
@@ -258,7 +258,7 @@ describe('Vercel case isolation', () => {
     );
 
     const error = await run(environment.exec('uncertain')).catch((cause: unknown) => cause);
-    expect(error).toBe(commandError);
+    expect(error).toMatchObject({ cause: commandError });
     // SAFETY: The test boundary attaches the original Effect Cause to typed errors.
     const failure = error as Error & { effectCause: Cause.Cause<Error> };
 

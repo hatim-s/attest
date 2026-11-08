@@ -3,7 +3,7 @@ import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, type AgentInvocationErrorOptions } from '../../errors.js';
 import type { InvocationResult } from '../../types.js';
 
 /** Cleanup outcomes remain attached to the original Cause without changing its reasons. */
@@ -17,6 +17,7 @@ class WebSocketCleanupError extends AgentInvocationError {
   constructor(
     readonly result: InvocationResult,
     readonly cleanupCause: Cause.Cause<unknown>,
+    options?: AgentInvocationErrorOptions,
   ) {
     super(
       result.status === 'invocation_error' ? result.error.code : 'timeout',
@@ -27,8 +28,13 @@ class WebSocketCleanupError extends AgentInvocationError {
         classification: 'close_timeout',
         applicationStarted: true,
         cause: { success: result, cleanup: cleanupCause },
+        ...options,
       },
     );
+  }
+
+  protected override rebuild(options: AgentInvocationErrorOptions): WebSocketCleanupError {
+    return new WebSocketCleanupError(this.result, this.cleanupCause, options);
   }
 }
 
@@ -91,21 +97,17 @@ const withWebSocketRelease = <A, E, R, E2, R2>(
 const retainWebSocketOpeningCause = (
   error: AgentInvocationError,
   cause: Cause.Cause<AgentInvocationError>,
-): AgentInvocationError => {
-  const retained = new AgentInvocationError(error.code, error.message, {
+): AgentInvocationError =>
+  new AgentInvocationError(error.code, error.message, {
     ...error,
     cause: error,
+    effectCause: cause,
     applicationStarted:
       error.applicationStarted === true ||
       cause.reasons.some(
         (reason) => Cause.isFailReason(reason) && reason.error.applicationStarted === true,
       ),
   });
-
-  Object.defineProperty(retained, 'effectCause', { value: cause });
-
-  return retained;
-};
 
 /** Keeps a late receipt on both the terminal result and its corresponding attempt. */
 const retainWebSocketOpeningResult = (

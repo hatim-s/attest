@@ -23,6 +23,7 @@ import {
   MetricOperationEvidence,
   MetricCleanupDiagnostics,
 } from '../internal/operation.js';
+import { TestFailure } from '../../_tests_/support/test-failure.js';
 
 /** Reads the typed failure while leaving defects and interruption in their native channels. */
 const failure = <A, E>(exit: Exit.Exit<A, E>) =>
@@ -47,7 +48,7 @@ describe('native metric resource ownership', () => {
               return Promise.reject(primary);
             },
             writeFiles: () => Promise.resolve(),
-            readFile: () => Promise.reject(new Error('unused fixture read')),
+            readFile: () => Promise.reject(new TestFailure({ message: 'unused fixture read' })),
             stop: () => {
               stops++;
 
@@ -92,12 +93,12 @@ describe('native metric resource ownership', () => {
     );
 
     if (Exit.isSuccess(exit)) throw new Error('Environment cleanup failure was scored.');
-    expect(failure(exit)).toBe(primary);
+    expect(failure(exit)).toMatchObject({ cause: primary });
     expect(
       getEnvironmentCleanupCause(exit.cause)
         ?.reasons.filter(Cause.isFailReason)
         .map((reason) => reason.error),
-    ).toContain(cleanup);
+    ).toContainEqual(expect.objectContaining({ cause: cleanup }));
     expect(metrics).toBe(1);
     expect(commands).toBe(1);
     expect(stops).toBe(1);
@@ -128,7 +129,8 @@ describe('native metric resource ownership', () => {
                 Effect.gen(function* () {
                   calls++;
 
-                  if (calls !== 1) return yield* Effect.fail(new Error('unexpected retry'));
+                  if (calls !== 1)
+                    return yield* Effect.fail(new TestFailure({ message: 'unexpected retry' }));
 
                   if (kind === 'release')
                     return yield* withRelease(
@@ -149,7 +151,7 @@ describe('native metric resource ownership', () => {
                           return Effect.sync(() => signal.removeEventListener('abort', abort));
                         });
 
-                        return yield* Effect.fail(new Error('cancelled owner'));
+                        return yield* Effect.fail(new TestFailure({ message: 'cancelled owner' }));
                       }),
                       Effect.fail(cleanup),
                     ),
@@ -206,7 +208,7 @@ describe('native metric resource ownership', () => {
         releaseAll([
           Effect.sync(() => {
             releases.push('first');
-          }).pipe(Effect.andThen(Effect.fail(new Error('close failed')))),
+          }).pipe(Effect.andThen(Effect.fail(new TestFailure({ message: 'close failed' })))),
           Effect.sync(() => {
             releases.push('second');
           }),
@@ -229,7 +231,7 @@ describe('native metric resource ownership', () => {
     expect(failure(failed)).toBe(primary);
 
     const defect = await Effect.runPromiseExit(
-      withRelease(Effect.die(primary), Effect.fail(new Error('cleanup'))),
+      withRelease(Effect.die(primary), Effect.fail(new TestFailure({ message: 'cleanup' }))),
     );
 
     expect(Exit.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true);
@@ -654,7 +656,10 @@ describe('native metric resource ownership', () => {
     const release = Effect.failCause(Cause.fail(cleanup));
 
     const exit = await Effect.runPromiseExit(
-      withRelease(withRelease(Effect.fail(new Error('primary')), release), release),
+      withRelease(
+        withRelease(Effect.fail(new TestFailure({ message: 'primary' })), release),
+        release,
+      ),
     );
 
     if (Exit.isSuccess(exit)) throw new Error('Expected failure.');
