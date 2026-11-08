@@ -22,7 +22,7 @@ import * as Schema from 'effect/Schema';
 import { runsQueryOptions } from './api/queries.js';
 import { projectOverviewQueryOptions } from './api/queries/projects.js';
 import type { DashboardSource } from './api/dashboard-source.js';
-import { EvalPage } from './routes/eval-page.js';
+import { EvalRunsPage } from './routes/eval/eval-runs-page.js';
 import { DirectoryPage } from './routes/directory/directory-page.js';
 import { ProjectPage } from './routes/project/project-page.js';
 import { PROJECT_RANGES } from './routes/project/project-range.js';
@@ -94,7 +94,7 @@ const projectIndexRoute = createRoute({
   component: ProjectPage,
 });
 
-/** The run list, run, comparison and eval pages that the compact eval routes will replace. */
+/** The run list, run and comparison pages that the compact eval routes will replace. */
 const workspaceRoute = createRoute({
   getParentRoute: () => projectRoute,
   id: 'workspace',
@@ -164,18 +164,38 @@ const compareRoute = createRoute({
 });
 
 const evalRoute = createRoute({
-  getParentRoute: () => workspaceRoute,
+  getParentRoute: () => projectRoute,
   path: 'evals/$suiteName',
   params: { parse: (params) => parseWithSchemaSync(evalParamsSchema, params) },
-  validateSearch: Schema.toStandardSchemaV1(
-    stripStruct({
-      limit: Schema.Finite.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 }))
-        .pipe(Schema.withDecodingDefault(Effect.succeed(20)))
-        .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(20)))),
+});
+
+/** The eval opens on its Runs tab. */
+const evalIndexRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: '/',
+  beforeLoad: ({ params }) =>
+    redirect({
+      to: '/projects/$projectKey/evals/$suiteName/runs',
+      params,
+      search: { x: 'run' },
+      replace: true,
     }),
-    { parseOptions: { onExcessProperty: 'error', errors: 'all' } },
-  ),
-  component: EvalPage,
+});
+
+/** `x` spaces the eval's pass-rate trend by run (equal slots) or by date. */
+const evalRunsSearchSchema = stripStruct({
+  x: Schema.Literals(['run', 'date'])
+    .pipe(Schema.withDecodingDefault(Effect.succeed('run')))
+    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some('run')))),
+});
+
+const evalRunsRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: 'runs',
+  validateSearch: Schema.toStandardSchemaV1(evalRunsSearchSchema, {
+    parseOptions: { onExcessProperty: 'error', errors: 'all' },
+  }),
+  component: EvalRunsPage,
 });
 
 const routeTree = rootRoute.addChildren([
@@ -185,8 +205,8 @@ const routeTree = rootRoute.addChildren([
     workspaceRoute.addChildren([
       runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
       compareRoute,
-      evalRoute,
     ]),
+    evalRoute.addChildren([evalIndexRoute, evalRunsRoute]),
   ]),
 ]);
 

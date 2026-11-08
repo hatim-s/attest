@@ -82,6 +82,15 @@ const formatCount = (count: number, noun: string): string =>
 /** Truncates an opaque identifier for display. */
 const shortId = (value: string, length = 8): string => value.slice(0, length);
 
+/**
+ * A run id short enough for a table. Run ids are ULIDs: runs started within the same second share
+ * their leading time characters, so the short form is the random tail.
+ */
+const shortRunId = (runId: string): string => runId.slice(-6);
+
+/** A commit sha in the usual seven-character form. */
+const shortSha = (sha: string): string => sha.slice(0, 7);
+
 export {
   formatCount,
   formatDateTime,
@@ -92,4 +101,6 @@ export {
   formatShortDateTime,
   formatStarted,
   shortId,
+  shortRunId,
+  shortSha,
 };

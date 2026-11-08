@@ -8,7 +8,7 @@ import type {
   ShellEval,
   ShellProject,
 } from '../../shell/navigation.js';
-import { shortId } from '../../lib/format.js';
+import { shortRunId } from '../../lib/format.js';
 
 /** Keeps the last good data through a failed refetch; only a first failure becomes an error. */
 const navigationData = <Data, Item>(
@@ -60,10 +60,10 @@ const recentLabel = (
 
   switch (target.kind) {
     case 'project-run':
-      return { label: `Run ${shortId(target.runId)}`, context: project.name };
+      return { label: `Run ${shortRunId(target.runId)}`, context: project.name };
     case 'run':
       return {
-        label: `Run ${shortId(target.runId)}`,
+        label: `Run ${shortRunId(target.runId)}`,
         context: `${project.name}, ${target.evalId}`,
       };
     case 'case':
@@ -72,7 +72,7 @@ const recentLabel = (
     case 'run-case':
       return {
         label: target.caseId,
-        context: `${project.name}, ${target.evalId}, run ${shortId(target.runId)}`,
+        context: `${project.name}, ${target.evalId}, run ${shortRunId(target.runId)}`,
       };
   }
 };

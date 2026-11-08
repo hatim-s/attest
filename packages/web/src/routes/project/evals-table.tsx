@@ -31,7 +31,7 @@ const latestPhrase = (latest: EvalSlice): LatestPhrase => {
 
 /**
  * One row per eval with a recorded run. Pass rate is from the newest complete slice; a project
- * whose only slices are partial shows none. Rows open the existing eval page.
+ * whose only slices are partial shows none. Rows open the eval's Runs tab.
  */
 const EvalsTable = ({ projectKey, evals }: { projectKey: string; evals: EvalPage }) => (
   <section className="attest-card" aria-label="Evals">
@@ -57,7 +57,7 @@ const EvalsTable = ({ projectKey, evals }: { projectKey: string; evals: EvalPage
               <td>
                 <Link
                   className="attest-rowlink"
-                  to="/projects/$projectKey/evals/$suiteName"
+                  to="/projects/$projectKey/evals/$suiteName/runs"
                   params={{ projectKey, suiteName }}
                 >
                   {suiteName}

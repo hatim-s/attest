@@ -2,9 +2,9 @@ import { getRouteApi } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import type { EvalSummary } from '@attest/core/records';
 import { useDashboardSource } from '../../api/api-client-context.js';
-import { useProjectChangeSignal } from '../../api/live-updates.js';
+import { useLiveProjectOverview } from '../../api/live-updates.js';
 import { evalsQueryOptions } from '../../api/queries/evals.js';
-import { overviewsQueryOptions, projectOverviewQueryOptions } from '../../api/queries/projects.js';
+import { overviewsQueryOptions } from '../../api/queries/projects.js';
 import { EmptyState } from '../../components/empty/empty-state.js';
 import { formatCount } from '../../lib/format.js';
 import { ActivityPanel } from './activity-panel.js';
@@ -37,17 +37,13 @@ const ProjectPage = () => {
   const search = route.useSearch();
   const navigate = route.useNavigate();
   const source = useDashboardSource();
-  const scope = { sourceId: source.id, projectKey };
-
-  const overview = useQuery(projectOverviewQueryOptions(source, projectKey));
+  const overview = useLiveProjectOverview(source, projectKey);
   const running = (overview.data?.runningRunCount ?? 0) > 0;
   const evals = useQuery(evalsQueryOptions(source, projectKey, running));
 
   const project = useQuery(overviewsQueryOptions(source)).data?.items.find(
     (entry) => entry.project.key === projectKey,
   )?.project;
-
-  useProjectChangeSignal(scope, overview.data);
 
   const window = projectWindow(search.range, utcToday());
   const rangeName = RANGE_NAMES[search.range];
