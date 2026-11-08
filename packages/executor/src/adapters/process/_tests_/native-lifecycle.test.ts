@@ -379,14 +379,6 @@ describe('native process ownership', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
-
-  it('keeps an invalid argv invariant as a defect', async () => {
-    const exit = await Effect.runPromiseExit(
-      ManagedChild.start({ argv: [], cwd: process.cwd(), env: {}, stderrCapBytes: 100 }),
-    );
-
-    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
-  });
 });
 
 it.each(['split', 'cap'] as const)(

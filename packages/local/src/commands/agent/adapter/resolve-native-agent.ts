@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
-import type { AgentResource } from '@attest/contracts';
+import type { AgentResource, Argv } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
 import { isProjectPath } from '../../../project/project-path.js';
@@ -32,12 +32,14 @@ const resolveProcessCwd = (projectRoot: string, cwd = '.') =>
   });
 
 /** Resolves only explicit relative argv paths against the authored cwd; no shell parsing occurs. */
-const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
-  argv.map((argument) =>
+const resolveProcessArgv = ([executable, ...argumentsList]: Argv, cwd: string): Argv => {
+  const resolveArgument = (argument: string): string =>
     isAbsolute(argument) || !(argument === '.' || argument === '..' || /^\.\.?\//u.test(argument))
       ? argument
-      : resolve(cwd, argument),
-  );
+      : resolve(cwd, argument);
+
+  return [resolveArgument(executable), ...argumentsList.map(resolveArgument)];
+};
 
 /** Adds literal header and query values the agent marks for redaction to its secret list. */
 const addRedactedRequestValues = (
@@ -97,7 +99,7 @@ const resolveProcessAgent = Effect.fn('resolveProcessAgent')(function* (
 
   if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
     return {
-      argv: [transport.argv[0]!, ...transport.argv.slice(1)],
+      argv: transport.argv,
       cwd: transport.cwd,
       env: variables,
       kind: 'vercel_sandbox',

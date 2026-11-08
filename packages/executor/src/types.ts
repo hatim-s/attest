@@ -3,7 +3,8 @@ import type { AgentResponse, ContractWarning, ParseReport, RawExcerpt } from '@a
 import type { AgentInvocationError } from './errors.js';
 
 /** Describes the two native transports that use the shared envelope invoker. */
-type NativeAgentTarget = { type: 'cli'; command: string[] } | { type: 'http'; url: string };
+type NativeAgentTarget =
+  { type: 'cli'; command: readonly string[] } | { type: 'http'; url: string };
 
 /** Controls a single agent invocation; timeouts and caps come from resolved config defaults. */
 type InvokeOptions = {

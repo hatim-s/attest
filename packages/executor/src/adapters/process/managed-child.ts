@@ -16,7 +16,7 @@ import {
 } from '../../internal/process-tree.js';
 
 type ManagedChildOptions = {
-  argv: readonly string[];
+  argv: readonly [string, ...string[]];
   cwd: string;
   env: Record<string, string>;
   stderrCapBytes: number;
@@ -57,9 +57,6 @@ class ManagedChild {
   /** Spawns argv directly, never through a shell, and waits for the OS spawn boundary. */
   static start = Effect.fn('ManagedChild.start')(function* (options: ManagedChildOptions) {
     const [executable, ...argumentsList] = options.argv;
-
-    if (executable === undefined)
-      return yield* Effect.die(new TypeError('Managed process argv cannot be empty.'));
 
     const child = spawn(executable, argumentsList, {
       cwd: options.cwd,

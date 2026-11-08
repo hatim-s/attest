@@ -1,12 +1,13 @@
 import {
+  argvSchema,
   isJsonObject,
   parseWithSchema,
   tryOwned,
   vercelSandboxSchema,
+  type Argv,
   type JsonValue,
 } from '@attest/contracts';
 
-import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
@@ -26,14 +27,18 @@ const tokenizeCommand = Effect.fn('tokenizeCommand')(function* (value: string) {
       }),
   );
 
-  if (argv.length === 0) {
+  const [executable, ...argumentsList] = argv;
+
+  if (executable === undefined) {
     return yield* new LocalError('cli_missing_input', 'The native command argv cannot be empty.', {
       path: '--native-command',
       hint: 'Pass a command string or a non-empty `--argv-json` array.',
     });
   }
 
-  return argv;
+  const tokens: Argv = [executable, ...argumentsList];
+
+  return tokens;
 });
 
 /** Parses an unambiguous JSON argv array. */
@@ -43,7 +48,7 @@ const parseArgvJson = Effect.fn('parseArgvJson')(function* (value: string) {
     hint: 'Pass a JSON array of strings.',
   });
 
-  const argv = parseWithSchema(Schema.Array(Schema.String).check(Schema.isMinLength(1)), parsed);
+  const argv = parseWithSchema(argvSchema, parsed);
 
   if (!argv.ok) {
     return yield* new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
