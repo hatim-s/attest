@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect';
 import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import {
   addCaseToTotals,
+  bucketActivity,
   emptySliceTotals,
   summarizeEvalSlices,
   toEvalSlice,
@@ -223,37 +224,13 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
     getActivity: ({ projectKey }, query) =>
       settle(() => {
         requireProject(projectKey);
-        const { from, to } = activityBounds(query);
-        const inWindow = slices.length > 0 && runCreatedAt >= from && runCreatedAt < to;
+        const bounds = activityBounds(query);
+        const inWindow = runCreatedAt >= bounds.from && runCreatedAt < bounds.to;
 
-        return {
-          coveredFrom: from,
-          coveredTo: to,
-          timezone: 'UTC' as const,
-          days: inWindow
-            ? [
-                slices.reduce(
-                  (day, { counts }) => ({
-                    ...day,
-                    slices: day.slices + 1,
-                    passed: day.passed + counts.passed,
-                    failed: day.failed + counts.failed,
-                    errored: day.errored + counts.errored,
-                    skipped: day.skipped + counts.skipped,
-                  }),
-                  {
-                    day: runCreatedAt.slice(0, 10),
-                    slices: 0,
-                    passed: 0,
-                    failed: 0,
-                    errored: 0,
-                    skipped: 0,
-                  },
-                ),
-              ]
-            : [],
-          truncated: false,
-        };
+        return bucketActivity(
+          inWindow ? slices.map(({ counts }) => ({ createdAt: runCreatedAt, ...counts })) : [],
+          bounds,
+        );
       }),
     listRuns: ({ projectKey }, query) =>
       settle(() => {

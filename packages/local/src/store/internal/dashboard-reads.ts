@@ -4,7 +4,12 @@ import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';
 import { storeCall, storeDecode } from './store-effect.js';
 import { canonicalTime, activityBounds } from '@attest/core/records';
-import { summarizeEvalSlices, toEvalSlice } from '@attest/core/analytics';
+import {
+  ACTIVITY_SLICE_LIMIT,
+  bucketActivity,
+  summarizeEvalSlices,
+  toEvalSlice,
+} from '@attest/core/analytics';
 import {
   StoreError,
   parsePageLimit,
@@ -13,7 +18,6 @@ import {
   type EvalSlice,
   type EvalCaseWindow,
   type CaseHistoryPage,
-  type Activity,
 } from '@attest/core';
 import type { CasesTable, Database, SuiteTotalsTable, RunsTable } from '../schema.js';
 
@@ -435,70 +439,31 @@ class DashboardReads {
     }.bind(this),
   );
 
-  /** UTC buckets over at most 10,000 recent slices. Dense intervals report truncation explicitly. */
+  /** UTC buckets over the newest ACTIVITY_SLICE_LIMIT slices; dense intervals report truncation. */
   getActivity = Effect.fn('DashboardReads.getActivity')(
     function* (this: DashboardReads, query: { from: string; to: string }) {
       const bounds = yield* storeDecode('Could not decode store data.', () =>
         activityBounds(query),
       );
 
-      const from = Date.parse(bounds.from);
-      const to = Date.parse(bounds.to);
-
       const rows = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
         this.#db
           .selectFrom('run_suite_totals')
-          .selectAll()
+          .select(['run_created_at', 'passed', 'failed', 'errored', 'skipped'])
           .where('is_eval', '=', 1)
-          .where('run_created_at', '>=', new Date(from).toISOString())
-          .where('run_created_at', '<', new Date(to).toISOString())
+          .where('run_created_at', '>=', bounds.from)
+          .where('run_created_at', '<', bounds.to)
           .orderBy('run_created_at', 'desc')
           .orderBy('run_id', 'desc')
           .orderBy('suite_name')
-          .limit(10001)
+          .limit(ACTIVITY_SLICE_LIMIT + 1)
           .execute(),
       );
 
-      const days = new Map<string, Activity['days'][number]>();
-
-      const truncated = rows.length > 10000;
-
-      // Drop the entire boundary UTC day, including ties. No partial total looks exact.
-      const cutoff = truncated
-        ? new Date(
-            Date.parse(rows[10000]!.run_created_at.slice(0, 10) + 'T00:00:00.000Z') + 86400000,
-          ).toISOString()
-        : new Date(from).toISOString();
-
-      for (const row of rows.slice(0, 10000).filter((row) => row.run_created_at >= cutoff)) {
-        const day = new Date(row.run_created_at).toISOString().slice(0, 10);
-
-        const bucket = days.get(day) ?? {
-          day,
-          slices: 0,
-          passed: 0,
-          failed: 0,
-          errored: 0,
-          skipped: 0,
-        };
-
-        days.set(day, {
-          ...bucket,
-          slices: bucket.slices + 1,
-          passed: bucket.passed + row.passed,
-          failed: bucket.failed + row.failed,
-          errored: bucket.errored + row.errored,
-          skipped: bucket.skipped + row.skipped,
-        });
-      }
-
-      return {
-        coveredFrom: cutoff > new Date(to).toISOString() ? new Date(to).toISOString() : cutoff,
-        coveredTo: new Date(to).toISOString(),
-        timezone: 'UTC' as const,
-        days: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
-        truncated: rows.length > 10000,
-      };
+      return bucketActivity(
+        rows.map(({ run_created_at, ...counts }) => ({ createdAt: run_created_at, ...counts })),
+        bounds,
+      );
     }.bind(this),
   );
 
