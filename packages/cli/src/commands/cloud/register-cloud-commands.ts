@@ -4,8 +4,12 @@ import * as cloudAdapter from '@attest/local/cloud';
 import { createEvalRunRequest, type EvalRunRequestFields } from '../eval/eval-request.js';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { renderResult } from '../shared/command-result.js';
-import { addCommonOptions, collect } from '../shared/cli-options.js';
-import type { CommonCliOptions } from '../shared/cli-options.js';
+import {
+  addCommonOptions,
+  collect,
+  promptContext,
+  type CommonCliOptions,
+} from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 
 type LoginOptions = CommonCliOptions & {
@@ -321,26 +325,22 @@ const registerCloudCommands = ({
               ),
             );
 
-          const request = yield* Effect.tryPromise({
-            try: () =>
-              createEvalRunRequest(
-                {
-                  all: options.all,
-                  testIds,
-                  caseIds: options.case,
-                  tags: options.tag,
-                  folders: options.folder,
-                  datasetIds: options.dataset,
-                  sample: options.sample,
-                  seed: options.seed,
-                  concurrency: options.concurrency,
-                  timeout: options.timeout,
-                  output: 'json',
-                },
-                { interactive: false, prompt: interaction.prompt },
-              ),
-            catch: (cause) => cause,
-          });
+          const request = yield* createEvalRunRequest(
+            {
+              all: options.all,
+              testIds,
+              caseIds: options.case,
+              tags: options.tag,
+              folders: options.folder,
+              datasetIds: options.dataset,
+              sample: options.sample,
+              seed: options.seed,
+              concurrency: options.concurrency,
+              timeout: options.timeout,
+              output: 'json',
+            },
+            promptContext({ nonInteractive: true }, interaction, commandSignal),
+          );
 
           const idempotencyKey = options.idempotencyKey ?? randomUUID();
           // Print the key before submission so a lost response can be retried safely.

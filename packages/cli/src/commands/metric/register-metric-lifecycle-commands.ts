@@ -5,9 +5,9 @@ import type { Command } from 'commander';
 import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  isInteractive,
   mutationRequestFields,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -32,8 +32,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const interactive = isInteractive(options, context.interaction, options.fromJson);
-            const prompt = { interactive, prompt: context.interaction.prompt };
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'metric.rename',
@@ -44,29 +43,21 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('metric.rename', options),
-                    metric_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          metricId,
-                          { path: '<metric-id>', question: 'Metric id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
-                    new_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          newId,
-                          { path: '<new-id>', question: 'New metric id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    metric_id: yield* requiredInput(
+                      metricId,
+                      { path: '<metric-id>', question: 'Metric id: ' },
+                      prompt,
+                    ),
+                    new_id: yield* requiredInput(
+                      newId,
+                      { path: '<new-id>', question: 'New metric id: ' },
+                      prompt,
+                    ),
                   };
                 }),
             });
 
-            yield* runMetricMutation(request, options, interactive, context);
+            yield* runMetricMutation({ request, options, prompt, context });
           }),
         ),
     );
@@ -81,7 +72,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
     .action((metricId: string | undefined, options: RemoveOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = promptContext(options, context.interaction, context.signal);
 
           const request = yield* readOrBuildRequest({
             command: 'metric.remove',
@@ -92,15 +83,11 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
               Effect.gen(function* () {
                 let request: Extract<CommandRequest, { command: 'metric.remove' }> = {
                   ...mutationRequestFields('metric.remove', options),
-                  metric_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        metricId,
-                        { path: '<metric-id>', question: 'Metric id: ' },
-                        { interactive, prompt: context.interaction.prompt },
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  metric_id: yield* requiredInput(
+                    metricId,
+                    { path: '<metric-id>', question: 'Metric id: ' },
+                    prompt,
+                  ),
                 };
 
                 if (options.detach !== undefined) {
@@ -111,7 +98,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
               }),
           });
 
-          yield* runMetricMutation(request, options, interactive, context);
+          yield* runMetricMutation({ request, options, prompt, context });
         }),
       ),
     );

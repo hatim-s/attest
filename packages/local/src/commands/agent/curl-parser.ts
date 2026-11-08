@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema';
 import type { HttpRequestTemplate, JsonValue, SecretReference } from '@attest/contracts';
 
 import { isSensitiveFieldName } from '../../internal/redaction.js';
+import { isLiteralTemplateValue } from '../../internal/template-value.js';
 import {
   applyPlaceholder,
   assertNoSensitiveBodyFields,
@@ -157,9 +158,6 @@ const findCurlBodyFilePath = (source: string): string | undefined => {
 
   return undefined;
 };
-
-const isLiteralTemplateValue = (value: string | SecretReference | undefined): value is string =>
-  typeof value === 'string';
 
 const isHttpMethod = (value: string): value is HttpRequestTemplate['method'] => METHODS.has(value);
 

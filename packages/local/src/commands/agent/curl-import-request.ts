@@ -1,4 +1,5 @@
-import { parseWithSchema, commandRequestSchema } from '@attest/contracts';
+import { parseWithSchema, commandRequestSchema, tryOwned } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
@@ -60,51 +61,62 @@ const CURL_MAPPING_DIAGNOSTICS: ReadonlySet<string> = new Set([
 ]);
 
 /** Maps header or query secret bindings to environment names; names match case-insensitively. */
-const parseEnvironmentBindings = (
+const parseEnvironmentBindings = Effect.fn('parseEnvironmentBindings')(function* (
   values: readonly string[] | undefined,
   path: string,
-): Record<string, string> | undefined => {
+) {
   if (values === undefined || values.length === 0) return undefined;
-  const bindings = Object.entries(parseSecretBindings(values, path));
+  const bindings = Object.entries(yield* parseSecretBindings(values, path));
   const names = new Set(bindings.map(([target]) => target.toLowerCase()));
 
   if (names.size !== values.length) {
-    throw new LocalError('cli_usage', 'A cURL secret binding is duplicated.', { path });
+    return yield* new LocalError('cli_usage', 'A cURL secret binding is duplicated.', { path });
   }
 
   return Object.fromEntries(bindings.map(([target, reference]) => [target, reference.from_env]));
-};
+});
 
-const parseBodyMappings = (
-  values: readonly string[] | undefined,
-): CurlImportRequest['placeholders'] =>
-  values?.map((value) => {
+/** Parses `--map-body TARGET=INPUT` pointer pairs, failing on the first value without `=`. */
+const parseBodyMappings = Effect.fn('parseBodyMappings')(function* (values: readonly string[]) {
+  const mappings: NonNullable<CurlImportRequest['placeholders']>[number][] = [];
+
+  for (const value of values) {
     const separator = value.indexOf('=');
 
     if (separator <= 0) {
-      throw new LocalError('cli_usage', 'A cURL body mapping is invalid.', {
+      return yield* new LocalError('cli_usage', 'A cURL body mapping is invalid.', {
         path: '--map-body',
         hint: 'Use TARGET_JSON_POINTER=INPUT_JSON_POINTER.',
       });
     }
 
-    return {
+    mappings.push({
       target_pointer: value.slice(0, separator),
       input_pointer: value.slice(separator + 1),
-    };
-  });
-
-const parseInteger = (value: string, path: string, options: { min: number }): number => {
-  const parsed = Number(value);
-
-  if (!Number.isSafeInteger(parsed) || parsed < options.min) {
-    throw new LocalError('cli_usage', `${path} must be an integer of at least ${options.min}.`, {
-      path,
     });
   }
 
+  return mappings;
+});
+
+/** Parses a safe integer flag value that must be at least `options.min`. */
+const parseInteger = Effect.fn('parseInteger')(function* (
+  value: string,
+  path: string,
+  options: { min: number },
+) {
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed) || parsed < options.min) {
+    return yield* new LocalError(
+      'cli_usage',
+      `${path} must be an integer of at least ${options.min}.`,
+      { path },
+    );
+  }
+
   return parsed;
-};
+});
 
 /** True when any polling flag was passed, which selects the polling transport. */
 const pollingFlagsPresent = (
@@ -123,32 +135,34 @@ const pollingFlagsPresent = (
   ].some((value) => value !== undefined);
 
 /** Normalizes cURL import flags through the same request schema as --from-json. */
-const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest => {
+const createCurlImportRequest = Effect.fn('createCurlImportRequest')(function* (
+  fields: CurlImportFields,
+) {
   const options = fields;
   const pollingSelected = pollingFlagsPresent(options);
 
   const successes =
     options.pollSuccess === undefined
       ? undefined
-      : parseJsonValues(options.pollSuccess, '--poll-success');
+      : yield* parseJsonValues(options.pollSuccess, '--poll-success');
 
   const failures =
     options.pollFailure === undefined
       ? undefined
-      : parseJsonValues(options.pollFailure, '--poll-failure');
+      : yield* parseJsonValues(options.pollFailure, '--poll-failure');
 
   const retries =
     options.retries === undefined
       ? undefined
-      : parseInteger(options.retries, '--retries', { min: 0 });
+      : yield* parseInteger(options.retries, '--retries', { min: 0 });
 
   const retryDelay =
     options.retryDelay === undefined
       ? undefined
-      : parseDuration(options.retryDelay, '--retry-delay');
+      : yield* parseDuration(options.retryDelay, '--retry-delay');
 
   if (retryDelay !== undefined && retries === undefined) {
-    throw new LocalError('cli_usage', '--retry-delay requires --retries.', {
+    return yield* new LocalError('cli_usage', '--retry-delay requires --retries.', {
       path: '--retry-delay',
     });
   }
@@ -165,18 +179,18 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
   if (fields.name !== undefined) candidate = { ...candidate, name: fields.name };
 
   if (options.mapBody !== undefined)
-    candidate = { ...candidate, placeholders: parseBodyMappings(options.mapBody) };
+    candidate = { ...candidate, placeholders: yield* parseBodyMappings(options.mapBody) };
 
   if (options.headerEnv !== undefined)
     candidate = {
       ...candidate,
-      header_env: parseEnvironmentBindings(options.headerEnv, '--header-env'),
+      header_env: yield* parseEnvironmentBindings(options.headerEnv, '--header-env'),
     };
 
   if (options.queryEnv !== undefined)
     candidate = {
       ...candidate,
-      query_env: parseEnvironmentBindings(options.queryEnv, '--query-env'),
+      query_env: yield* parseEnvironmentBindings(options.queryEnv, '--query-env'),
     };
 
   if (options.errorPointer !== undefined)
@@ -206,11 +220,11 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
       minimum_interval_ms:
         options.pollMinimumInterval === undefined
           ? undefined
-          : parseDuration(options.pollMinimumInterval, '--poll-minimum-interval'),
+          : yield* parseDuration(options.pollMinimumInterval, '--poll-minimum-interval'),
       maximum_interval_ms:
         options.pollMaximumInterval === undefined
           ? undefined
-          : parseDuration(options.pollMaximumInterval, '--poll-maximum-interval'),
+          : yield* parseDuration(options.pollMaximumInterval, '--poll-maximum-interval'),
     };
 
     if (options.pollStatusUrlPointer !== undefined)
@@ -237,22 +251,25 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     if (options.connectTimeout !== undefined)
       timeouts = {
         ...timeouts,
-        connect_ms: parseDuration(options.connectTimeout, '--connect-timeout'),
+        connect_ms: yield* parseDuration(options.connectTimeout, '--connect-timeout'),
       };
 
     if (options.firstByteTimeout !== undefined)
       timeouts = {
         ...timeouts,
-        first_byte_ms: parseDuration(options.firstByteTimeout, '--first-byte-timeout'),
+        first_byte_ms: yield* parseDuration(options.firstByteTimeout, '--first-byte-timeout'),
       };
 
     if (options.bodyTimeout !== undefined)
-      timeouts = { ...timeouts, idle_ms: parseDuration(options.bodyTimeout, '--body-timeout') };
+      timeouts = {
+        ...timeouts,
+        idle_ms: yield* parseDuration(options.bodyTimeout, '--body-timeout'),
+      };
 
     if (options.attemptTimeout !== undefined)
       timeouts = {
         ...timeouts,
-        attempt_ms: parseDuration(options.attemptTimeout, '--attempt-timeout'),
+        attempt_ms: yield* parseDuration(options.attemptTimeout, '--attempt-timeout'),
       };
     candidate = { ...candidate, timeouts: timeouts };
   }
@@ -273,7 +290,7 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     if (options.requestCapBytes !== undefined)
       limits = {
         ...limits,
-        request_bytes: parseInteger(options.requestCapBytes, '--request-cap-bytes', {
+        request_bytes: yield* parseInteger(options.requestCapBytes, '--request-cap-bytes', {
           min: 1,
         }),
       };
@@ -281,7 +298,7 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     if (options.responseCapBytes !== undefined)
       limits = {
         ...limits,
-        response_bytes: parseInteger(options.responseCapBytes, '--response-cap-bytes', {
+        response_bytes: yield* parseInteger(options.responseCapBytes, '--response-cap-bytes', {
           min: 1,
         }),
       };
@@ -302,7 +319,7 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     parsed.value.command !== 'agent.import' ||
     parsed.value.source_type !== 'curl'
   ) {
-    throw new LocalError('cli_usage', 'cURL import flags are incomplete or inconsistent.', {
+    return yield* new LocalError('cli_usage', 'cURL import flags are incomplete or inconsistent.', {
       path: '--type',
       hint: 'Provide extraction pointers and every required polling field.',
       details: { diagnostics: parsed.ok ? [] : schemaIssueDiagnostics(parsed.error.issues) },
@@ -310,6 +327,23 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
   }
 
   return parsed.value;
+});
+
+/** Reads the first `unsafe_header:NAME` or `unsafe_query:NAME` parser diagnostic. */
+const firstUnboundCredential = (
+  diagnostics: readonly string[],
+): { kind: 'header' | 'query'; name: string } | undefined => {
+  for (const diagnostic of diagnostics) {
+    const [kind, name] = diagnostic.split(':');
+
+    if (name === undefined) continue;
+
+    if (kind === 'unsafe_header') return { kind: 'header', name };
+
+    if (kind === 'unsafe_query') return { kind: 'query', name };
+  }
+
+  return undefined;
 };
 
 /**
@@ -317,33 +351,21 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
  * binding yet, so a guided import can ask for one. Returns the name only; the captured value
  * never leaves the parser.
  */
-const findUnboundCurlCredential = (
+const findUnboundCurlCredential = Effect.fn('findUnboundCurlCredential')(function* (
   source: string,
   bindings: Pick<CurlImportFields, 'headerEnv' | 'queryEnv'>,
-): { kind: 'header' | 'query'; name: string } | undefined => {
-  try {
-    parseCurlCommand(source, {
-      headerSecrets: parseEnvironmentBindings(bindings.headerEnv, '--header-env'),
-      querySecrets: parseEnvironmentBindings(bindings.queryEnv, '--query-env'),
-    });
+) {
+  const headerSecrets = yield* parseEnvironmentBindings(bindings.headerEnv, '--header-env');
+  const querySecrets = yield* parseEnvironmentBindings(bindings.queryEnv, '--query-env');
 
-    return undefined;
-  } catch (error: unknown) {
-    if (!(error instanceof CurlImportError)) throw error;
-
-    for (const diagnostic of error.diagnostics) {
-      const [kind, name] = diagnostic.split(':');
-
-      if (name === undefined) continue;
-
-      if (kind === 'unsafe_header') return { kind: 'header', name };
-
-      if (kind === 'unsafe_query') return { kind: 'query', name };
-    }
-
-    return undefined;
-  }
-};
+  // The parser throws its own class; only its diagnostics name an unbound credential.
+  return yield* tryOwned(CurlImportError, () => {
+    parseCurlCommand(source, { headerSecrets, querySecrets });
+  }).pipe(
+    Effect.as(undefined),
+    Effect.catch((error) => Effect.succeed(firstUnboundCredential(error.diagnostics))),
+  );
+});
 
 export {
   CURL_MAPPING_DIAGNOSTICS,

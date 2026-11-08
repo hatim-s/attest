@@ -1,5 +1,7 @@
 export { AttestError } from './errors/attest-error.js';
 
+export { tryOwned } from './errors/try-owned.js';
+
 export type { Result } from './result.js';
 
 export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './schema/json-schema.js';
@@ -127,12 +129,17 @@ export { agentResourceSchema } from './project/resources/agent.js';
 export type { AgentResource } from './project/resources/agent.js';
 
 export {
+  argvSchema,
   httpRequestTemplateSchema,
   agentTransportSchema,
   vercelSandboxSchema,
 } from './project/resources/agent-transports.js';
 
-export type { HttpRequestTemplate, VercelSandbox } from './project/resources/agent-transports.js';
+export type {
+  Argv,
+  HttpRequestTemplate,
+  VercelSandbox,
+} from './project/resources/agent-transports.js';
 
 export { testCaseSchema } from './project/resources/case.js';
 

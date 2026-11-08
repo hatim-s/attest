@@ -1,7 +1,7 @@
+import * as Effect from 'effect/Effect';
 import type { MetricPresetId } from '@attest/contracts';
 
-import type { CommandContext } from '../shared/command-context.js';
-import { requiredInput } from '../shared/required-input.js';
+import { ask, requiredInput, type PromptContext } from '../shared/required-input.js';
 import type { MetricAddOptions } from './register-metric-add-command.js';
 
 /** One guided question: when to ask it and how its answer changes the options. */
@@ -149,23 +149,19 @@ const PRESET_PROMPTS: Partial<Record<MetricPresetId, readonly GuidedPrompt[]>> =
 };
 
 /** Asks one guided question and applies its answer. */
-const askGuidedPrompt = async (
+const askGuidedPrompt = Effect.fn('askGuidedPrompt')(function* (
   step: GuidedPrompt,
   options: MetricAddOptions,
-  context: CommandContext,
-): Promise<MetricAddOptions> => {
+  prompt: PromptContext,
+) {
   const question = step.question(options);
 
   const answer =
     step.fallback === undefined
-      ? await requiredInput(
-          undefined,
-          { path: step.path, question },
-          { interactive: true, prompt: context.interaction.prompt },
-        )
-      : (await context.interaction.prompt(question)).trim() || step.fallback;
+      ? yield* requiredInput(undefined, { path: step.path, question }, prompt)
+      : (yield* ask(prompt, question)).trim() || step.fallback;
 
   return step.apply(options, answer);
-};
+});
 
 export { OPERATOR_PROMPTS, PRESET_PROMPTS, askGuidedPrompt };

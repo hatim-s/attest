@@ -1,5 +1,7 @@
 import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
 import { symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -15,25 +17,33 @@ import { createAgentProject, snapshotFiles } from './support/agent-project.js';
 
 const noStdin = (): Promise<string> => Promise.reject(new Error('stdin must not be read'));
 
+/** Runs one import request against the fixture project without reading stdin. */
+const importCommand = (
+  root: string,
+  request: Parameters<typeof runAgentImportCommand>[0]['request'],
+) =>
+  runAgentImportCommand({
+    interactive: false,
+    project: root,
+    readStdin: noStdin,
+    request,
+    workingDirectory: root,
+  });
+
 const importAgent = (
   root: string,
   request: Parameters<typeof runAgentImportCommand>[0]['request'],
-): Promise<Effect.Success<ReturnType<typeof runAgentImportCommand>>> =>
-  Effect.runPromiseExit(
-    runAgentImportCommand({
-      interactive: false,
-      project: root,
-      readStdin: noStdin,
-      request,
-      workingDirectory: root,
-    }),
-  ).then((exit) => valueFromExit(exit));
+) => Effect.runPromiseExit(importCommand(root, request)).then((exit) => valueFromExit(exit));
 
 const importCurl = (
   root: string,
   fields: Omit<CurlImportFields, 'responsePointer'> & { responsePointer?: string },
-): Promise<Effect.Success<ReturnType<typeof runAgentImportCommand>>> =>
-  importAgent(root, createCurlImportRequest({ responsePointer: '', ...fields }));
+) =>
+  Effect.runPromiseExit(
+    createCurlImportRequest({ responsePointer: '', ...fields }).pipe(
+      Effect.flatMap((request) => importCommand(root, request)),
+    ),
+  ).then((exit) => valueFromExit(exit));
 
 const importJson = (root: string, source: string, as: string) =>
   importAgent(root, {
@@ -290,23 +300,25 @@ describe('agent import', () => {
 });
 
 describe('agent add authoring', () => {
-  it('rejects credential-like WebSocket request-template fields from flags', () => {
-    const error: unknown = (() => {
-      try {
-        return createAgentResource({
-          agentId: 'unsafe-flags',
-          webSocketUrl: 'wss://agent.example/socket',
-          requestTemplate: JSON.stringify({
-            request_id: '{{request_id}}',
-            nested: { api_key: 'flag-template-secret' },
-          }),
-        });
-      } catch (thrown: unknown) {
-        return thrown;
-      }
-    })();
+  it('rejects credential-like WebSocket request-template fields from flags', async () => {
+    const exit = await Effect.runPromiseExit(
+      createAgentResource({
+        agentId: 'unsafe-flags',
+        webSocketUrl: 'wss://agent.example/socket',
+        requestTemplate: JSON.stringify({
+          request_id: '{{request_id}}',
+          nested: { api_key: 'flag-template-secret' },
+        }),
+      }),
+    );
 
-    if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
+    // A typed failure, not a defect that merely carries a LocalError.
+    const [error, ...others] = Exit.isFailure(exit)
+      ? exit.cause.reasons.map((reason) => (Cause.isFailReason(reason) ? reason.error : reason))
+      : [];
+
+    if (!(error instanceof LocalError)) throw new Error('Expected one typed LocalError failure.');
+    expect(others).toEqual([]);
     expect(error).toMatchObject({
       code: 'project_invalid',
       message: 'WebSocket request templates cannot contain credential-like fields.',

@@ -213,26 +213,24 @@ const commonOutputMode = (program: Command, leaf: Command): string | undefined =
 
 const outputFormat = (options: CommonCliOptions): 'human' | 'json' => options.output ?? 'human';
 
-/** Prompts are allowed only for human output on a real terminal outside CI. */
-const isInteractive = (
-  options: { nonInteractive?: boolean; output?: string },
-  interaction: Pick<CliInteraction, 'ci' | 'inputIsTTY' | 'outputIsTTY'>,
-  fromJson?: string,
-): boolean =>
-  options.nonInteractive !== true &&
-  (options.output ?? 'human') === 'human' &&
-  fromJson === undefined &&
-  !interaction.ci &&
-  interaction.inputIsTTY &&
-  interaction.outputIsTTY;
-
-/** Prompts for missing values only when the command may be interactive. */
+/**
+ * The one way to build a prompt context, cancelled by `signal`. Prompts are allowed only for
+ * human output without a JSON request, on a real terminal outside CI.
+ */
 const promptContext = (
   options: { fromJson?: string; nonInteractive?: boolean; output?: string },
   interaction: CliInteraction,
+  signal: AbortSignal,
 ): PromptContext => ({
-  interactive: isInteractive(options, interaction, options.fromJson),
+  interactive:
+    options.nonInteractive !== true &&
+    (options.output ?? 'human') === 'human' &&
+    options.fromJson === undefined &&
+    !interaction.ci &&
+    interaction.inputIsTTY &&
+    interaction.outputIsTTY,
   prompt: interaction.prompt,
+  signal,
 });
 
 /** Builds the request envelope fields that the mutation flags map to. */
@@ -268,7 +266,6 @@ export {
   commonOption,
   commonOutputMode,
   inheritCommonOptions,
-  isInteractive,
   mutationRequestFields,
   nonInteractiveOption,
   outputFormat,

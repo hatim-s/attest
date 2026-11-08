@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { isJsonObject } from '@attest/contracts';
 import { LocalError } from '@attest/local';
 import {
@@ -7,8 +8,9 @@ import {
   type CurlImportFields,
 } from '@attest/local/agent';
 
+import { AttestCliError } from '../../errors/cli-error.js';
 import { commaSeparated, promptChoice, promptDefault, promptOptional } from './agent-prompts.js';
-import { requiredInput, type PromptContext } from '../shared/required-input.js';
+import { ask, requiredInput, type PromptContext } from '../shared/required-input.js';
 
 type CurlFlags = Omit<CurlImportFields, 'responsePointer'> & { responsePointer?: string };
 
@@ -16,23 +18,23 @@ type CurlFlags = Omit<CurlImportFields, 'responsePointer'> & { responsePointer?:
 const MAX_CREDENTIAL_PROMPTS = 32;
 
 /** Asks for an environment variable for every captured credential that still lacks one. */
-const promptCredentialBindings = async (
+const promptCredentialBindings = Effect.fn('promptCredentialBindings')(function* (
   fields: CurlFlags,
   curlSource: string,
   context: PromptContext,
-): Promise<CurlFlags> => {
+): Effect.fn.Return<CurlFlags, AttestCliError | LocalError> {
   let headerEnv = [...(fields.headerEnv ?? [])];
   let queryEnv = [...(fields.queryEnv ?? [])];
 
   // Reparse after each binding; the captured value is never copied into a prompt.
   for (let asked = 0; asked < MAX_CREDENTIAL_PROMPTS; asked += 1) {
-    const credential = findUnboundCurlCredential(curlSource, { headerEnv, queryEnv });
+    const credential = yield* findUnboundCurlCredential(curlSource, { headerEnv, queryEnv });
 
     if (credential === undefined) break;
     const flag = credential.kind === 'header' ? '--header-env' : '--query-env';
     const label = credential.kind === 'header' ? 'Header' : 'Query';
 
-    const environment = await requiredInput(
+    const environment = yield* requiredInput(
       undefined,
       { path: flag, question: `${label} ${credential.name} environment variable: ` },
       context,
@@ -45,41 +47,37 @@ const promptCredentialBindings = async (
   }
 
   return { ...fields, headerEnv, queryEnv };
-};
+});
 
 /** Asks how the polling submission reports its job and where to poll for status. */
-const promptPollingFields = async (
+const promptPollingFields = Effect.fn('promptPollingFields')(function* (
   fields: CurlFlags,
   context: PromptContext,
-): Promise<CurlFlags> => {
+): Effect.fn.Return<CurlFlags, AttestCliError | LocalError> {
   const polling: CurlFlags = {
     ...fields,
-    pollJobIdPointer: await promptDefault(
-      fields.pollJobIdPointer,
-      'Submission job id JSON Pointer',
-      '/job_id',
-      context,
-    ),
+    pollJobIdPointer: yield* promptDefault(context, {
+      value: fields.pollJobIdPointer,
+      question: 'Submission job id JSON Pointer',
+      fallback: '/job_id',
+    }),
   };
 
   if (fields.pollStatusUrlPointer === undefined && fields.pollStatusUrlTemplate === undefined) {
-    const statusSource = await promptChoice(
-      'Status URL source',
-      ['pointer', 'template'],
-      'pointer',
-      'status-url-source',
-      context,
-    );
+    const statusSource = yield* promptChoice(context, {
+      question: 'Status URL source',
+      choices: ['pointer', 'template'],
+      fallback: 'pointer',
+      path: 'status-url-source',
+    });
 
     if (statusSource === 'pointer') {
-      polling.pollStatusUrlPointer = await promptDefault(
-        undefined,
-        'Submission status URL JSON Pointer',
-        '/status_url',
-        context,
-      );
+      polling.pollStatusUrlPointer = yield* promptDefault(context, {
+        question: 'Submission status URL JSON Pointer',
+        fallback: '/status_url',
+      });
     } else {
-      polling.pollStatusUrlTemplate = await requiredInput(
+      polling.pollStatusUrlTemplate = yield* requiredInput(
         undefined,
         {
           path: '--poll-status-url-template',
@@ -90,65 +88,62 @@ const promptPollingFields = async (
     }
   }
 
-  polling.pollStatusPointer = await promptDefault(
-    fields.pollStatusPointer,
-    'Polling status JSON Pointer',
-    '/status',
-    context,
-  );
+  polling.pollStatusPointer = yield* promptDefault(context, {
+    value: fields.pollStatusPointer,
+    question: 'Polling status JSON Pointer',
+    fallback: '/status',
+  });
   polling.pollSuccess = fields.pollSuccess ??
     commaSeparated(
-      await context.prompt('Polling success JSON values, comma-separated ["done"]: '),
+      yield* ask(context, 'Polling success JSON values, comma-separated ["done"]: '),
     ) ?? ['"done"'];
   polling.pollFailure = fields.pollFailure ??
     commaSeparated(
-      await context.prompt('Polling failure JSON values, comma-separated ["failed"]: '),
+      yield* ask(context, 'Polling failure JSON values, comma-separated ["failed"]: '),
     ) ?? ['"failed"'];
-  polling.pollMinimumInterval = await promptDefault(
-    fields.pollMinimumInterval,
-    'Minimum polling interval',
-    '1s',
-    context,
-  );
-  polling.pollMaximumInterval = await promptDefault(
-    fields.pollMaximumInterval,
-    'Maximum polling interval',
-    '5s',
-    context,
-  );
-  polling.idempotencyHeader = await promptOptional(
+  polling.pollMinimumInterval = yield* promptDefault(context, {
+    value: fields.pollMinimumInterval,
+    question: 'Minimum polling interval',
+    fallback: '1s',
+  });
+  polling.pollMaximumInterval = yield* promptDefault(context, {
+    value: fields.pollMaximumInterval,
+    question: 'Maximum polling interval',
+    fallback: '5s',
+  });
+  polling.idempotencyHeader = yield* promptOptional(
     fields.idempotencyHeader,
     'Submission idempotency header',
     context,
   );
 
   return polling;
-};
+});
 
 /**
  * Completes a cURL import interactively: credential bindings, body mappings, response pointers,
  * and the polling shape. Returns the flags unchanged outside an interactive terminal.
  */
-const promptCurlImportFields = async (
+const promptCurlImportFields = Effect.fn('promptCurlImportFields')(function* (
   fields: CurlFlags,
   curlSource: string,
   context: PromptContext,
-): Promise<CurlImportFields> => {
+): Effect.fn.Return<CurlImportFields, AttestCliError | LocalError> {
   if (!context.interactive) {
     return { ...fields, responsePointer: fields.responsePointer ?? '/answer' };
   }
 
-  let guided = await promptCredentialBindings(fields, curlSource, context);
+  let guided = yield* promptCredentialBindings(fields, curlSource, context);
 
   if (fields.mapBody === undefined) {
     guided.mapBody = commaSeparated(
-      await context.prompt('Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
+      yield* ask(context, 'Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
     );
   }
 
-  guided.errorPointer = await promptOptional(fields.errorPointer, 'Error JSON Pointer', context);
-  guided.tracePointer = await promptOptional(fields.tracePointer, 'Trace JSON Pointer', context);
-  guided.remoteJobIdPointer = await promptOptional(
+  guided.errorPointer = yield* promptOptional(fields.errorPointer, 'Error JSON Pointer', context);
+  guided.tracePointer = yield* promptOptional(fields.tracePointer, 'Trace JSON Pointer', context);
+  guided.remoteJobIdPointer = yield* promptOptional(
     fields.remoteJobIdPointer,
     'Remote job id JSON Pointer',
     context,
@@ -156,20 +151,24 @@ const promptCurlImportFields = async (
 
   const transport = pollingFlagsPresent(fields)
     ? 'polling'
-    : await promptChoice('Transport', ['direct', 'polling'], 'direct', 'transport', context);
+    : yield* promptChoice(context, {
+        question: 'Transport',
+        choices: ['direct', 'polling'],
+        fallback: 'direct',
+        path: 'transport',
+      });
 
-  if (transport === 'polling') guided = await promptPollingFields(guided, context);
+  if (transport === 'polling') guided = yield* promptPollingFields(guided, context);
 
   return {
     ...guided,
-    responsePointer: await promptDefault(
-      fields.responsePointer,
-      'Response JSON Pointer',
-      '/answer',
-      context,
-    ),
+    responsePointer: yield* promptDefault(context, {
+      value: fields.responsePointer,
+      question: 'Response JSON Pointer',
+      fallback: '/answer',
+    }),
   };
-};
+});
 
 /** True when an import failed on a body mapping the user can re-enter. */
 const isCurlMappingError = (cause: unknown): cause is LocalError => {
@@ -189,11 +188,13 @@ const isCurlMappingError = (cause: unknown): cause is LocalError => {
 };
 
 /** Asks for replacement body mappings after an import rejected the previous ones. */
-const promptBodyMappings = async (context: PromptContext): Promise<string[] | undefined> =>
-  commaSeparated(
-    await context.prompt(
+const promptBodyMappings = Effect.fn('promptBodyMappings')(function* (context: PromptContext) {
+  return commaSeparated(
+    yield* ask(
+      context,
       'Body mapping was invalid. Re-enter TARGET_POINTER=INPUT_POINTER values [none]: ',
     ),
   );
+});
 
 export { isCurlMappingError, promptBodyMappings, promptCurlImportFields, type CurlFlags };

@@ -3,7 +3,12 @@ import * as Effect from 'effect/Effect';
 import { createReadStream } from 'node:fs';
 import { extname, resolve } from 'node:path';
 
-import type { CaseImportOptions, ImportFormat, TestCase } from '@attest/contracts';
+import {
+  tryOwned,
+  type CaseImportOptions,
+  type ImportFormat,
+  type TestCase,
+} from '@attest/contracts';
 import {
   DEFAULT_IMPORT_LIMITS,
   discoverCsvHeaders,
@@ -172,16 +177,6 @@ const toCliImportError = (error: TabularImportError): LocalError => {
   });
 };
 
-/** Runs one pure import operation while preserving unexpected exceptions as defects. */
-const tabularImportCall = <A>(operation: () => A) =>
-  Effect.try({ try: operation, catch: (cause) => cause }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof TabularImportError
-        ? Effect.fail(toCliImportError(cause))
-        : Effect.die(cause),
-    ),
-  );
-
 /** Reads one bounded source once so a guided preview and its confirmed write use identical bytes. */
 const prepareImportSource = Effect.fn('prepareImportSource')(function* (
   source: string,
@@ -198,7 +193,13 @@ const prepareImportSource = Effect.fn('prepareImportSource')(function* (
   );
 
   const csvHeaders =
-    format === 'csv' ? yield* tabularImportCall(() => discoverCsvHeaders(boundedSource)) : [];
+    format === 'csv'
+      ? yield* tryOwned(
+          TabularImportError,
+          () => discoverCsvHeaders(boundedSource),
+          toCliImportError,
+        )
+      : [];
 
   return {
     csvHeaders,
@@ -225,20 +226,23 @@ const runTabularImportAdapter = Effect.fn('runTabularImportAdapter')(function* (
       ),
     ));
 
-  return yield* tabularImportCall(() =>
-    importTabularCases({
-      collisionContexts: options.collisionContexts,
-      dedupe: options.importOptions.dedupe,
-      existingCases: options.existingCases,
-      format,
-      keySource: options.importOptions.key,
-      mappings: options.importOptions.mapping,
-      onConflict: options.importOptions.on_conflict,
-      parseJsonSources: options.importOptions.parse_json,
-      recordsPointer: options.importOptions.records_pointer,
-      source,
-      sync: options.importOptions.sync,
-    }),
+  return yield* tryOwned(
+    TabularImportError,
+    () =>
+      importTabularCases({
+        collisionContexts: options.collisionContexts,
+        dedupe: options.importOptions.dedupe,
+        existingCases: options.existingCases,
+        format,
+        keySource: options.importOptions.key,
+        mappings: options.importOptions.mapping,
+        onConflict: options.importOptions.on_conflict,
+        parseJsonSources: options.importOptions.parse_json,
+        recordsPointer: options.importOptions.records_pointer,
+        source,
+        sync: options.importOptions.sync,
+      }),
+    toCliImportError,
   );
 });
 

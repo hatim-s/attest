@@ -50,7 +50,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.add',
@@ -59,23 +59,19 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
               options,
               build: () =>
                 Effect.gen(function* () {
-                  const id = yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        datasetId,
-                        { path: '<dataset-id>', question: 'Dataset id: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  });
+                  const id = yield* requiredInput(
+                    datasetId,
+                    { path: '<dataset-id>', question: 'Dataset id: ' },
+                    prompt,
+                  );
 
                   return {
                     ...mutationRequestFields('test.dataset.add', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
                     dataset: {
                       schema: DATASET_SCHEMA_ID,
                       case_schema: CASE_SCHEMA_ID,
@@ -112,7 +108,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.import',
@@ -123,29 +119,21 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 Effect.gen(function* () {
                   let request: Extract<CommandRequest, { command: 'test.dataset.import' }> = {
                     ...mutationRequestFields('test.dataset.import', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    source: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          source,
-                          { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
-                    as: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          options.as,
-                          { path: '--as', question: 'Dataset id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
+                    source: yield* requiredInput(
+                      source,
+                      { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
+                      prompt,
+                    ),
+                    as: yield* requiredInput(
+                      options.as,
+                      { path: '--as', question: 'Dataset id: ' },
+                      prompt,
+                    ),
                     import: importRequestFields(options),
                   };
 
@@ -210,7 +198,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.attach',
@@ -221,20 +209,16 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 Effect.gen(function* () {
                   let request: Extract<CommandRequest, { command: 'test.dataset.attach' }> = {
                     ...mutationRequestFields('test.dataset.attach', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    dataset_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          datasetId,
-                          { path: '<dataset-id>', question: 'Dataset id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
+                    dataset_id: yield* requiredInput(
+                      datasetId,
+                      { path: '<dataset-id>', question: 'Dataset id: ' },
+                      prompt,
+                    ),
                   };
 
                   if (options.tag !== undefined) {
@@ -266,7 +250,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.detach',
@@ -277,20 +261,16 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('test.dataset.detach', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    dataset_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          datasetId,
-                          { path: '<dataset-id>', question: 'Dataset id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
+                    dataset_id: yield* requiredInput(
+                      datasetId,
+                      { path: '<dataset-id>', question: 'Dataset id: ' },
+                      prompt,
+                    ),
                   };
                 }),
             });
@@ -316,7 +296,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.rename',
@@ -327,24 +307,16 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('test.dataset.rename', options),
-                    dataset_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          datasetId,
-                          { path: '<dataset-id>', question: 'Current dataset id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
-                    new_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          newId,
-                          { path: '<new-id>', question: 'New dataset id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    dataset_id: yield* requiredInput(
+                      datasetId,
+                      { path: '<dataset-id>', question: 'Current dataset id: ' },
+                      prompt,
+                    ),
+                    new_id: yield* requiredInput(
+                      newId,
+                      { path: '<new-id>', question: 'New dataset id: ' },
+                      prompt,
+                    ),
                   };
                 }),
             });
@@ -374,15 +346,11 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
               Effect.gen(function* () {
                 return {
                   ...mutationRequestFields('test.dataset.remove', options),
-                  dataset_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        datasetId,
-                        { path: '<dataset-id>', question: 'Dataset id: ' },
-                        promptContext(options, context.interaction),
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  dataset_id: yield* requiredInput(
+                    datasetId,
+                    { path: '<dataset-id>', question: 'Dataset id: ' },
+                    promptContext(options, context.interaction, context.signal),
+                  ),
                 };
               }),
           });
@@ -396,9 +364,11 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
           }
 
           if (
-            !(yield* Effect.tryPromise({
-              try: () => confirmRemoval(request, `dataset ${request.dataset_id}`, options, context),
-              catch: (cause) => cause,
+            !(yield* confirmRemoval({
+              request,
+              label: `dataset ${request.dataset_id}`,
+              options,
+              context,
             }))
           ) {
             return;

@@ -1,50 +1,68 @@
+import * as Effect from 'effect/Effect';
 import { AttestCliError } from '../../errors/cli-error.js';
-import type { PromptContext } from '../shared/required-input.js';
+import { ask, type PromptContext } from '../shared/required-input.js';
+
+type DefaultPrompt = {
+  /** A flag value that, when present, is used without asking. */
+  value?: string;
+  question: string;
+  /** Shown in brackets and used for an empty answer or a non-interactive command. */
+  fallback: string;
+};
+
+type ChoicePrompt<Choice extends string> = {
+  question: string;
+  choices: readonly [Choice, ...Choice[]];
+  fallback: Choice;
+  /** Names the choice in the unknown-choice error. */
+  path: string;
+};
 
 /** Returns a flag value, or asks with a documented default. */
-const promptDefault = async (
-  value: string | undefined,
-  question: string,
-  fallback: string,
+const promptDefault = Effect.fn('promptDefault')(function* (
   context: PromptContext,
-): Promise<string> => {
+  { value, question, fallback }: DefaultPrompt,
+) {
   if (value?.trim()) return value.trim();
 
   if (!context.interactive) return fallback;
 
-  return (await context.prompt(`${question} [${fallback}]: `)).trim() || fallback;
-};
+  return (yield* ask(context, `${question} [${fallback}]: `)).trim() || fallback;
+});
 
 /** Returns a flag value, or asks and treats an empty answer as no value. */
-const promptOptional = async (
+const promptOptional = Effect.fn('promptOptional')(function* (
   value: string | undefined,
   question: string,
   context: PromptContext,
-): Promise<string | undefined> => {
+) {
   if (value?.trim()) return value.trim();
 
   if (!context.interactive) return undefined;
-  const answer = (await context.prompt(`${question} [none]: `)).trim();
+
+  const answer = (yield* ask(context, `${question} [none]: `)).trim();
 
   return answer.length === 0 ? undefined : answer;
-};
+});
 
 /** Asks with a default and accepts only one of the listed answers. */
-const promptChoice = async <const Choice extends string>(
-  question: string,
-  choices: readonly [Choice, ...Choice[]],
-  fallback: Choice,
-  path: string,
+const promptChoice = Effect.fn('promptChoice')(function* <const Choice extends string>(
   context: PromptContext,
-): Promise<Choice> => {
-  const answer = await promptDefault(undefined, question, fallback, context);
+  { question, choices, fallback, path }: ChoicePrompt<Choice>,
+) {
+  const answer = yield* promptDefault(context, { question, fallback });
   const choice = choices.find((candidate) => candidate === answer);
 
   if (choice !== undefined) return choice;
-  throw new AttestCliError('cli_usage', `${question} must be one of ${choices.join(', ')}.`, {
-    path,
-  });
-};
+
+  return yield* new AttestCliError(
+    'cli_usage',
+    `${question} must be one of ${choices.join(', ')}.`,
+    {
+      path,
+    },
+  );
+});
 
 /** Splits a comma-separated answer, returning undefined when nothing was entered. */
 const commaSeparated = (value: string): string[] | undefined => {

@@ -4,6 +4,7 @@ import {
   agentResourceSchema,
   type AgentResource,
 } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
 import {
@@ -17,7 +18,7 @@ import {
 } from './input-parsers.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
 import { parseNameValuePairs, parseSecretBindings } from '../../shared/secret-bindings.js';
-import { assertSafeNativeAgentResource } from './resource-validation.js';
+import { validateNativeAgentResource } from './resource-validation.js';
 import type { AgentAddFields } from './types.js';
 
 /** The CLI flag, without dashes, that sets each agent add field. */
@@ -210,10 +211,10 @@ const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =
   value !== undefined && (!Array.isArray(value) || value.length > 0);
 
 /** Rejects every flag that the selected transport would otherwise silently discard. */
-const assertApplicableAuthoringFlags = (
+const assertApplicableAuthoringFlags = Effect.fn('assertApplicableAuthoringFlags')(function* (
   fields: AgentAddFields,
   selected: TransportSelection,
-): void => {
+) {
   const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
   const incompatibleOptions: string[] = [];
 
@@ -230,7 +231,8 @@ const assertApplicableAuthoringFlags = (
 
   if (incompatibleOptions.length > 0) {
     incompatibleOptions.sort();
-    throw new LocalError(
+
+    return yield* new LocalError(
       'cli_usage',
       `Options ${incompatibleOptions.join(', ')} are not valid for this transport.`,
       {
@@ -246,7 +248,7 @@ const assertApplicableAuthoringFlags = (
     fields.incrementalOutputMode !== undefined &&
     fields.incrementalOutputPointer === undefined
   ) {
-    throw new LocalError(
+    return yield* new LocalError(
       'cli_usage',
       'Option --incremental-output-mode requires --incremental-output-pointer.',
       {
@@ -255,29 +257,32 @@ const assertApplicableAuthoringFlags = (
       },
     );
   }
-};
+});
 
 /** Builds the one readiness probe a background agent was given. */
-const backgroundReadiness = (
+const backgroundReadiness = Effect.fn('backgroundReadiness')(function* (
   fields: AgentAddFields,
-): Extract<AgentResource['transport'], { kind: 'background_cli' }>['readiness'] => {
+): Effect.fn.Return<
+  Extract<AgentResource['transport'], { kind: 'background_cli' }>['readiness'],
+  LocalError
+> {
   if (fields.readinessHttp !== undefined) return { kind: 'http', url: fields.readinessHttp };
 
   if (fields.readinessTcp !== undefined) {
-    return { kind: 'tcp', ...parseTcpReadiness(fields.readinessTcp) };
+    return { kind: 'tcp', ...(yield* parseTcpReadiness(fields.readinessTcp)) };
   }
 
   return { kind: 'stderr', pattern: fields.readinessStderr ?? '' };
-};
+});
 
 /** Normalizes non-interactive or wizard-populated add fields into one resource. */
-const createAgentResource = (fields: AgentAddFields): AgentResource => {
+const createAgentResource = Effect.fn('createAgentResource')(function* (fields: AgentAddFields) {
   const selections = TRANSPORT_SELECTORS.flatMap(([field, selection]) =>
     fields[field] === undefined ? [] : [selection],
   );
 
   if (selections.length !== 1) {
-    throw new LocalError(
+    return yield* new LocalError(
       selections.length === 0 ? 'cli_missing_input' : 'cli_usage',
       'Select exactly one agent transport.',
       {
@@ -290,19 +295,22 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     );
   }
 
-  assertApplicableAuthoringFlags(fields, selections[0]!);
-  const timeout = fields.timeout === undefined ? undefined : parseDuration(fields.timeout);
+  yield* assertApplicableAuthoringFlags(fields, selections[0]!);
+
+  const timeout =
+    fields.timeout === undefined ? undefined : yield* parseDuration(fields.timeout, '--timeout');
+
   const name = fields.name?.trim() || fields.agentId;
 
   const processEnvironment =
     fields.env === undefined || fields.env.length === 0
       ? {}
-      : { env: parseSecretBindings(fields.env, '--env') };
+      : { env: yield* parseSecretBindings(fields.env, '--env') };
 
   const headers =
     fields.headerEnv === undefined || fields.headerEnv.length === 0
       ? {}
-      : { headers: parseSecretBindings(fields.headerEnv, '--header-env') };
+      : { headers: yield* parseSecretBindings(fields.headerEnv, '--header-env') };
 
   let transport: AgentResource['transport'];
 
@@ -311,23 +319,27 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
 
     // Number('') is 0, so the digit check keeps an empty value from selecting an ephemeral port.
     if (port !== undefined && (!/^\d+$/u.test(port) || Number(port) > 65_535)) {
-      throw new LocalError('cli_usage', 'Callback port must be an integer from 0 to 65535.', {
-        path: '--callback-port',
-      });
+      return yield* new LocalError(
+        'cli_usage',
+        'Callback port must be an integer from 0 to 65535.',
+        {
+          path: '--callback-port',
+        },
+      );
     }
 
     const listenPort = port === undefined ? undefined : Number(port);
 
     const triggerHeaders = {
-      ...parseNameValuePairs(
+      ...(yield* parseNameValuePairs(
         fields.header ?? [],
         '--header',
         'Use NAME=VALUE for a trigger header.',
-      ),
+      )),
       ...headers.headers,
     };
 
-    const triggerQuery = parseNameValuePairs(
+    const triggerQuery = yield* parseNameValuePairs(
       fields.query ?? [],
       '--query',
       'Use NAME=VALUE for a trigger query value.',
@@ -401,7 +413,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     );
 
     if (readiness.length !== 1 || fields.invokeUrl === undefined) {
-      throw new LocalError(
+      return yield* new LocalError(
         'cli_missing_input',
         'Background agents require invoke URL and exactly one readiness probe.',
         {
@@ -414,9 +426,9 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     transport = {
       kind: 'background_cli',
       lifecycle: 'per_run',
-      start_argv: tokenizeCommand(fields.backgroundCommand),
+      start_argv: yield* tokenizeCommand(fields.backgroundCommand),
       ...processEnvironment,
-      readiness: backgroundReadiness(fields),
+      readiness: yield* backgroundReadiness(fields),
       invoke: {
         url: fields.invokeUrl,
         method: 'POST',
@@ -426,7 +438,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       extraction: {
         result_pointer: fields.responsePointer ?? '/output',
       },
-      stop_timeout_ms: parseDuration(fields.stopTimeout ?? '5s', '--stop-timeout'),
+      stop_timeout_ms: yield* parseDuration(fields.stopTimeout ?? '5s', '--stop-timeout'),
     };
 
     if (fields.cwd !== undefined) transport = { ...transport, cwd: fields.cwd };
@@ -449,10 +461,13 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     transport = {
       kind: 'jsonl_bridge',
       lifecycle: 'per_run',
-      argv: tokenizeCommand(fields.jsonlCommand),
+      argv: yield* tokenizeCommand(fields.jsonlCommand),
       ...processEnvironment,
       concurrency: fields.bridgeConcurrency ?? 'serial',
-      cancellation_grace_ms: parseDuration(fields.cancellationGrace ?? '1s', '--cancel-grace'),
+      cancellation_grace_ms: yield* parseDuration(
+        fields.cancellationGrace ?? '1s',
+        '--cancel-grace',
+      ),
     };
 
     if (fields.cwd !== undefined) transport = { ...transport, cwd: fields.cwd };
@@ -468,7 +483,10 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         ...headers,
       },
       terminal_pointer: fields.terminalPointer ?? '/type',
-      terminal_values: parseJsonValues(fields.terminalValues ?? ['"result"'], '--terminal-value'),
+      terminal_values: yield* parseJsonValues(
+        fields.terminalValues ?? ['"result"'],
+        '--terminal-value',
+      ),
       result_pointer: fields.responsePointer ?? '/output',
     };
 
@@ -494,22 +512,22 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       framing: 'text_json',
       url: fields.webSocketUrl,
       ...headers,
-      request_template: parseRequestTemplate(
+      request_template: yield* parseRequestTemplate(
         fields.requestTemplate ?? '{"request_id":"{{request_id}}","request":"{{request}}"}',
       ),
       request_id_pointer: fields.requestIdPointer ?? '/request_id',
       acknowledgement_pointer: fields.acknowledgementPointer ?? '/type',
-      acknowledgement_values: parseJsonValues(
+      acknowledgement_values: yield* parseJsonValues(
         fields.acknowledgementValues ?? ['"acknowledgement"'],
         '--acknowledgement-value',
       ),
       result_pointer: fields.responsePointer ?? '/output',
       error_pointer: fields.errorPointer ?? '/error',
-      open_timeout_ms: parseDuration(fields.openTimeout ?? '10s', '--open-timeout'),
-      message_idle_timeout_ms: parseDuration(fields.idleTimeout ?? '30s', '--idle-timeout'),
-      attempt_timeout_ms: parseDuration(fields.attemptTimeout ?? '60s', '--attempt-timeout'),
-      ping_interval_ms: parseDuration(fields.pingInterval ?? '15s', '--ping-interval'),
-      close_timeout_ms: parseDuration(fields.closeTimeout ?? '5s', '--close-timeout'),
+      open_timeout_ms: yield* parseDuration(fields.openTimeout ?? '10s', '--open-timeout'),
+      message_idle_timeout_ms: yield* parseDuration(fields.idleTimeout ?? '30s', '--idle-timeout'),
+      attempt_timeout_ms: yield* parseDuration(fields.attemptTimeout ?? '60s', '--attempt-timeout'),
+      ping_interval_ms: yield* parseDuration(fields.pingInterval ?? '15s', '--ping-interval'),
+      close_timeout_ms: yield* parseDuration(fields.closeTimeout ?? '5s', '--close-timeout'),
       retry_boundary: 'before_acknowledgement',
       replay_after_acknowledgement: false,
     };
@@ -525,15 +543,15 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       lifecycle: 'per_case' as const,
       argv:
         fields.argvJson === undefined
-          ? tokenizeCommand(fields.nativeCommand ?? '')
-          : parseArgvJson(fields.argvJson),
+          ? yield* tokenizeCommand(fields.nativeCommand ?? '')
+          : yield* parseArgvJson(fields.argvJson),
       ...processEnvironment,
     };
 
     if (fields.cwd !== undefined) transport = { ...transport, cwd: fields.cwd };
 
     if (fields.sandboxJson !== undefined)
-      transport = { ...transport, sandbox: parseSandboxJson(fields.sandboxJson) };
+      transport = { ...transport, sandbox: yield* parseSandboxJson(fields.sandboxJson) };
   }
 
   let resource: AgentResource = {
@@ -559,14 +577,14 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
   const parsed = parseWithSchema(agentResourceSchema, resource);
 
   if (!parsed.ok) {
-    throw new LocalError('cli_usage', 'Agent values do not match the resource schema.', {
+    return yield* new LocalError('cli_usage', 'Agent values do not match the resource schema.', {
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  assertSafeNativeAgentResource(parsed.value);
+  yield* validateNativeAgentResource(parsed.value);
 
   return parsed.value;
-};
+});
 
 export { AGENT_ADD_FLAGS, agentAddFlagConflicts, createAgentResource };

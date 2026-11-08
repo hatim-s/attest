@@ -11,7 +11,6 @@ import { cancelConfiguration, readRequestDocument, runConfiguration } from '@att
 import type { Command } from 'commander';
 import {
   AttestCliError,
-  CliExit,
   renderCliError,
   serializeCliError,
   type SerializedCliFailure,
@@ -21,10 +20,10 @@ import { createCliSuccessResult, serializeCliResult } from '../../output/cli-pro
 import {
   collect,
   commonOption,
-  isInteractive,
   nonInteractiveOption,
   outputOption,
   projectOption,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { collectEvalEvents } from './eval-event-stream.js';
@@ -74,18 +73,13 @@ const readRunRequest = (
 ) =>
   Effect.gen(function* () {
     if (fields.fromJson === undefined) {
-      return yield* Effect.tryPromise({
-        try: () =>
-          createEvalRunRequest(fields, {
-            interactive: isInteractive(fields, context.interaction),
-            prompt: context.interaction.prompt,
-            signal,
-          }),
-        catch: (cause) => cause,
-      });
+      return yield* createEvalRunRequest(
+        fields,
+        promptContext(fields, context.interaction, signal),
+      );
     }
 
-    assertNoEvalFlags(fields.fromJson, command);
+    yield* assertNoEvalFlags(fields.fromJson, command);
 
     const document = yield* readRequestDocument(fields.fromJson, {
       hint: REQUEST_DOCUMENT_HINT,
@@ -97,7 +91,7 @@ const readRunRequest = (
 
     if (output !== undefined) command.setOptionValueWithSource('output', output, 'config');
 
-    return parseEvalRunRequest(document);
+    return yield* parseEvalRunRequest(document);
   });
 
 /** Runs one eval, streaming progress or JSONL, and prints the final result in the chosen mode. */
@@ -209,7 +203,7 @@ const executeEvalRun = (
       }
     }
 
-    if (final.data.exit_code !== 0) throw new CliExit(final.data.exit_code);
+    return final.data.exit_code;
   });
 
 /**
@@ -224,10 +218,10 @@ const readCancelRequest = (
 ) =>
   Effect.gen(function* () {
     if (options.fromJson === undefined) {
-      return createEvalCancelRequest({ output: options.output, runId });
+      return yield* createEvalCancelRequest({ output: options.output, runId });
     }
 
-    assertNoEvalFlags(options.fromJson, command);
+    yield* assertNoEvalFlags(options.fromJson, command);
 
     const document = yield* readRequestDocument(options.fromJson, {
       hint: REQUEST_DOCUMENT_HINT,
@@ -241,7 +235,7 @@ const readCancelRequest = (
       command.setOptionValueWithSource('output', output, 'config');
     }
 
-    return parseEvalCancelRequest(document);
+    return yield* parseEvalCancelRequest(document);
   });
 
 /** Registers `eval run` and `eval cancel`, which call the local eval runner directly. */
@@ -295,7 +289,7 @@ const registerEvalCommands = (context: CommandContext): void => {
             );
           }
 
-          yield* executeEvalRun(request, {
+          return yield* executeEvalRun(request, {
             project: options.project,
             signal,
             context,

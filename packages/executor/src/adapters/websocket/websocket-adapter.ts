@@ -1,4 +1,4 @@
-import type { AgentRequest } from '@attest/contracts';
+import { tryOwned, type AgentRequest } from '@attest/contracts';
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -37,16 +37,11 @@ const startWebSocketAgent = Effect.fn('startWebSocketAgent')(function* (
     );
   }
 
-  let implementation: PerCaseWebSocketSession | RunScopedWebSocketSession;
-
-  try {
-    implementation =
-      agent.transport.lifecycle === 'per_case'
-        ? new PerCaseWebSocketSession(agent, options)
-        : new RunScopedWebSocketSession(agent, options);
-  } catch (cause) {
-    return yield* cause instanceof AgentInvocationError ? Effect.fail(cause) : Effect.die(cause);
-  }
+  const implementation = yield* tryOwned(AgentInvocationError, () =>
+    agent.transport.lifecycle === 'per_case'
+      ? new PerCaseWebSocketSession(agent, options)
+      : new RunScopedWebSocketSession(agent, options),
+  );
 
   const accepted = new Set<Deferred.Deferred<void>>();
   const closing = Semaphore.makeUnsafe(1);

@@ -6,6 +6,7 @@ import {
   parseWithSchema,
   AGENT_RESOURCE_SCHEMA_ID,
   agentResourceSchema,
+  tryOwned,
   type AgentResource,
   type CommandRequest,
 } from '@attest/contracts';
@@ -13,7 +14,7 @@ import {
 import { LocalError } from '../../../errors/index.js';
 import { withAnchored, anchoredCall } from '../../../internal/open-anchored.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseJsonTextEffect, readSourceText } from '../../../internal/source-text.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import { findCurlBodyFilePath, parseCurlCommand, type CurlImportPreview } from '../curl-parser.js';
 import { CurlImportError } from '../curl-tokenizer.js';
@@ -136,7 +137,7 @@ const readImportedAgentResource = Effect.fn('readImportedAgentResource')(functio
     ? yield* readRemoteJson(source, 'source')
     : yield* readSourceText(source, { path: 'source', readStdin, workingDirectory });
 
-  const value = yield* parseJsonTextEffect(text, { path: 'source' });
+  const value = yield* parseJsonText(text, { path: 'source' });
   const parsed = parseWithSchema(agentResourceSchema, value);
 
   if (!parsed.ok) {
@@ -249,18 +250,15 @@ const readCurlBodyFile = Effect.fn('readCurlBodyFile')(function* (
 
 /** Maps known cURL parse failures while leaving unexpected exceptions as defects. */
 const parseCurlInput = <A>(parse: () => A) =>
-  Effect.try({ try: parse, catch: (cause) => cause }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof CurlImportError
-        ? Effect.fail(
-            new LocalError('cli_usage', cause.message, {
-              path: 'source',
-              hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
-              details: { diagnostics: cause.diagnostics },
-            }),
-          )
-        : Effect.die(cause),
-    ),
+  tryOwned(
+    CurlImportError,
+    parse,
+    (error) =>
+      new LocalError('cli_usage', error.message, {
+        path: 'source',
+        hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
+        details: { diagnostics: error.diagnostics },
+      }),
   );
 
 /** Converts one inert cURL request into a canonical direct or polling agent resource. */

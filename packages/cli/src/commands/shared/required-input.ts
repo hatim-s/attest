@@ -1,11 +1,13 @@
+import * as Effect from 'effect/Effect';
+import { LocalError } from '@attest/local';
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CliPrompt } from './cli-interaction.js';
 
-/** Whether a command may ask, how it asks, and the signal that cancels a pending question. */
+/** Whether a command may ask, how it asks, and the command signal that cancels a pending question. */
 type PromptContext = {
   interactive: boolean;
   prompt: CliPrompt;
-  signal?: AbortSignal;
+  signal: AbortSignal;
 };
 
 type RequiredInput = {
@@ -14,70 +16,83 @@ type RequiredInput = {
   question: string;
 };
 
-const cancelled = (): AttestCliError => new AttestCliError('cancelled', 'Command cancelled.');
+/** Cancellation of a pending question. Its literal code lets `localPrompt` map it by type. */
+class PromptCancelledError extends AttestCliError {
+  override readonly code = 'cancelled';
 
-/** Asks one question and rejects as soon as the command is cancelled. */
-const promptWithSignal = async (
-  prompt: CliPrompt,
-  question: string,
-  signal?: AbortSignal,
-): Promise<string> => {
-  if (signal === undefined) return prompt(question);
+  constructor() {
+    super('cancelled', 'Command cancelled.');
+  }
+}
 
-  if (signal.aborted) throw cancelled();
+/**
+ * Asks one question and closes it when either the command or its fiber is cancelled. An abort
+ * rejection, or any rejection after the command signal aborted, is cancellation; any other
+ * rejection is a defect.
+ */
+const ask = Effect.fn('ask')(function* (context: PromptContext, question: string) {
+  const { prompt, signal } = context;
 
-  return new Promise<string>((resolvePrompt, rejectPrompt) => {
-    let settled = false;
+  if (signal.aborted) return yield* new PromptCancelledError();
 
-    const finish = (action: () => void): void => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener('abort', cancel);
-      action();
-    };
+  const answer = Effect.tryPromise({
+    try: (interruption) => prompt(question, { signal: interruption }),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      // Readline closes the question itself on Ctrl+C or Ctrl+D, without any process signal.
+      signal.aborted || (cause instanceof Error && cause.name === 'AbortError')
+        ? Effect.fail(new PromptCancelledError())
+        : Effect.die(cause),
+    ),
+  );
 
-    const cancel = (): void => finish(() => rejectPrompt(cancelled()));
+  const cancellation = Effect.callback<never, PromptCancelledError>((resume) => {
+    const abort = () => resume(Effect.fail(new PromptCancelledError()));
+    signal.addEventListener('abort', abort, { once: true });
 
-    const promptFailure = (cause: unknown): Error => {
-      if (signal.aborted) return cancelled();
+    if (signal.aborted) abort();
 
-      if (cause instanceof Error && cause.name === 'AbortError') return cancelled();
-
-      if (cause instanceof Error) return cause;
-
-      return new Error('Prompt failed with a non-error rejection.', { cause });
-    };
-
-    signal.addEventListener('abort', cancel, { once: true });
-    // The signal closes a real readline question; the race also covers prompts that ignore it.
-    void prompt(question, { signal }).then(
-      (answer) => finish(() => resolvePrompt(answer)),
-      (cause: unknown) => finish(() => rejectPrompt(promptFailure(cause))),
-    );
+    return Effect.sync(() => signal.removeEventListener('abort', abort));
   });
-};
+
+  return yield* Effect.raceFirst(answer, cancellation);
+});
+
+/**
+ * Lends `ask` to a local command, such as a mutation confirmation. Its only failure is
+ * cancellation, carried into local's own error vocabulary with the same code and message.
+ */
+const localPrompt = (context: PromptContext) => (question: string) =>
+  ask(context, question).pipe(
+    Effect.mapError(({ code, message }) => new LocalError(code, message)),
+  );
 
 /** Returns the flag value, else asks for it on a terminal, else reports it as missing input. */
-const requiredInput = async (
+const requiredInput = Effect.fn('requiredInput')(function* (
   value: string | undefined,
   input: RequiredInput,
   context: PromptContext,
-): Promise<string> => {
-  if (context.signal?.aborted === true) throw cancelled();
+) {
+  if (context.signal.aborted) return yield* new PromptCancelledError();
   const provided = value?.trim();
 
   if (provided !== undefined && provided.length > 0) return provided;
 
   if (context.interactive) {
-    const answer = (await promptWithSignal(context.prompt, input.question, context.signal)).trim();
+    const answer = (yield* ask(context, input.question)).trim();
 
     if (answer.length > 0) return answer;
   }
 
-  throw new AttestCliError('cli_missing_input', `Required input ${input.path} is missing.`, {
-    path: input.path,
-    hint: `Pass ${input.path} or provide it in a complete --from-json request.`,
-  });
-};
+  return yield* new AttestCliError(
+    'cli_missing_input',
+    `Required input ${input.path} is missing.`,
+    {
+      path: input.path,
+      hint: `Pass ${input.path} or provide it in a complete --from-json request.`,
+    },
+  );
+});
 
-export { promptWithSignal, requiredInput, type PromptContext };
+export { ask, localPrompt, requiredInput, type PromptCancelledError, type PromptContext };

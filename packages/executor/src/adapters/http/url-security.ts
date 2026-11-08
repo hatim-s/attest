@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect';
-import { awaitAbort, httpSync } from './http-effects.js';
+import { tryOwned } from '@attest/contracts';
+import { awaitAbort } from './http-effects.js';
 import { isIP } from 'node:net';
 import type { LookupAddress } from 'node:dns';
 import { lookup } from 'node:dns/promises';
@@ -87,9 +88,9 @@ const resolveSafeHttpUrl = Effect.fn('http.resolveSafeUrl')(function* (
     if (signal?.aborted === true) throw abortedError(callerSignal, 'HTTP hostname resolution');
   };
 
-  yield* httpSync(throwIfAborted);
+  yield* tryOwned(AgentInvocationError, throwIfAborted);
 
-  const url = yield* httpSync(() => {
+  const url = yield* tryOwned(AgentInvocationError, () => {
     let url: URL;
 
     try {

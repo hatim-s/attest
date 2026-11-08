@@ -1,10 +1,11 @@
 import * as Exit from 'effect/Exit';
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 import * as Fiber from 'effect/Fiber';
 import * as Queue from 'effect/Queue';
 import * as Semaphore from 'effect/Semaphore';
-import { httpSync, withHttpCleanup } from '../http/http-effects.js';
+import { withHttpCleanup } from '../http/http-effects.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   createServer,
@@ -240,17 +241,15 @@ const createLoopbackCompletionReceiver = Effect.fn('callback.makeReceiver')(func
       return;
     }
 
-    let candidate: ReturnType<typeof parseJson>;
+    const candidate = yield* Effect.option(Effect.try(() => parseJson(body)));
 
-    try {
-      candidate = parseJson(body);
-    } catch {
+    if (Option.isNone(candidate)) {
       reply(response, 400, { error: 'malformed_json' });
 
       return;
     }
 
-    const parsed = parseAgentCompletion(candidate);
+    const parsed = parseAgentCompletion(candidate.value);
 
     if (!parsed.ok) {
       const issues = parsed.error
@@ -480,7 +479,7 @@ const createLoopbackCompletionReceiver = Effect.fn('callback.makeReceiver')(func
 
           if (closed || signal?.aborted) return yield* Effect.fail(stopped);
           const completion = yield* Deferred.make<AgentCompletion, AgentInvocationError>();
-          const token = yield* httpSync(() => randomBytes(32).toString('base64url'));
+          const token = yield* Effect.sync(() => randomBytes(32).toString('base64url'));
 
           const entry: Entry = {
             key: registrationKey(runId, caseId),

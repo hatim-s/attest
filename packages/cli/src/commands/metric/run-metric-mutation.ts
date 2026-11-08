@@ -4,19 +4,23 @@ import { runMetricMutationCommand, type MetricAuthoringRequest } from '@attest/l
 import { outputFormat, type MutationCliOptions } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { renderCommandResult } from '../shared/command-result.js';
+import { localPrompt, type PromptContext } from '../shared/required-input.js';
+
+type MetricMutationInput = {
+  request: MetricAuthoringRequest;
+  options: MutationCliOptions;
+  /** The caller's prompt context, so the mutation asks under the same rules as its guided input. */
+  prompt: PromptContext;
+  context: CommandContext;
+};
 
 /** Runs one metric mutation through local and prints its result. */
-const runMetricMutation = (
-  request: MetricAuthoringRequest,
-  options: MutationCliOptions,
-  interactive: boolean,
-  context: CommandContext,
-) =>
+const runMetricMutation = ({ request, options, prompt, context }: MetricMutationInput) =>
   Effect.gen(function* () {
     const result = yield* runMetricMutationCommand({
-      interactive,
+      interactive: prompt.interactive,
       project: options.project,
-      prompt: context.interaction.prompt,
+      prompt: localPrompt(prompt),
       readStdin: context.interaction.readStdin,
       request,
       workingDirectory: context.workingDirectory,

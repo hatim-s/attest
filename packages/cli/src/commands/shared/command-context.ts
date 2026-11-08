@@ -1,5 +1,6 @@
 import type * as Effect from 'effect/Effect';
 import type * as Context from 'effect/Context';
+import type { CliExitCode } from '@attest/contracts';
 import type { EvalApplication, CancellationRegistry } from '@attest/local/eval';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -35,11 +36,21 @@ type CliServices = {
   eval?: Partial<Pick<typeof EvalAdapter, 'runConfiguration' | 'cancelConfiguration'>>;
 };
 
+/**
+ * A native command program. It returns an exit code only when it already published its own
+ * terminal result, such as an eval whose verdict failed its gate; otherwise the exit code is 0.
+ */
+type CommandProgram = Effect.Effect<
+  CliExitCode | void,
+  unknown,
+  EvalApplication | CancellationRegistry
+>;
+
 /** What every command registration needs: the root program, terminal I/O, and invocation facts. */
 type CommandContext = {
   /** Selects the native command program executed by the application root. */
   submit: (
-    program: Effect.Effect<unknown, unknown, EvalApplication | CancellationRegistry>,
+    program: CommandProgram,
     /** Owners join their work; shutdown preserves failures, owned maps post-signal failures. */
     options?: { cancellation: 'owned' | 'shutdown'; cancellationMessage?: string },
   ) => void;
@@ -102,4 +113,10 @@ const resolveAttestPaths = async ({
   };
 };
 
-export { resolveAttestPaths, type CliIo, type CliServices, type CommandContext };
+export {
+  resolveAttestPaths,
+  type CliIo,
+  type CliServices,
+  type CommandContext,
+  type CommandProgram,
+};

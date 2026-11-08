@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect';
-import { awaitAbort, httpSync, withHttpCleanup } from '../http/http-effects.js';
+import { tryOwned } from '@attest/contracts';
+import { awaitAbort, withHttpCleanup } from '../http/http-effects.js';
 import type { JsonValue } from '@attest/contracts';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import { parseJson } from '../../internal/json-value.js';
@@ -183,14 +184,22 @@ const consumeResponse = Effect.fn('stream.consume')(function* (
         return yield* Effect.fail(
           capError('Streaming response exceeds its aggregate evidence cap.'),
         );
-      const terminal = yield* httpSync(() => acceptLines(decode(chunk), false));
 
-      if (terminal !== undefined) return yield* httpSync(() => completed(terminal));
+      const terminal = yield* tryOwned(AgentInvocationError, () =>
+        acceptLines(decode(chunk), false),
+      );
+
+      if (terminal !== undefined)
+        return yield* tryOwned(AgentInvocationError, () => completed(terminal));
     }
 
-    const terminal = yield* httpSync(() => acceptLines(decode(), false) ?? acceptLines('', true));
+    const terminal = yield* tryOwned(
+      AgentInvocationError,
+      () => acceptLines(decode(), false) ?? acceptLines('', true),
+    );
 
-    if (terminal !== undefined) return yield* httpSync(() => completed(terminal));
+    if (terminal !== undefined)
+      return yield* tryOwned(AgentInvocationError, () => completed(terminal));
 
     return yield* Effect.fail(
       new AgentInvocationError(

@@ -8,9 +8,10 @@ import {
 } from '@attest/local/test';
 
 import { AttestCliError } from '../../../errors/cli-error.js';
-import { outputFormat, type MutationCliOptions } from '../../shared/cli-options.js';
+import { outputFormat, promptContext, type MutationCliOptions } from '../../shared/cli-options.js';
 import type { CommandContext } from '../../shared/command-context.js';
 import { renderCommandResult } from '../../shared/command-result.js';
+import { ask, type PromptContext } from '../../shared/required-input.js';
 import { runTestMutation } from './run-test-mutation.js';
 
 type ImportRequest = Extract<
@@ -54,7 +55,7 @@ const runConfirmedDatasetImport = (
     );
 
     const preview = yield* runPreparedImport(
-      validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
+      yield* validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
       options,
       context,
       prepared.source,
@@ -73,7 +74,7 @@ const runConfirmedDatasetImport = (
       );
     }
 
-    const confirmed = validateCommandRequest('test.dataset.import', {
+    const confirmed = yield* validateCommandRequest('test.dataset.import', {
       ...request,
       dry_run: false,
       if_project_hash: projectHashBefore,
@@ -125,12 +126,15 @@ const confirmed = (answer: string): boolean => {
   return normalized === 'y' || normalized === 'yes';
 };
 
+type SuggestedMappingsInput = {
+  request: ImportRequest;
+  csvHeaders: readonly string[];
+  prompt: PromptContext;
+  context: CommandContext;
+};
+
 /** Fills in CSV mappings from the headers after the user accepts them; null when declined. */
-const withSuggestedMappings = (
-  request: ImportRequest,
-  csvHeaders: readonly string[],
-  context: CommandContext,
-) =>
+const withSuggestedMappings = ({ request, csvHeaders, prompt, context }: SuggestedMappingsInput) =>
   Effect.gen(function* () {
     const suggestions = suggestedCsvMappings(csvHeaders);
 
@@ -145,13 +149,10 @@ const withSuggestedMappings = (
 
     const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);
 
-    const answer = (yield* Effect.tryPromise({
-      try: () =>
-        context.interaction.prompt(
-          `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
-        ),
-      catch: (cause) => cause,
-    }))
+    const answer = (yield* ask(
+      prompt,
+      `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
+    ))
       .trim()
       .toLowerCase();
 
@@ -163,7 +164,7 @@ const withSuggestedMappings = (
       return null;
     }
 
-    return validateCommandRequest(request.command, {
+    return yield* validateCommandRequest(request.command, {
       ...request,
       import: { ...request.import, mapping: suggestions },
     });
@@ -176,6 +177,8 @@ const runGuidedImport = (
   context: CommandContext,
 ) =>
   Effect.gen(function* () {
+    const prompt = promptContext(options, context.interaction, context.signal);
+
     const prepared = yield* prepareImportSource(
       request.source,
       context.workingDirectory,
@@ -186,13 +189,13 @@ const runGuidedImport = (
     const needsMappings = prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0;
 
     const guided = needsMappings
-      ? yield* withSuggestedMappings(request, prepared.csvHeaders, context)
+      ? yield* withSuggestedMappings({ request, csvHeaders: prepared.csvHeaders, prompt, context })
       : request;
 
     if (guided === null) return;
 
     const preview = yield* runPreparedImport(
-      validateCommandRequest(guided.command, { ...guided, dry_run: true }),
+      yield* validateCommandRequest(guided.command, { ...guided, dry_run: true }),
       options,
       context,
       prepared.source,
@@ -200,20 +203,13 @@ const runGuidedImport = (
 
     context.io.output(renderCommandResult(guided.command, 'human', preview));
 
-    if (
-      !confirmed(
-        yield* Effect.tryPromise({
-          try: () => context.interaction.prompt('Apply this import? [y/N]: '),
-          catch: (cause) => cause,
-        }),
-      )
-    ) {
+    if (!confirmed(yield* ask(prompt, 'Apply this import? [y/N]: '))) {
       context.io.output('No changes made; import was not applied.');
 
       return;
     }
 
-    const applied = validateCommandRequest(guided.command, {
+    const applied = yield* validateCommandRequest(guided.command, {
       ...guided,
       dry_run: false,
       if_project_hash: preview.projectHashBefore,

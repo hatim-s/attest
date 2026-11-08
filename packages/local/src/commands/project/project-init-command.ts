@@ -13,6 +13,7 @@ import { prepareProjectCandidate } from '../../project/transaction/index.js';
 import { registerProject } from '../../registry/index.js';
 import { readCommandRequest } from '../shared/command-request.js';
 import type { ProjectInitResult } from '../shared/command-result.js';
+import type { Prompt } from '../shared/prompt.js';
 import { publishProjectManifest, rollbackPublishedManifest } from './manifest-publish.js';
 
 type ProjectInitCommandOptions = {
@@ -22,7 +23,7 @@ type ProjectInitCommandOptions = {
   fromJson?: string;
   interactive: boolean;
   name?: string;
-  prompt?: (question: string) => Promise<string>;
+  prompt?: Prompt;
   projectDirectory?: string;
   readStdin: () => Promise<string>;
   /** Global project registry the initialized project joins. */
@@ -196,12 +197,7 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
       });
     }
 
-    const prompt = options.prompt;
-    name =
-      (yield* Effect.tryPromise({
-        try: () => prompt(`Project name [${defaultName}]: `),
-        catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-      })).trim() || defaultName;
+    name = (yield* options.prompt(`Project name [${defaultName}]: `)).trim() || defaultName;
   }
 
   name = (name ?? defaultName).trim();
@@ -286,34 +282,26 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
       // registration fails, and the error tells the user to run `attest projects add`.
       let verified = false;
 
+      // Only expected failures map to init codes. A defect keeps its Die so the CLI reports
+      // `internal_error`, and the rollback below still runs for every non-success Exit.
       const primary = yield* Effect.exit(
         Effect.gen(function* () {
           if (!inspected.exists) {
             yield* Effect.tryPromise({
               try: () => mkdir(inspected.root),
               catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-            }).pipe(
-              Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
-              Effect.mapError(initFailure),
-            );
+            }).pipe(Effect.mapError(initFailure));
             createdDirectory = true;
           }
 
-          yield* assertUninitialized(inspected.root).pipe(
-            Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
-            Effect.mapError(initFailure),
-          );
+          yield* assertUninitialized(inspected.root).pipe(Effect.mapError(initFailure));
           yield* publishProjectManifest(inspected.root, manifest.contents).pipe(
-            Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
             Effect.mapError(initFailure),
           );
           published = true;
 
           const loaded = yield* restore(
-            loadProject({ project: inspected.root }).pipe(
-              Effect.catchDefect((cause) => Effect.fail(initFailure(cause))),
-              Effect.mapError(initFailure),
-            ),
+            loadProject({ project: inspected.root }).pipe(Effect.mapError(initFailure)),
           );
 
           if (loaded.projectHash !== prepared.projectHash)
@@ -332,7 +320,6 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
             name: prepared.project.project.name,
             projectId: prepared.project.project.project_id,
           }).pipe(
-            Effect.catchDefect((cause) => Effect.fail(cause)),
             Effect.mapError(
               (cause) =>
                 new LocalError(
@@ -354,22 +341,27 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
       if (verified) return yield* Effect.failCause(primary.cause);
       const releases: Exit.Exit<void, LocalError>[] = [];
 
+      // Restoration is a release: capture every failure, defects included, as recovery work
+      // while keeping both the primary and the release Cause.
+      const recoveryRequired = (message: string, path: string, hint: string) =>
+        Effect.catchCause((release: Cause.Cause<unknown>) =>
+          Effect.fail(
+            new LocalError('project_recovery_required', message, {
+              path,
+              hint,
+              cause: Cause.combine(primary.cause, release),
+            }),
+          ),
+        );
+
       if (published)
         releases.push(
           yield* Effect.exit(
             rollbackPublishedManifest(inspected.root, manifest.contents).pipe(
-              Effect.catchDefect((cause) => Effect.fail(cause)),
-              Effect.mapError(
-                (cause) =>
-                  new LocalError(
-                    'project_recovery_required',
-                    'Initialization failed and the published manifest could not be rolled back.',
-                    {
-                      path: join(inspected.root, 'attest.project.json'),
-                      hint: 'Preserve the manifest and reconcile it before retrying.',
-                      cause: Cause.combine(primary.cause, Cause.fail(cause)),
-                    },
-                  ),
+              recoveryRequired(
+                'Initialization failed and the published manifest could not be rolled back.',
+                join(inspected.root, 'attest.project.json'),
+                'Preserve the manifest and reconcile it before retrying.',
               ),
             ),
           ),
@@ -380,17 +372,14 @@ const runProjectInitCommand = Effect.fn('runProjectInitCommand')(function* (
           yield* Effect.exit(
             Effect.tryPromise({
               try: () => rmdir(inspected.root),
-              catch: (cause) =>
-                new LocalError(
-                  'project_recovery_required',
-                  'Initialization failed and the new target directory could not be removed.',
-                  {
-                    path: inspected.root,
-                    hint: 'Preserve and inspect the target directory before retrying.',
-                    cause: Cause.combine(primary.cause, Cause.fail(cause)),
-                  },
-                ),
-            }),
+              catch: (cause) => cause,
+            }).pipe(
+              recoveryRequired(
+                'Initialization failed and the new target directory could not be removed.',
+                inspected.root,
+                'Preserve and inspect the target directory before retrying.',
+              ),
+            ),
           ),
         );
 

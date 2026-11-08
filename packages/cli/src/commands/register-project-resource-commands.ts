@@ -24,14 +24,15 @@ import {
   addCommonOptions,
   addMutationOptions,
   commonOption,
-  isInteractive,
   outputFormat,
   outputOption,
+  promptContext,
   type CommonCliOptions,
   type MutationCliOptions,
 } from './shared/cli-options.js';
 import type { CommandContext } from './shared/command-context.js';
 import { renderCommandResult, renderResult } from './shared/command-result.js';
+import { localPrompt } from './shared/required-input.js';
 
 type ProjectInitCliOptions = MutationCliOptions & Pick<ProjectInitCommandOptions, 'name'>;
 
@@ -46,14 +47,16 @@ const registerProjectInit = (
     .action((directory: string | undefined, options: ProjectInitCliOptions) =>
       context.submit(
         Effect.gen(function* () {
+          const prompt = promptContext(options, context.interaction, context.signal);
+
           const result = yield* runProjectInitCommand({
             directory,
             dryRun: options.dryRun,
             expectedProjectHash: options.ifProjectHash,
             fromJson: options.fromJson,
-            interactive: isInteractive(options, context.interaction, options.fromJson),
+            interactive: prompt.interactive,
             name: options.name,
-            prompt: context.interaction.prompt,
+            prompt: localPrompt(prompt),
             projectDirectory: options.project,
             readStdin: context.interaction.readStdin,
             registryPath: context.registryPath,

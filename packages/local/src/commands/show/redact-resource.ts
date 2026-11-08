@@ -64,7 +64,7 @@ const redactRequestTemplates = (value: unknown): void => {
 };
 
 /** Returns the argv a process transport launches, or undefined for network transports. */
-const processArgv = (transport: AgentResource['transport']): readonly string[] | undefined => {
+const processArgv = (transport: AgentResource['transport']) => {
   switch (transport.kind) {
     case 'background_cli':
       return transport.start_argv;
@@ -84,7 +84,17 @@ const redactAgentResource = (resource: AgentResource): JsonValue => {
   const argv = processArgv(redacted.transport);
 
   if (argv !== undefined) {
-    const masked = argv.map((value, index) => (positions.has(index) ? REDACTED : value));
+    const mask = (value: string, index: number): string =>
+      positions.has(index) ? REDACTED : value;
+
+    const [executable, ...rest] = argv;
+
+    // Keeps the non-empty argv shape the transport schema requires.
+    const masked: typeof argv = [
+      mask(executable, 0),
+      ...rest.map((value, index) => mask(value, index + 1)),
+    ];
+
     const transport = redacted.transport;
 
     if (transport.kind === 'background_cli')

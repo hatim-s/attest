@@ -243,28 +243,27 @@ const invokeSandboxAttempt = Effect.fn('invokeSandboxAttempt')(function* (
                 );
               }
 
-              try {
-                return {
-                  status: 'ok' as const,
-                  raw: parseJson(raw),
-                  diagnostics,
-                  durationMs: duration(),
-                  rawExcerpt,
-                  warnings: [],
-                };
-              } catch (error: unknown) {
-                return fail(
+              return yield* Effect.try({
+                try: () => parseJson(raw),
+                catch: (cause) =>
                   new AgentInvocationError(
                     'invalid_envelope',
                     'Sandbox agent stdout was not valid JSON',
-                    {
-                      cause: error,
-                    },
+                    { cause },
                   ),
-                  diagnostics,
-                  rawExcerpt,
-                );
-              }
+              }).pipe(
+                Effect.match({
+                  onFailure: (error) => fail(error, diagnostics, rawExcerpt),
+                  onSuccess: (parsed) => ({
+                    status: 'ok' as const,
+                    raw: parsed,
+                    diagnostics,
+                    durationMs: duration(),
+                    rawExcerpt,
+                    warnings: [],
+                  }),
+                }),
+              );
             }).pipe(
               Effect.catch((error) =>
                 Effect.sync(() => {
@@ -381,7 +380,7 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
       const { artifactRoot } = options;
 
       if (artifacts.length > 0 && artifactRoot === undefined) {
-        throw new TypeError('Sandbox artifacts require an output directory.');
+        return yield* Effect.die(new TypeError('Sandbox artifacts require an output directory.'));
       }
 
       const credentials = yield* Effect.try({

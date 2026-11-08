@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
   AGENT_PROTOCOL,
+  tryOwned,
   type AgentRequest,
   type WebSocketErrorClassification,
 } from '@attest/contracts';
@@ -151,15 +152,9 @@ class WebSocketSessionState {
     signal: AbortSignal | undefined,
   ): Effect.Effect<void, AgentInvocationError> {
     return Effect.gen({ self: this }, function* () {
-      let text: string;
-
-      try {
-        text = materializeRequest(this.agent, pending.request, pending.requestId);
-      } catch (cause) {
-        return yield* cause instanceof AgentInvocationError
-          ? Effect.fail(cause)
-          : Effect.die(cause);
-      }
+      const text = yield* tryOwned(AgentInvocationError, () =>
+        materializeRequest(this.agent, pending.request, pending.requestId),
+      );
 
       pending.dispatched = true;
       yield* connection.sendText(text, signal);

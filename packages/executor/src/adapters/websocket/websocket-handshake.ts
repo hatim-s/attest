@@ -37,18 +37,14 @@ const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const openWebSocketHandshake = Effect.fn('openWebSocketHandshake')(function* (
   options: OpenWebSocketHandshakeOptions,
 ) {
-  let webSocketUrl: URL;
-
-  try {
-    webSocketUrl = new URL(options.url);
-  } catch (cause: unknown) {
-    return yield* Effect.fail(
+  const webSocketUrl = yield* Effect.try({
+    try: () => new URL(options.url),
+    catch: (cause) =>
       new AgentInvocationError('network', 'WebSocket URL is invalid.', {
         cause,
         classification: 'connection_failed',
       }),
-    );
-  }
+  });
 
   if (
     !['ws:', 'wss:'].includes(webSocketUrl.protocol) ||

@@ -1,9 +1,8 @@
 import { createInterface } from 'node:readline/promises';
 import { text } from 'node:stream/consumers';
 
-import type { AgentImportCommandOptions } from '@attest/local/agent';
-
-type CliPrompt = NonNullable<AgentImportCommandOptions['prompt']>;
+/** Asks one terminal question; the signal closes a pending question on cancellation. */
+type CliPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
 
 type CliInteraction = {
   ci: boolean;

@@ -1,9 +1,10 @@
 import * as Effect from 'effect/Effect';
+import { tryOwned } from '@attest/contracts';
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
 import type { StreamHttpTransport } from '../stream/stream-transport.js';
 import type { HttpJsonTransport } from './http-client.js';
-import { httpSync, withHttpCleanup } from './http-effects.js';
+import { withHttpCleanup } from './http-effects.js';
 import { openGuardedResponse, type GuardedHttpFetch } from './guarded-response.js';
 import { openWebStream } from '../stream/web-stream-request.js';
 import { readWebJson } from './web-response-body.js';
@@ -57,7 +58,7 @@ const createFetchHttpTransports = (guardedFetch: GuardedHttpFetch) => {
           }),
         );
       const redirected = new URL(location, result.url);
-      yield* httpSync(() => requireSameOrigin(redirected, origin));
+      yield* tryOwned(AgentInvocationError, () => requireSameOrigin(redirected, origin));
       current = { ...current, url: redirected.toString() };
     }
 

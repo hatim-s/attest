@@ -1,4 +1,3 @@
-import { promptEffect } from '../shared/prompt-effect.js';
 import * as Effect from 'effect/Effect';
 import { parseWithSchemaSync } from '@attest/contracts';
 import type { JsonValue, ProjectResources } from '@attest/contracts';
@@ -81,10 +80,8 @@ const mutationResult = Effect.fn('mutationResult')(function* ({
         const previewText = renderPreview(preview);
 
         if (confirmation.interactive === true && confirmation.prompt !== undefined) {
-          const prompt = confirmation.prompt;
-
-          const answer = (yield* promptEffect(() =>
-            prompt(`${previewText}\nApply these changes? [y/N]: `),
+          const answer = (yield* confirmation.prompt(
+            `${previewText}\nApply these changes? [y/N]: `,
           )).trim();
 
           if (!/^y(?:es)?$/iu.test(answer)) {

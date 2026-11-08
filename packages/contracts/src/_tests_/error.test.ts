@@ -1,7 +1,11 @@
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
 import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { AttestError } from '../errors/attest-error.js';
+import { tryOwned } from '../errors/try-owned.js';
 
 class ExampleError extends AttestError {
   declare readonly code: 'EXAMPLE_CODE';
@@ -54,5 +58,46 @@ describe('AttestError', () => {
         writable: true,
       });
     }
+  });
+});
+
+describe('tryOwned', () => {
+  const owned = new ExampleError('owned failure');
+  const foreign = new TypeError('programming error');
+
+  it('fails with the owned class, mapped when a mapper is given', () => {
+    const plain = Effect.runSyncExit(
+      tryOwned(ExampleError, () => {
+        throw owned;
+      }),
+    );
+
+    const mapped = Effect.runSyncExit(
+      tryOwned(
+        ExampleError,
+        () => {
+          throw owned;
+        },
+        (error) => error.code,
+      ),
+    );
+
+    expect(plain).toEqual(Exit.fail(owned));
+    expect(mapped).toEqual(Exit.fail('EXAMPLE_CODE'));
+  });
+
+  it('keeps anything else as a defect', () => {
+    const exit = Effect.runSyncExit(
+      tryOwned(
+        ExampleError,
+        () => {
+          throw foreign;
+        },
+        (error) => error.code,
+      ),
+    );
+
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(foreign);
+    expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
   });
 });

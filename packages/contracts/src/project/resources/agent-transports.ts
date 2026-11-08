@@ -58,6 +58,15 @@ const responseExtractionSchema = Schema.Struct({
   remote_job_id_pointer: Schema.optional(jsonPointerSchema),
 }).annotate({ identifier: 'ResponseExtraction' });
 
+/**
+ * A process argv with at least an executable. The length check aborts on failure, so the
+ * refinement only runs on a non-empty array; it gives the decoded value a non-empty tuple type
+ * so spawners need no empty case and an empty argv reports one issue.
+ */
+const argvSchema = Schema.Array(Schema.String)
+  .check(Schema.isMinLength(1).abort())
+  .pipe(Schema.refine((argv): argv is readonly [string, ...string[]] => argv.length > 0));
+
 const processEnvironmentSchema = Schema.Record(Schema.String, secretReferenceSchema);
 
 const literalRelativePathSchema = relativePathSchema.check(
@@ -121,7 +130,7 @@ const vercelSandboxSchema = Schema.Struct({
 const nativeForegroundTransportSchema = Schema.Struct({
   kind: Schema.Literal('native_cli'),
   lifecycle: Schema.Literal('per_case'),
-  argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  argv: argvSchema,
   cwd: Schema.optional(relativePathSchema),
   env: Schema.optional(processEnvironmentSchema),
   sandbox: Schema.optional(vercelSandboxSchema),
@@ -145,7 +154,7 @@ const backgroundReadinessSchema = Schema.Union([
 const nativeBackgroundTransportSchema = Schema.Struct({
   kind: Schema.Literal('background_cli'),
   lifecycle: Schema.Literal('per_run'),
-  start_argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  start_argv: argvSchema,
   cwd: Schema.optional(relativePathSchema),
   env: Schema.optional(processEnvironmentSchema),
   readiness: backgroundReadinessSchema,
@@ -158,7 +167,7 @@ const nativeBackgroundTransportSchema = Schema.Struct({
 const jsonlBridgeTransportSchema = Schema.Struct({
   kind: Schema.Literal('jsonl_bridge'),
   lifecycle: Schema.Literal('per_run'),
-  argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  argv: argvSchema,
   cwd: Schema.optional(relativePathSchema),
   env: Schema.optional(processEnvironmentSchema),
   concurrency: Schema.Literals(['serial', 'multiplexed']),
@@ -304,12 +313,16 @@ type ResponseExtraction = typeof responseExtractionSchema.Type;
 
 type VercelSandbox = typeof vercelSandboxSchema.Type;
 
+type Argv = typeof argvSchema.Type;
+
 export {
   agentTransportSchema,
+  argvSchema,
   httpRequestTemplateSchema,
   responseExtractionSchema,
   vercelSandboxSchema,
   type AgentTransport,
+  type Argv,
   type HttpRequestTemplate,
   type ResponseExtraction,
   type VercelSandbox,

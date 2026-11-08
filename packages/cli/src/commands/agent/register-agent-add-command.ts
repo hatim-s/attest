@@ -16,15 +16,15 @@ import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
   collect,
-  isInteractive,
   mutationRequestFields,
   outputFormat,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
 import { renderCommandResult } from '../shared/command-result.js';
-import { requiredInput } from '../shared/required-input.js';
+import { localPrompt, requiredInput } from '../shared/required-input.js';
 import { promptTransportFields } from './guided-agent-add.js';
 
 /** Fields whose flag spelling does not camel-case to the local field name. */
@@ -196,8 +196,8 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
       context.submit(
         Effect.gen(function* () {
           const fields = agentAddFields(agentId, options);
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
-          const prompt = { interactive, prompt: context.interaction.prompt };
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'agent.add',
@@ -206,20 +206,17 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
             options,
             build: () =>
               Effect.gen(function* () {
-                const id = yield* Effect.tryPromise({
-                  try: () =>
-                    requiredInput(agentId, { path: '<agent-id>', question: 'Agent id: ' }, prompt),
-                  catch: (cause) => cause,
-                });
+                const id = yield* requiredInput(
+                  agentId,
+                  { path: '<agent-id>', question: 'Agent id: ' },
+                  prompt,
+                );
 
-                const guided = yield* Effect.tryPromise({
-                  try: () => promptTransportFields({ ...fields, agentId: id }, prompt),
-                  catch: (cause) => cause,
-                });
+                const guided = yield* promptTransportFields({ ...fields, agentId: id }, prompt);
 
                 return {
                   ...mutationRequestFields('agent.add', options),
-                  agent: createAgentResource(guided),
+                  agent: yield* createAgentResource(guided),
                 };
               }),
           });
@@ -227,7 +224,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
           const result = yield* runAgentAddCommand({
             interactive,
             project: options.project,
-            prompt: context.interaction.prompt,
+            prompt: localPrompt(prompt),
             request,
             workingDirectory: context.workingDirectory,
           });

@@ -75,13 +75,11 @@ const createHttpClient = (
         () => controller.abort(),
       );
 
-      let body: unknown;
+      const body: unknown = yield* Effect.try(() => {
+        const parsed: unknown = JSON.parse(text);
 
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = undefined;
-      }
+        return parsed;
+      }).pipe(Effect.orElseSucceed(() => undefined));
 
       if (!response.ok) {
         const envelope = parseWithSchema(apiErrorEnvelopeSchema, body);

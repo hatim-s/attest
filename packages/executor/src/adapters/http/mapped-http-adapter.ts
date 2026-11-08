@@ -1,6 +1,11 @@
 import * as Effect from 'effect/Effect';
-import { httpSync, withHttpSignal } from './http-effects.js';
-import { parseAgentResponse, type AgentRequest, type AgentResource } from '@attest/contracts';
+import { withHttpSignal } from './http-effects.js';
+import {
+  parseAgentResponse,
+  tryOwned,
+  type AgentRequest,
+  type AgentResource,
+} from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import {
@@ -76,7 +81,7 @@ const invokeMappedHttpAgent = Effect.fn('http.invokeMapped')(function* (
           const requestTemplate =
             agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
 
-          const materialized = yield* httpSync(() =>
+          const materialized = yield* tryOwned(AgentInvocationError, () =>
             materializeHttpRequest(
               resolveRequestTemplate(requestTemplate, options),
               request,
@@ -119,11 +124,11 @@ const invokeMappedHttpAgent = Effect.fn('http.invokeMapped')(function* (
 
           const remoteJobId =
             completed.remoteJobId ??
-            (yield* httpSync(() =>
+            (yield* tryOwned(AgentInvocationError, () =>
               extractRemoteJobId(response.raw, agent.transport.extraction.remote_job_id_pointer),
             ));
 
-          const normalized = yield* httpSync(() =>
+          const normalized = yield* tryOwned(AgentInvocationError, () =>
             extractAgentResponse(response.raw, agent.transport.extraction, options.secrets ?? []),
           );
 

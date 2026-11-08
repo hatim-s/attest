@@ -1,8 +1,10 @@
 import { isJsonArray } from '../../../internal/json-array.js';
-import type { AgentResource, JsonValue } from '@attest/contracts';
+import type { AgentResource, JsonValue, SecretReference } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
+import { isLiteralTemplateValue } from '../../../internal/template-value.js';
 
 const isJsonObject = (value: JsonValue): value is { [key: string]: JsonValue } =>
   value !== null && typeof value === 'object' && !isJsonArray(value);
@@ -30,11 +32,23 @@ const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined
   return undefined;
 };
 
+/** Names the first credential-like entry authored as a literal instead of a secret reference. */
+const findLiteralSensitiveEntry = (
+  entries: Readonly<Record<string, string | SecretReference>> | undefined,
+): string | undefined => {
+  for (const [name, value] of Object.entries(entries ?? {})) {
+    if (isSensitiveFieldName(name) && isLiteralTemplateValue(value)) return name;
+  }
+
+  return undefined;
+};
+
+/** Rejects an unsafe authored HTTP template and returns its URL with placeholders filled. */
 // BOUNDARY: Authored HTTP templates are checked for credential literals, sensitive body fields and unsupported URL forms before requests are allowed.
-const assertSafeHttpTemplate = (
+const assertSafeHttpTemplate = Effect.fn('assertSafeHttpTemplate')(function* (
   request: Extract<AgentResource['transport'], { kind: 'http' }>['request'],
   path: string,
-): URL => {
+) {
   const separator = request.url.indexOf('://');
   const authorityStart = separator + 3;
   const authorityEnd = request.url.slice(authorityStart).search(/[/?#]/u);
@@ -49,20 +63,17 @@ const assertSafeHttpTemplate = (
     request.url.slice(0, authorityStart).includes('{{') ||
     authority.includes('{{')
   ) {
-    throw new LocalError(
+    return yield* new LocalError(
       'project_invalid',
       'Mapped HTTP URL placeholders are allowed only in path or query components.',
       { path },
     );
   }
 
-  let url: URL;
-
-  try {
-    url = new URL(request.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
-  } catch {
-    throw new LocalError('project_invalid', 'Mapped HTTP URL is invalid.', { path });
-  }
+  const url = yield* Effect.try({
+    try: () => new URL(request.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder')),
+    catch: () => new LocalError('project_invalid', 'Mapped HTTP URL is invalid.', { path }),
+  });
 
   if (
     !['http:', 'https:'].includes(url.protocol) ||
@@ -71,39 +82,49 @@ const assertSafeHttpTemplate = (
     url.hash.length > 0 ||
     url.search.length > 0
   ) {
-    throw new LocalError('project_invalid', 'Mapped HTTP URL contains an unsafe component.', {
-      path,
-      hint: 'Keep query mappings separate and remove credentials or fragments from the URL.',
+    return yield* new LocalError(
+      'project_invalid',
+      'Mapped HTTP URL contains an unsafe component.',
+      {
+        path,
+        hint: 'Keep query mappings separate and remove credentials or fragments from the URL.',
+      },
+    );
+  }
+
+  const literalHeader = findLiteralSensitiveEntry(request.headers);
+
+  if (literalHeader !== undefined) {
+    return yield* new LocalError('project_invalid', 'Sensitive HTTP headers must use references.', {
+      path: `${path}/headers/${literalHeader}`,
     });
   }
 
-  for (const [name, value] of Object.entries(request.headers ?? {})) {
-    if (isSensitiveFieldName(name) && typeof value === 'string') {
-      throw new LocalError('project_invalid', 'Sensitive HTTP headers must use references.', {
-        path: `${path}/headers/${name}`,
-      });
-    }
-  }
+  const literalQuery = findLiteralSensitiveEntry(request.query);
 
-  for (const [name, value] of Object.entries(request.query ?? {})) {
-    if (isSensitiveFieldName(name) && typeof value === 'string') {
-      throw new LocalError('project_invalid', 'Sensitive HTTP query values must use references.', {
-        path: `${path}/query/${name}`,
-      });
-    }
+  if (literalQuery !== undefined) {
+    return yield* new LocalError(
+      'project_invalid',
+      'Sensitive HTTP query values must use references.',
+      { path: `${path}/query/${literalQuery}` },
+    );
   }
 
   const sensitiveBody =
     request.body === undefined ? undefined : findSensitiveBodyField(request.body);
 
   if (sensitiveBody !== undefined) {
-    throw new LocalError('project_invalid', 'Mapped HTTP bodies cannot contain credentials.', {
-      path: `${path}/body${sensitiveBody}`,
-      hint: 'Move credentials to an environment-backed header or query reference.',
-    });
+    return yield* new LocalError(
+      'project_invalid',
+      'Mapped HTTP bodies cannot contain credentials.',
+      {
+        path: `${path}/body${sensitiveBody}`,
+        hint: 'Move credentials to an environment-backed header or query reference.',
+      },
+    );
   }
 
   return url;
-};
+});
 
-export { assertSafeHttpTemplate, findSensitiveBodyField };
+export { assertSafeHttpTemplate, findLiteralSensitiveEntry, findSensitiveBodyField };

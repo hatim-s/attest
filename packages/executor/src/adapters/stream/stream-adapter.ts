@@ -1,6 +1,11 @@
 import * as Effect from 'effect/Effect';
-import { httpSync, httpDelay, withHttpSignal } from '../http/http-effects.js';
-import { parseAgentResponse, type AgentRequest, type AgentResource } from '@attest/contracts';
+import { httpDelay, withHttpSignal } from '../http/http-effects.js';
+import {
+  parseAgentResponse,
+  tryOwned,
+  type AgentRequest,
+  type AgentResource,
+} from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import { DEFAULT_ATTEMPT_MS, DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';
@@ -75,7 +80,7 @@ const invokeStreamingAgent = Effect.fn('stream.invoke')(function* (
           const outcome = yield* Effect.result(
             withHttpSignal(attemptMs, [overallSignal], (attemptSignal) =>
               Effect.gen(function* () {
-                const materialized = yield* httpSync(() =>
+                const materialized = yield* tryOwned(AgentInvocationError, () =>
                   materializeHttpRequest(
                     resolveRequestTemplate(agent.transport.request, options),
                     request,

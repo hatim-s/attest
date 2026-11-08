@@ -4,14 +4,6 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import { AgentInvocationError, abortedError } from '../../errors.js';
 
-/** Captures only declared mapping failures; programming errors retain their defect channel. */
-const httpSync = <A>(evaluate: () => A) =>
-  Effect.try({ try: evaluate, catch: (cause) => cause }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof AgentInvocationError ? Effect.fail(cause) : Effect.die(cause),
-    ),
-  );
-
 /** Observes an external abort without retaining its listener after the wait ends. */
 const awaitAbort = (signal: AbortSignal) =>
   Effect.callback<void>((resume) => {
@@ -133,4 +125,4 @@ const withHttpCleanup = <A, E, R, R2>(
     }),
   );
 
-export { httpSync, awaitAbort, httpDelay, withHttpSignal, withHttpCleanup, HttpCleanup };
+export { awaitAbort, httpDelay, withHttpSignal, withHttpCleanup, HttpCleanup };
