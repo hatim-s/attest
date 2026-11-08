@@ -122,7 +122,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
               }),
           });
 
-          yield* runMetricMutation(request, options, context);
+          yield* runMetricMutation({ request, options, prompt, context });
         }),
       ),
     );

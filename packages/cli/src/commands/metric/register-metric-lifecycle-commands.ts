@@ -57,7 +57,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
                 }),
             });
 
-            yield* runMetricMutation(request, options, context);
+            yield* runMetricMutation({ request, options, prompt, context });
           }),
         ),
     );
@@ -98,7 +98,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
               }),
           });
 
-          yield* runMetricMutation(request, options, context);
+          yield* runMetricMutation({ request, options, prompt, context });
         }),
       ),
     );

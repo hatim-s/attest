@@ -60,7 +60,7 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
               }),
           });
 
-          yield* runMetricMutation(request, options, context);
+          yield* runMetricMutation({ request, options, prompt, context });
         }),
       ),
     );
