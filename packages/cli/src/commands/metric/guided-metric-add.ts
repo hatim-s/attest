@@ -1,10 +1,10 @@
-import { promptWithSignal } from '../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import { METRIC_PRESETS, type MetricPresetId } from '@attest/contracts';
 import { loadCommandProject } from '@attest/local/project';
 
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CommandContext } from '../shared/command-context.js';
+import { ask, type PromptContext } from '../shared/required-input.js';
 import { OPERATOR_PROMPTS, PRESET_PROMPTS, askGuidedPrompt } from './guided-metric-prompts.js';
 import type { MetricAddOptions } from './register-metric-add-command.js';
 
@@ -48,17 +48,22 @@ const PRESET_BY_VALUE_OPERATOR: Partial<Record<ValueOperator, MetricPresetId>> =
   'json-schema': 'output-schema',
 };
 
+type GuidedChoice<Choice extends string> = {
+  question: string;
+  choices: readonly Choice[];
+  /** Answer used for an empty reply. */
+  fallback: Choice;
+  /** Names the choice in the unknown-choice error. */
+  path: string;
+};
+
+/** Asks for one of `choices`; an empty reply selects the fallback. */
 const guidedChoice = <Choice extends string>(
-  question: string,
-  choices: readonly Choice[],
-  defaultChoice: Choice,
-  path: string,
-  context: CommandContext,
+  prompt: PromptContext,
+  { question, choices, fallback, path }: GuidedChoice<Choice>,
 ) =>
   Effect.gen(function* () {
-    const answer =
-      (yield* promptWithSignal(context.interaction.prompt, question, context.signal)).trim() ||
-      defaultChoice;
+    const answer = (yield* ask(prompt, question)).trim() || fallback;
 
     const choice = choices.find((candidate) => candidate === answer);
 
@@ -78,7 +83,11 @@ const traceSupport = (agent: { capabilities?: { trace?: boolean } }): string =>
     : 'does not advertise trace support';
 
 /** Shows which authored agents emit traces, so a trace metric is chosen knowingly. */
-const guidedTraceCapability = (options: MetricAddOptions, context: CommandContext) =>
+const guidedTraceCapability = (
+  options: MetricAddOptions,
+  prompt: PromptContext,
+  context: CommandContext,
+) =>
   Effect.gen(function* () {
     const loaded = yield* loadCommandProject({
       project: options.project,
@@ -97,10 +106,9 @@ const guidedTraceCapability = (options: MetricAddOptions, context: CommandContex
       .join('\n');
 
     const selectedId =
-      (yield* promptWithSignal(
-        context.interaction.prompt,
+      (yield* ask(
+        prompt,
         `Agent trace capabilities:\n${catalog}\nAgent for capability guidance [${defaultAgent.id}]: `,
-        context.signal,
       )).trim() || defaultAgent.id;
 
     const selected = loaded.agents.find(({ id }) => id === selectedId);
@@ -131,9 +139,12 @@ const presetCatalog = (): string =>
 /** Asks for the metric kind, assertion evidence, and operator before any operator value. */
 const selectGuidedMetricFields = (
   options: MetricAddOptions,
-  interactive: boolean,
+  prompt: PromptContext,
   context: CommandContext,
-) =>
+): Effect.Effect<
+  MetricAddOptions,
+  AttestCliError | Effect.Error<ReturnType<typeof loadCommandProject>>
+> =>
   Effect.gen(function* () {
     if (options.preset !== undefined) return options;
 
@@ -143,47 +154,43 @@ const selectGuidedMetricFields = (
       options.pattern !== undefined ||
       [options.lt, options.lte, options.gt, options.gte].some((value) => value !== undefined);
 
-    if (!interactive || hasDirectAssertion) return options;
+    if (!prompt.interactive || hasDirectAssertion) return options;
 
-    const kind = yield* guidedChoice(
-      `Metric catalog (${METRIC_PRESETS[0]?.schema ?? 'unknown'}):\n${presetCatalog()}\nMetric kind [assertion] (assertion|judge|command|http): `,
-      METRIC_KINDS,
-      'assertion',
-      'kind',
-      context,
-    );
+    const kind = yield* guidedChoice(prompt, {
+      question: `Metric catalog (${METRIC_PRESETS[0]?.schema ?? 'unknown'}):\n${presetCatalog()}\nMetric kind [assertion] (assertion|judge|command|http): `,
+      choices: METRIC_KINDS,
+      fallback: 'assertion',
+      path: 'kind',
+    });
 
     if (kind !== 'assertion') return { ...options, preset: PRESET_BY_KIND[kind] };
 
-    const evidence = yield* guidedChoice(
-      'Assertion evidence [output] (input|output|expected|trace): ',
-      ASSERTION_EVIDENCE,
-      'output',
-      'evidence',
-      context,
-    );
+    const evidence = yield* guidedChoice(prompt, {
+      question: 'Assertion evidence [output] (input|output|expected|trace): ',
+      choices: ASSERTION_EVIDENCE,
+      fallback: 'output',
+      path: 'evidence',
+    });
 
     if (evidence === 'trace') {
-      const capability = yield* guidedTraceCapability(options, context);
+      const capability = yield* guidedTraceCapability(options, prompt, context);
 
-      const operator = yield* guidedChoice(
-        `${capability}\nTrace operator [tool-called] (tool-called|tool-order|no-tool-errors|span): `,
-        TRACE_OPERATORS,
-        'tool-called',
-        'operator',
-        context,
-      );
+      const operator = yield* guidedChoice(prompt, {
+        question: `${capability}\nTrace operator [tool-called] (tool-called|tool-order|no-tool-errors|span): `,
+        choices: TRACE_OPERATORS,
+        fallback: 'tool-called',
+        path: 'operator',
+      });
 
       return { ...options, preset: PRESET_BY_TRACE_OPERATOR[operator] };
     }
 
-    const operator = yield* guidedChoice(
-      `Assertion operator for $.${evidence} [equals] (${VALUE_OPERATORS.join('|')}): `,
-      VALUE_OPERATORS,
-      'equals',
-      'operator',
-      context,
-    );
+    const operator = yield* guidedChoice(prompt, {
+      question: `Assertion operator for $.${evidence} [equals] (${VALUE_OPERATORS.join('|')}): `,
+      choices: VALUE_OPERATORS,
+      fallback: 'equals',
+      path: 'operator',
+    });
 
     const guided: MetricAddOptions = {
       ...options,
@@ -193,23 +200,19 @@ const selectGuidedMetricFields = (
 
     const step = OPERATOR_PROMPTS.get(operator);
 
-    return step === undefined ? guided : yield* askGuidedPrompt(step, guided, context);
+    return step === undefined ? guided : yield* askGuidedPrompt(step, guided, prompt);
   });
 
 /** Asks for whatever the chosen preset still needs, in the order the preset lists it. */
-const fillGuidedMetricFields = (
-  options: MetricAddOptions,
-  interactive: boolean,
-  context: CommandContext,
-) =>
+const fillGuidedMetricFields = (options: MetricAddOptions, prompt: PromptContext) =>
   Effect.gen(function* () {
     const preset = options.preset;
 
-    if (!interactive || preset === undefined) return options;
+    if (!prompt.interactive || preset === undefined) return options;
     let guided = options;
 
     for (const step of PRESET_PROMPTS[preset] ?? []) {
-      if (step.needed(guided)) guided = yield* askGuidedPrompt(step, guided, context);
+      if (step.needed(guided)) guided = yield* askGuidedPrompt(step, guided, prompt);
     }
 
     return guided;

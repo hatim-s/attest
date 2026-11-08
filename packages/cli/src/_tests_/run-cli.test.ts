@@ -1,4 +1,3 @@
-import { promptWithSignal } from '../commands/shared/required-input.js';
 import { valueFromExit } from '@attest/local';
 import * as Effect from 'effect/Effect';
 import * as Cause from 'effect/Cause';
@@ -77,30 +76,6 @@ const expectPrimaryFailure = (
 };
 
 describe('runCli', () => {
-  it('aborts a pending terminal question when the command signal fires', async () => {
-    const controller = new AbortController();
-    let questionSignal: AbortSignal | undefined;
-
-    const result = Effect.runPromiseExit(
-      promptWithSignal(
-        (_question, options) => {
-          questionSignal = options?.signal;
-          controller.abort();
-
-          return new Promise<string>(() => {});
-        },
-        'Question: ',
-        controller.signal,
-      ).pipe(Effect.flip),
-    );
-
-    await expect(result).resolves.toMatchObject({
-      _tag: 'Success',
-      value: { code: 'cancelled', message: 'Command cancelled.' },
-    });
-    expect(questionSignal?.aborted).toBe(true);
-  });
-
   it.each(['json', 'human', 'jsonl'] as const)(
     'keeps the admission failure when the shared store also fails to close in %s mode',
     async (output) => {

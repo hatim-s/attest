@@ -5,9 +5,9 @@ import { Option, type Command } from 'commander';
 import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  isInteractive,
   mutationRequestFields,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -28,13 +28,8 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
     .action((source: string | undefined, options: ImportOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
-
-          const prompt = {
-            interactive,
-            prompt: context.interaction.prompt,
-            signal: context.signal,
-          };
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'metric.import',

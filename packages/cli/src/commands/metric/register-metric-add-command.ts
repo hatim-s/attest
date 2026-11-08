@@ -14,8 +14,8 @@ import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
   collect,
-  isInteractive,
   mutationRequestFields,
+  promptContext,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
@@ -93,7 +93,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .action((metricId: string | undefined, options: MetricAddOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = promptContext(options, context.interaction, context.signal);
 
           const request = yield* readOrBuildRequest({
             command: 'metric.add',
@@ -105,11 +105,11 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
                 const id = yield* requiredInput(
                   metricId,
                   { path: '<metric-id>', question: 'Metric id: ' },
-                  { interactive, prompt: context.interaction.prompt, signal: context.signal },
+                  prompt,
                 );
 
-                const selected = yield* selectGuidedMetricFields(options, interactive, context);
-                const guided = yield* fillGuidedMetricFields(selected, interactive, context);
+                const selected = yield* selectGuidedMetricFields(options, prompt, context);
+                const guided = yield* fillGuidedMetricFields(selected, prompt);
 
                 const resource = yield* createMetricResource({
                   ...guided,
@@ -122,7 +122,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
               }),
           });
 
-          yield* runMetricMutation(request, options, interactive, context);
+          yield* runMetricMutation(request, options, prompt.interactive, context);
         }),
       ),
     );

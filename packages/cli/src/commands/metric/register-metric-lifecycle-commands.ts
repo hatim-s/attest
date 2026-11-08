@@ -5,9 +5,9 @@ import type { Command } from 'commander';
 import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  isInteractive,
   mutationRequestFields,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -32,13 +32,8 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const interactive = isInteractive(options, context.interaction, options.fromJson);
-
-            const prompt = {
-              interactive,
-              prompt: context.interaction.prompt,
-              signal: context.signal,
-            };
+            const prompt = promptContext(options, context.interaction, context.signal);
+            const { interactive } = prompt;
 
             const request = yield* readOrBuildRequest({
               command: 'metric.rename',
@@ -78,7 +73,8 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
     .action((metricId: string | undefined, options: RemoveOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'metric.remove',
@@ -92,7 +88,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
                   metric_id: yield* requiredInput(
                     metricId,
                     { path: '<metric-id>', question: 'Metric id: ' },
-                    { interactive, prompt: context.interaction.prompt, signal: context.signal },
+                    prompt,
                   ),
                 };
 

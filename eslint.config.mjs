@@ -324,6 +324,11 @@ const effectRoots = [
     owner: 'CLI scoped persisted report and diff fixture root',
   },
   {
+    file: 'packages/cli/src/commands/shared/_tests_/required-input.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'prompt cancellation test root',
+  },
+  {
     file: 'packages/local/src/store/_tests_/fixtures/crash-writer.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'intentional crash process root',

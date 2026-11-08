@@ -1,4 +1,3 @@
-import { promptWithSignal } from '../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import { isJsonObject } from '@attest/contracts';
 import { LocalError } from '@attest/local';
@@ -10,7 +9,7 @@ import {
 } from '@attest/local/agent';
 
 import { commaSeparated, promptChoice, promptDefault, promptOptional } from './agent-prompts.js';
-import { requiredInput, type PromptContext } from '../shared/required-input.js';
+import { ask, requiredInput, type PromptContext } from '../shared/required-input.js';
 
 type CurlFlags = Omit<CurlImportFields, 'responsePointer'> & { responsePointer?: string };
 
@@ -100,19 +99,11 @@ const promptPollingFields = Effect.fn('promptPollingFields')(function* (
   );
   polling.pollSuccess = fields.pollSuccess ??
     commaSeparated(
-      yield* promptWithSignal(
-        context.prompt,
-        'Polling success JSON values, comma-separated ["done"]: ',
-        context.signal,
-      ),
+      yield* ask(context, 'Polling success JSON values, comma-separated ["done"]: '),
     ) ?? ['"done"'];
   polling.pollFailure = fields.pollFailure ??
     commaSeparated(
-      yield* promptWithSignal(
-        context.prompt,
-        'Polling failure JSON values, comma-separated ["failed"]: ',
-        context.signal,
-      ),
+      yield* ask(context, 'Polling failure JSON values, comma-separated ["failed"]: '),
     ) ?? ['"failed"'];
   polling.pollMinimumInterval = yield* promptDefault(
     fields.pollMinimumInterval,
@@ -152,11 +143,7 @@ const promptCurlImportFields = Effect.fn('promptCurlImportFields')(function* (
 
   if (fields.mapBody === undefined) {
     guided.mapBody = commaSeparated(
-      yield* promptWithSignal(
-        context.prompt,
-        'Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: ',
-        context.signal,
-      ),
+      yield* ask(context, 'Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
     );
   }
 
@@ -207,10 +194,9 @@ const promptBodyMappings = Effect.fn('promptBodyMappings')(function* (
   context: PromptContext,
 ): Effect.fn.Return<string[] | undefined, Error> {
   return commaSeparated(
-    yield* promptWithSignal(
-      context.prompt,
+    yield* ask(
+      context,
       'Body mapping was invalid. Re-enter TARGET_POINTER=INPUT_POINTER values [none]: ',
-      context.signal,
     ),
   );
 });

@@ -226,13 +226,15 @@ const isInteractive = (
   interaction.inputIsTTY &&
   interaction.outputIsTTY;
 
-/** Prompts for missing values only when the command may be interactive. */
+/** The one way to build a prompt context: interactive only when allowed, cancelled by `signal`. */
 const promptContext = (
   options: { fromJson?: string; nonInteractive?: boolean; output?: string },
   interaction: CliInteraction,
+  signal: AbortSignal,
 ): PromptContext => ({
   interactive: isInteractive(options, interaction, options.fromJson),
   prompt: interaction.prompt,
+  signal,
 });
 
 /** Builds the request envelope fields that the mutation flags map to. */

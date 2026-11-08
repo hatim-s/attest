@@ -6,9 +6,9 @@ import type { Command } from 'commander';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import {
   addCommonOptions,
-  isInteractive,
   outputFormat,
   type CommonCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -29,10 +29,7 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
     .action((metricId: string | undefined, options: TestOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const prompt = {
-            interactive: isInteractive(options, context.interaction, options.fromJson),
-            prompt: context.interaction.prompt,
-          };
+          const prompt = promptContext(options, context.interaction, context.signal);
 
           const request = yield* readOrBuildRequest({
             command: 'metric.test',

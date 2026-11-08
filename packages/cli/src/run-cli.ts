@@ -191,8 +191,12 @@ const runCliApplication = (
 
     const interaction = { ...createDefaultCliInteraction(signal), ...options.interaction };
 
+    // A caller's own signal (fiber interruption) must not hide the command signal.
     const prompt: CliInteraction['prompt'] = (question, options) =>
-      interaction.prompt(question, { ...options, signal: options?.signal ?? signal });
+      interaction.prompt(question, {
+        ...options,
+        signal: options?.signal === undefined ? signal : AbortSignal.any([options.signal, signal]),
+      });
 
     const io = options.io ?? defaultIo;
     const workingDirectory = options.workingDirectory ?? process.cwd();

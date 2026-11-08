@@ -4,8 +4,12 @@ import * as cloudAdapter from '@attest/local/cloud';
 import { createEvalRunRequest, type EvalRunRequestFields } from '../eval/eval-request.js';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { renderResult } from '../shared/command-result.js';
-import { addCommonOptions, collect } from '../shared/cli-options.js';
-import type { CommonCliOptions } from '../shared/cli-options.js';
+import {
+  addCommonOptions,
+  collect,
+  promptContext,
+  type CommonCliOptions,
+} from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 
 type LoginOptions = CommonCliOptions & {
@@ -335,7 +339,7 @@ const registerCloudCommands = ({
               timeout: options.timeout,
               output: 'json',
             },
-            { interactive: false, prompt: interaction.prompt },
+            promptContext({ nonInteractive: true }, interaction, commandSignal),
           );
 
           const idempotencyKey = options.idempotencyKey ?? randomUUID();

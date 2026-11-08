@@ -6,10 +6,10 @@ import type { Command } from 'commander';
 import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  isInteractive,
   mutationRequestFields,
   outputFormat,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -35,13 +35,8 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
     ) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
-
-          const prompt = {
-            interactive,
-            prompt: context.interaction.prompt,
-            signal: context.signal,
-          };
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'agent.rename',
@@ -91,7 +86,8 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
     .action((agentId: string | undefined, options: RemoveOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'agent.remove',
@@ -105,7 +101,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
                   agent_id: yield* requiredInput(
                     agentId,
                     { path: '<agent-id>', question: 'Agent id: ' },
-                    { interactive, prompt: context.interaction.prompt, signal: context.signal },
+                    prompt,
                   ),
                 };
 

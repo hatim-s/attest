@@ -8,9 +8,9 @@ import { AttestCliError } from '../../errors/cli-error.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import {
   addCommonOptions,
-  isInteractive,
   outputFormat,
   type CommonCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -43,7 +43,8 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
     .action((agentId: string | undefined, options: TestOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           if (options.watch === true && !interactive) {
             return yield* Effect.fail(
@@ -68,7 +69,7 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
                   agent_id: yield* requiredInput(
                     agentId,
                     { path: '<agent-id>', question: 'Agent id: ' },
-                    { interactive, prompt: context.interaction.prompt, signal },
+                    prompt,
                   ),
                   input: yield* readAgentTestInput({
                     input: options.input,

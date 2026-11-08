@@ -15,10 +15,10 @@ import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
   collect,
-  isInteractive,
   mutationRequestFields,
   outputFormat,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readJsonRequest } from '../shared/command-request.js';
@@ -90,13 +90,8 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
     .action((source: string | undefined, options: ImportOptions, command: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
-
-          const prompt = {
-            interactive,
-            prompt: context.interaction.prompt,
-            signal: context.signal,
-          };
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const runImport = (
             request: Parameters<typeof runAgentImportCommand>[0]['request'],

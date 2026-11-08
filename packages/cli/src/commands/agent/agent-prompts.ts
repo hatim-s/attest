@@ -1,7 +1,6 @@
-import { promptWithSignal } from '../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import { AttestCliError } from '../../errors/cli-error.js';
-import type { PromptContext } from '../shared/required-input.js';
+import { ask, type PromptContext } from '../shared/required-input.js';
 
 /** Returns a flag value, or asks with a documented default. */
 const promptDefault = Effect.fn('promptDefault')(function* (
@@ -14,13 +13,7 @@ const promptDefault = Effect.fn('promptDefault')(function* (
 
   if (!context.interactive) return fallback;
 
-  return (
-    (yield* promptWithSignal(
-      context.prompt,
-      `${question} [${fallback}]: `,
-      context.signal,
-    )).trim() || fallback
-  );
+  return (yield* ask(context, `${question} [${fallback}]: `)).trim() || fallback;
 });
 
 /** Returns a flag value, or asks and treats an empty answer as no value. */
@@ -33,11 +26,7 @@ const promptOptional = Effect.fn('promptOptional')(function* (
 
   if (!context.interactive) return undefined;
 
-  const answer = (yield* promptWithSignal(
-    context.prompt,
-    `${question} [none]: `,
-    context.signal,
-  )).trim();
+  const answer = (yield* ask(context, `${question} [none]: `)).trim();
 
   return answer.length === 0 ? undefined : answer;
 });

@@ -8,9 +8,9 @@ import {
   addCommonOptions,
   addMutationOptions,
   collect,
-  isInteractive,
   mutationRequestFields,
   outputFormat,
+  promptContext,
   type CommonCliOptions,
   type MutationCliOptions,
 } from '../../shared/cli-options.js';
@@ -37,10 +37,7 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
     .action((testId: string | undefined, options: TestAddOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const prompt = {
-            interactive: isInteractive(options, context.interaction, options.fromJson),
-            prompt: context.interaction.prompt,
-          };
+          const prompt = promptContext(options, context.interaction, context.signal);
 
           const request = yield* readOrBuildRequest({
             command: 'test.add',
@@ -110,10 +107,7 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
           const id = yield* requiredInput(
             testId,
             { path: '<test-id>', question: 'Test id: ' },
-            {
-              interactive: isInteractive(options, context.interaction),
-              prompt: context.interaction.prompt,
-            },
+            promptContext(options, context.interaction, context.signal),
           );
 
           const result = yield* runTestShowCommand({
@@ -139,10 +133,7 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = {
-              interactive: isInteractive(options, context.interaction, options.fromJson),
-              prompt: context.interaction.prompt,
-            };
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.rename',
@@ -191,16 +182,20 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
                   test_id: yield* requiredInput(
                     testId,
                     { path: '<test-id>', question: 'Test id: ' },
-                    {
-                      interactive: isInteractive(options, context.interaction, options.fromJson),
-                      prompt: context.interaction.prompt,
-                    },
+                    promptContext(options, context.interaction, context.signal),
                   ),
                 };
               }),
           });
 
-          if (!(yield* confirmRemoval(request, `test ${request.test_id}`, options, context)))
+          if (
+            !(yield* confirmRemoval({
+              request,
+              label: `test ${request.test_id}`,
+              options,
+              context,
+            }))
+          )
             return;
           yield* runTestMutation(request, options, context);
         }),

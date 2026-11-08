@@ -21,10 +21,10 @@ import { createCliSuccessResult, serializeCliResult } from '../../output/cli-pro
 import {
   collect,
   commonOption,
-  isInteractive,
   nonInteractiveOption,
   outputOption,
   projectOption,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { collectEvalEvents } from './eval-event-stream.js';
@@ -74,11 +74,10 @@ const readRunRequest = (
 ) =>
   Effect.gen(function* () {
     if (fields.fromJson === undefined) {
-      return yield* createEvalRunRequest(fields, {
-        interactive: isInteractive(fields, context.interaction),
-        prompt: context.interaction.prompt,
-        signal,
-      });
+      return yield* createEvalRunRequest(
+        fields,
+        promptContext(fields, context.interaction, signal),
+      );
     }
 
     assertNoEvalFlags(fields.fromJson, command);

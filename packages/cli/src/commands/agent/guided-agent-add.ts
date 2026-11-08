@@ -1,10 +1,9 @@
-import { promptWithSignal } from '../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import type { AgentAddFields } from '@attest/local/agent';
 
 import { AttestCliError } from '../../errors/cli-error.js';
 import { commaSeparated, promptChoice, promptDefault, promptOptional } from './agent-prompts.js';
-import { requiredInput, type PromptContext } from '../shared/required-input.js';
+import { ask, requiredInput, type PromptContext } from '../shared/required-input.js';
 
 type GuidedTransport = 'background' | 'cli' | 'http' | 'jsonl' | 'stream' | 'websocket';
 
@@ -21,11 +20,7 @@ const TRANSPORT_FLAGS = [
 const readTransport = Effect.fn('readTransport')(function* (
   context: PromptContext,
 ): Effect.fn.Return<GuidedTransport, Error> {
-  const answer = (yield* promptWithSignal(
-    context.prompt,
-    'Transport [cli/http/background/jsonl/stream/websocket]: ',
-    context.signal,
-  ))
+  const answer = (yield* ask(context, 'Transport [cli/http/background/jsonl/stream/websocket]: '))
     .trim()
     .toLowerCase();
 
@@ -147,11 +142,7 @@ const promptWebSocketFields = Effect.fn('promptWebSocketFields')(function* (
     webSocketLifecycle,
     connectionMode,
     headerEnv: commaSeparated(
-      yield* promptWithSignal(
-        context.prompt,
-        'Header environment references HEADER=ENV, comma-separated [none]: ',
-        context.signal,
-      ),
+      yield* ask(context, 'Header environment references HEADER=ENV, comma-separated [none]: '),
     ),
     webSocketSubprotocol: yield* promptOptional(undefined, 'WebSocket subprotocol', context),
     requestTemplate: yield* promptDefault(

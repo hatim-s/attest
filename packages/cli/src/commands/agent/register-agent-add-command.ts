@@ -16,10 +16,10 @@ import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
   collect,
-  isInteractive,
   mutationRequestFields,
   outputFormat,
   type MutationCliOptions,
+  promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
@@ -196,13 +196,8 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
       context.submit(
         Effect.gen(function* () {
           const fields = agentAddFields(agentId, options);
-          const interactive = isInteractive(options, context.interaction, options.fromJson);
-
-          const prompt = {
-            interactive,
-            prompt: context.interaction.prompt,
-            signal: context.signal,
-          };
+          const prompt = promptContext(options, context.interaction, context.signal);
+          const { interactive } = prompt;
 
           const request = yield* readOrBuildRequest({
             command: 'agent.add',

@@ -69,7 +69,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .action((testId: string | undefined, options: CaseAddOptions, leaf: Command) =>
       context.submit(
         Effect.gen(function* () {
-          const prompt = promptContext(options, context.interaction);
+          const prompt = promptContext(options, context.interaction, context.signal);
 
           const request = yield* readOrBuildRequest({
             command: 'test.case.add',
@@ -137,7 +137,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.case.import',
@@ -193,7 +193,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
           const id = yield* requiredInput(
             testId,
             { path: '<test-id>', question: 'Test id: ' },
-            promptContext(options, context.interaction),
+            promptContext(options, context.interaction, context.signal),
           );
 
           const result = yield* runTestCaseListCommand({
@@ -213,7 +213,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .action((testId: string | undefined, caseId: string | undefined, options: CommonCliOptions) =>
       context.submit(
         Effect.gen(function* () {
-          const prompt = promptContext(options, context.interaction);
+          const prompt = promptContext(options, context.interaction, context.signal);
 
           const resolvedTestId = yield* requiredInput(
             testId,
@@ -255,7 +255,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.case.rename',
@@ -308,7 +308,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.case.remove',
@@ -333,7 +333,14 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 }),
             });
 
-            if (!(yield* confirmRemoval(request, `case ${request.case_id}`, options, context)))
+            if (
+              !(yield* confirmRemoval({
+                request,
+                label: `case ${request.case_id}`,
+                options,
+                context,
+              }))
+            )
               return;
             yield* runTestMutation(request, options, context);
           }),

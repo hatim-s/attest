@@ -1,4 +1,3 @@
-import { promptWithSignal } from '../../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import type { DatasetImportMapping } from '@attest/contracts';
 import {
@@ -9,9 +8,10 @@ import {
 } from '@attest/local/test';
 
 import { AttestCliError } from '../../../errors/cli-error.js';
-import { outputFormat, type MutationCliOptions } from '../../shared/cli-options.js';
+import { outputFormat, promptContext, type MutationCliOptions } from '../../shared/cli-options.js';
 import type { CommandContext } from '../../shared/command-context.js';
 import { renderCommandResult } from '../../shared/command-result.js';
+import { ask, type PromptContext } from '../../shared/required-input.js';
 import { runTestMutation } from './run-test-mutation.js';
 
 type ImportRequest = Extract<
@@ -126,12 +126,15 @@ const confirmed = (answer: string): boolean => {
   return normalized === 'y' || normalized === 'yes';
 };
 
+type SuggestedMappingsInput = {
+  request: ImportRequest;
+  csvHeaders: readonly string[];
+  prompt: PromptContext;
+  context: CommandContext;
+};
+
 /** Fills in CSV mappings from the headers after the user accepts them; null when declined. */
-const withSuggestedMappings = (
-  request: ImportRequest,
-  csvHeaders: readonly string[],
-  context: CommandContext,
-) =>
+const withSuggestedMappings = ({ request, csvHeaders, prompt, context }: SuggestedMappingsInput) =>
   Effect.gen(function* () {
     const suggestions = suggestedCsvMappings(csvHeaders);
 
@@ -146,10 +149,9 @@ const withSuggestedMappings = (
 
     const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);
 
-    const answer = (yield* promptWithSignal(
-      context.interaction.prompt,
+    const answer = (yield* ask(
+      prompt,
       `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
-      context.signal,
     ))
       .trim()
       .toLowerCase();
@@ -175,6 +177,8 @@ const runGuidedImport = (
   context: CommandContext,
 ) =>
   Effect.gen(function* () {
+    const prompt = promptContext(options, context.interaction, context.signal);
+
     const prepared = yield* prepareImportSource(
       request.source,
       context.workingDirectory,
@@ -185,7 +189,7 @@ const runGuidedImport = (
     const needsMappings = prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0;
 
     const guided = needsMappings
-      ? yield* withSuggestedMappings(request, prepared.csvHeaders, context)
+      ? yield* withSuggestedMappings({ request, csvHeaders: prepared.csvHeaders, prompt, context })
       : request;
 
     if (guided === null) return;
@@ -199,15 +203,7 @@ const runGuidedImport = (
 
     context.io.output(renderCommandResult(guided.command, 'human', preview));
 
-    if (
-      !confirmed(
-        yield* promptWithSignal(
-          context.interaction.prompt,
-          'Apply this import? [y/N]: ',
-          context.signal,
-        ),
-      )
-    ) {
+    if (!confirmed(yield* ask(prompt, 'Apply this import? [y/N]: '))) {
       context.io.output('No changes made; import was not applied.');
 
       return;

@@ -50,7 +50,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.add',
@@ -108,7 +108,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.import',
@@ -198,7 +198,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.attach',
@@ -250,7 +250,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.detach',
@@ -296,7 +296,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
       ) =>
         context.submit(
           Effect.gen(function* () {
-            const prompt = promptContext(options, context.interaction);
+            const prompt = promptContext(options, context.interaction, context.signal);
 
             const request = yield* readOrBuildRequest({
               command: 'test.dataset.rename',
@@ -349,7 +349,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                   dataset_id: yield* requiredInput(
                     datasetId,
                     { path: '<dataset-id>', question: 'Dataset id: ' },
-                    promptContext(options, context.interaction),
+                    promptContext(options, context.interaction, context.signal),
                   ),
                 };
               }),
@@ -364,7 +364,12 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
           }
 
           if (
-            !(yield* confirmRemoval(request, `dataset ${request.dataset_id}`, options, context))
+            !(yield* confirmRemoval({
+              request,
+              label: `dataset ${request.dataset_id}`,
+              options,
+              context,
+            }))
           ) {
             return;
           }

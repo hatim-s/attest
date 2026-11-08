@@ -18,7 +18,7 @@ import type { Command } from 'commander';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { authoredFieldPresence } from '../shared/cli-options.js';
 import { assertNoRequestOverlap } from '../shared/command-request.js';
-import { promptWithSignal, type PromptContext } from '../shared/required-input.js';
+import { ask, type PromptContext } from '../shared/required-input.js';
 
 type EvalRunRequestFields = Partial<Pick<EvalRunRequest, 'tags' | 'folders' | 'output'>> & {
   all?: Extract<EvalRunRequest, { all: true }>['all'];
@@ -110,7 +110,7 @@ const promptForSelection = Effect.fn('promptForSelection')(function* (
   context: PromptContext,
 ): Effect.fn.Return<{ all: true } | { test_ids: readonly string[] }, Error> {
   const question = 'Test ids (space-separated) or all [all]: ';
-  const answer = (yield* promptWithSignal(context.prompt, question, context.signal)).trim();
+  const answer = (yield* ask(context, question)).trim();
 
   if (answer.length === 0 || answer.toLowerCase() === 'all') return { all: true };
 
