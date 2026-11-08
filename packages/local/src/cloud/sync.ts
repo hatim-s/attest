@@ -7,6 +7,7 @@ import {
   parseWithSchema,
   PORTABLE_MAX_UPLOAD_BYTES,
   portableProjectBundleSchema,
+  tryOwned,
 } from '@attest/contracts';
 import { EvalResolutionError, resolvePortableProject } from '@attest/core';
 import { LocalError } from '../errors/index.js';
@@ -110,14 +111,7 @@ const createCloudBundle = Effect.fn('createCloudBundle')(function* (project: Loa
     );
   }
 
-  yield* Effect.try({
-    try: () => resolvePortableProject(parsed.value),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      cause instanceof EvalResolutionError ? Effect.fail(cause) : Effect.die(cause),
-    ),
-  );
+  yield* tryOwned(EvalResolutionError, () => resolvePortableProject(parsed.value));
 
   return parsed.value;
 });
@@ -272,14 +266,7 @@ const pullCloudProject = Effect.fn('pullCloudProject')(function* (
         );
       }
 
-      yield* Effect.try({
-        try: () => resolvePortableProject(response.bundle),
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.catch((cause) =>
-          cause instanceof EvalResolutionError ? Effect.fail(cause) : Effect.die(cause),
-        ),
-      );
+      yield* tryOwned(EvalResolutionError, () => resolvePortableProject(response.bundle));
       const changes = yield* planPullChanges(root, link.file_hashes, response.bundle.files);
 
       const prepared = yield* prepareTransaction(root, changes, {
