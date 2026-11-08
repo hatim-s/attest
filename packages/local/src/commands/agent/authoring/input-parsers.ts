@@ -1,10 +1,5 @@
 import { isJsonObject } from '@attest/contracts';
-import {
-  parseWithSchema,
-  vercelSandboxSchema,
-  type JsonValue,
-  type VercelSandbox,
-} from '@attest/contracts';
+import { parseWithSchema, vercelSandboxSchema, type JsonValue } from '@attest/contracts';
 
 import * as Schema from 'effect/Schema';
 import * as Effect from 'effect/Effect';
@@ -15,32 +10,37 @@ import { parseJsonText } from '../../../internal/source-text.js';
 import { ShellWordsError, splitShellWords } from '../shell-words.js';
 
 /** Tokenizes a convenience command string into argv without expansion or shell execution. */
-const tokenizeCommand = (value: string): readonly string[] => {
-  let argv: string[];
-
-  try {
-    argv = splitShellWords(value, { rejectShellControl: false });
-  } catch (error: unknown) {
-    if (!(error instanceof ShellWordsError)) throw error;
-    throw new LocalError('cli_usage', 'The native command contains an unclosed quote.', {
-      path: '--native-command',
-      hint: 'Close the quote or use `--argv-json` for an unambiguous argv array.',
-    });
-  }
+const tokenizeCommand = Effect.fn('tokenizeCommand')(function* (value: string) {
+  // The tokenizer throws its own class; anything else is a defect, not a usage error.
+  const argv = yield* Effect.try({
+    try: () => splitShellWords(value, { rejectShellControl: false }),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      cause instanceof ShellWordsError
+        ? Effect.fail(
+            new LocalError('cli_usage', 'The native command contains an unclosed quote.', {
+              path: '--native-command',
+              hint: 'Close the quote or use `--argv-json` for an unambiguous argv array.',
+            }),
+          )
+        : Effect.die(cause),
+    ),
+  );
 
   if (argv.length === 0) {
-    throw new LocalError('cli_missing_input', 'The native command argv cannot be empty.', {
+    return yield* new LocalError('cli_missing_input', 'The native command argv cannot be empty.', {
       path: '--native-command',
       hint: 'Pass a command string or a non-empty `--argv-json` array.',
     });
   }
 
   return argv;
-};
+});
 
 /** Parses an unambiguous JSON argv array. */
-const parseArgvJson = (value: string): readonly string[] => {
-  const parsed = parseJsonText(value, {
+const parseArgvJson = Effect.fn('parseArgvJson')(function* (value: string) {
+  const parsed = yield* parseJsonText(value, {
     path: '--argv-json',
     hint: 'Pass a JSON array of strings.',
   });
@@ -48,18 +48,18 @@ const parseArgvJson = (value: string): readonly string[] => {
   const argv = parseWithSchema(Schema.Array(Schema.String).check(Schema.isMinLength(1)), parsed);
 
   if (!argv.ok) {
-    throw new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
+    return yield* new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
       path: '--argv-json',
       hint: 'Pass a JSON array containing at least one string.',
     });
   }
 
   return argv.value;
-};
+});
 
 /** Parses and validates one Vercel sandbox definition. */
-const parseSandboxJson = (value: string): VercelSandbox => {
-  const parsed = parseJsonText(value, {
+const parseSandboxJson = Effect.fn('parseSandboxJson')(function* (value: string) {
+  const parsed = yield* parseJsonText(value, {
     path: '--sandbox-json',
     hint: 'Pass one Vercel sandbox JSON object.',
   });
@@ -67,18 +67,25 @@ const parseSandboxJson = (value: string): VercelSandbox => {
   const sandbox = parseWithSchema(vercelSandboxSchema, parsed);
 
   if (!sandbox.ok) {
-    throw new LocalError('cli_usage', '`--sandbox-json` does not match the sandbox schema.', {
-      path: '--sandbox-json',
-      hint: 'Pass kind, files, and optional image, artifacts, or artifact_directory fields.',
-      details: { diagnostics: schemaIssueDiagnostics(sandbox.error.issues) },
-    });
+    return yield* new LocalError(
+      'cli_usage',
+      '`--sandbox-json` does not match the sandbox schema.',
+      {
+        path: '--sandbox-json',
+        hint: 'Pass kind, files, and optional image, artifacts, or artifact_directory fields.',
+        details: { diagnostics: schemaIssueDiagnostics(sandbox.error.issues) },
+      },
+    );
   }
 
   return sandbox.value;
-};
+});
 
 /** Parses a positive duration expressed as milliseconds, seconds, or minutes. */
-const parseDuration = (value: string, path = '--timeout'): number => {
+const parseDuration = Effect.fn('parseDuration')(function* (
+  value: string,
+  path: string = '--timeout',
+) {
   const match = /^(\d+)(ms|s|m)$/u.exec(value);
   const amount = match?.[1] === undefined ? 0 : Number(match[1]);
   const unit = match?.[2];
@@ -86,79 +93,70 @@ const parseDuration = (value: string, path = '--timeout'): number => {
   const milliseconds = amount * multiplier;
 
   if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
-    throw new LocalError('cli_usage', 'Duration must be a positive value.', {
+    return yield* new LocalError('cli_usage', 'Duration must be a positive value.', {
       path,
       hint: 'Use an integer followed by ms, s, or m, such as `60s`.',
     });
   }
 
   return milliseconds;
-};
+});
 
-/** Parses repeatable JSON-valued command options. */
-const parseJsonValues = (values: readonly string[], path: string): JsonValue[] =>
-  values.map((value) =>
-    parseJsonText(value, {
-      path,
-      hint: 'Quote strings as JSON, for example `--terminal-value \'"done"\'`.',
-    }),
-  );
+/** Parses repeatable JSON-valued command options, failing on the first invalid value. */
+const parseJsonValues = Effect.fn('parseJsonValues')(function* (
+  values: readonly string[],
+  path: string,
+) {
+  const parsed: JsonValue[] = [];
+
+  for (const value of values) {
+    parsed.push(
+      yield* parseJsonText(value, {
+        path,
+        hint: 'Quote strings as JSON, for example `--terminal-value \'"done"\'`.',
+      }),
+    );
+  }
+
+  return parsed;
+});
 
 /** Parses one WebSocket text-JSON request template. */
 // BOUNDARY: CLI JSON template text is decoded and rejected unless it is an object containing the required request id placeholder.
-const parseRequestTemplate = (value: string): Record<string, JsonValue> => {
-  const parsed = parseJsonText(value, {
+const parseRequestTemplate = Effect.fn('parseRequestTemplate')(function* (value: string) {
+  const parsed = yield* parseJsonText(value, {
     path: '--request-template',
     hint: 'Pass one JSON object containing exactly one `{{request_id}}` value.',
   });
 
   if (!isJsonObject(parsed)) {
-    throw new LocalError('cli_usage', '`--request-template` must be a JSON object.', {
+    return yield* new LocalError('cli_usage', '`--request-template` must be a JSON object.', {
       path: '--request-template',
       hint: 'Example: `{"request_id":"{{request_id}}","request":"{{request}}"}`.',
     });
   }
 
   return parsed;
-};
+});
 
 /** Parses one background-process TCP readiness target. */
-const parseTcpReadiness = (value: string) => {
+const parseTcpReadiness = Effect.fn('parseTcpReadiness')(function* (value: string) {
   const match = /^(\[[^\]]+\]|[^:]+):(\d+)$/u.exec(value);
   const port = Number(match?.[2]);
 
   if (match?.[1] === undefined || !Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new LocalError('cli_usage', '--readiness-tcp must be HOST:PORT.', {
+    return yield* new LocalError('cli_usage', '--readiness-tcp must be HOST:PORT.', {
       path: '--readiness-tcp',
       hint: 'Example: `--readiness-tcp 127.0.0.1:8787`.',
     });
   }
 
   return { host: match[1].replace(/^\[|\]$/gu, ''), port };
-};
-
-/** Parses argv JSON in the typed channel for local Effect authoring commands. */
-const parseArgvJsonEffect = Effect.fn('parseArgvJsonEffect')(function* (value: string) {
-  return yield* Effect.try({ try: () => parseArgvJson(value), catch: (cause) => cause }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
-});
-
-/** Parses a duration in the typed channel while the public CLI parser remains synchronous. */
-const parseDurationEffect = Effect.fn('parseDurationEffect')(function* (
-  value: string,
-  path: string = '--timeout',
-) {
-  return yield* Effect.try({ try: () => parseDuration(value, path), catch: (cause) => cause }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
 });
 
 export {
   parseArgvJson,
-  parseArgvJsonEffect,
   parseDuration,
-  parseDurationEffect,
   parseJsonValues,
   parseRequestTemplate,
   parseSandboxJson,

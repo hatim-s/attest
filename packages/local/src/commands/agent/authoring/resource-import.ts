@@ -13,7 +13,7 @@ import {
 import { LocalError } from '../../../errors/index.js';
 import { withAnchored, anchoredCall } from '../../../internal/open-anchored.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseJsonTextEffect, readSourceText } from '../../../internal/source-text.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import { findCurlBodyFilePath, parseCurlCommand, type CurlImportPreview } from '../curl-parser.js';
 import { CurlImportError } from '../curl-tokenizer.js';
@@ -136,7 +136,7 @@ const readImportedAgentResource = Effect.fn('readImportedAgentResource')(functio
     ? yield* readRemoteJson(source, 'source')
     : yield* readSourceText(source, { path: 'source', readStdin, workingDirectory });
 
-  const value = yield* parseJsonTextEffect(text, { path: 'source' });
+  const value = yield* parseJsonText(text, { path: 'source' });
   const parsed = parseWithSchema(agentResourceSchema, value);
 
   if (!parsed.ok) {

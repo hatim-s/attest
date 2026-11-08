@@ -8,7 +8,7 @@ import {
 
 import { LocalError } from '../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
-import { parseJsonTextEffect, readSourceText } from '../../internal/source-text.js';
+import { parseJsonText, readSourceText } from '../../internal/source-text.js';
 
 type CommandRequestFor<TCommand extends CommandRequest['command']> = Extract<
   CommandRequest,
@@ -30,27 +30,28 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
   command: TCommand,
   value: unknown,
   path: string | undefined,
-): CommandRequestFor<TCommand> => {
-  const parsed = parseWithSchema(commandRequestSchema, value);
+) =>
+  Effect.gen(function* () {
+    const parsed = parseWithSchema(commandRequestSchema, value);
 
-  if (!parsed.ok) {
-    throw new LocalError('cli_usage', 'The command request does not match its schema.', {
-      path,
-      hint: `Run \`attest help ${command.replaceAll('.', ' ')} --output json\` and repair the input.`,
-      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
-    });
-  }
+    if (!parsed.ok) {
+      return yield* new LocalError('cli_usage', 'The command request does not match its schema.', {
+        path,
+        hint: `Run \`attest help ${command.replaceAll('.', ' ')} --output json\` and repair the input.`,
+        details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
+      });
+    }
 
-  if (parsed.value.command !== command) {
-    throw new LocalError('cli_usage', 'The command request targets another command.', {
-      path: '/command',
-      hint: `Set \`command\` to \`${command}\`.`,
-    });
-  }
+    if (parsed.value.command !== command) {
+      return yield* new LocalError('cli_usage', 'The command request targets another command.', {
+        path: '/command',
+        hint: `Set \`command\` to \`${command}\`.`,
+      });
+    }
 
-  // SAFETY: The complete request schema passed and its command discriminant equals the generic command argument above.
-  return parsed.value as CommandRequestFor<TCommand>;
-};
+    // SAFETY: The complete request schema passed and its command discriminant equals the generic command argument above.
+    return parsed.value as CommandRequestFor<TCommand>;
+  });
 
 /**
  * Validates a request built from CLI flags through the same published schema as `--from-json`,
@@ -60,7 +61,7 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
 const validateCommandRequest = <TCommand extends CommandRequest['command']>(
   command: TCommand,
   value: unknown,
-): CommandRequestFor<TCommand> => parseCommandRequest(command, value, undefined);
+) => parseCommandRequest(command, value, undefined);
 
 /**
  * Reads one `--from-json` document from a file or stdin without validating it, for callers that
@@ -72,7 +73,7 @@ const readRequestDocument = Effect.fn('readRequestDocument')(function* (
 ) {
   const text = yield* readSourceText(source, { ...options, path: '--from-json' });
 
-  return yield* parseJsonTextEffect(text, { path: '--from-json', hint: options.hint });
+  return yield* parseJsonText(text, { path: '--from-json', hint: options.hint });
 });
 
 /** Reads one `--from-json` request document from a file or stdin and validates it. */
@@ -84,12 +85,7 @@ const readCommandRequest = Effect.fn('readCommandRequest')(function* <
     hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
   });
 
-  return yield* Effect.try({
-    try: () => parseCommandRequest(command, value, '--from-json'),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
+  return yield* parseCommandRequest(command, value, '--from-json');
 });
 
 export { readCommandRequest, readRequestDocument, validateCommandRequest };

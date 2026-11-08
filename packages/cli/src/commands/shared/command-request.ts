@@ -96,7 +96,7 @@ const readOrBuildRequest = <TCommand extends CommandRequest['command']>({
   Effect.gen(function* () {
     const { fromJson } = options;
 
-    if (fromJson === undefined) return validateCommandRequest(read.command, yield* build());
+    if (fromJson === undefined) return yield* validateCommandRequest(read.command, yield* build());
 
     return yield* readJsonRequest({ ...read, options: { ...options, fromJson } });
   });

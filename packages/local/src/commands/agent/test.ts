@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
-import { parseJsonTextEffect, readSourceText } from '../../internal/source-text.js';
+import { parseJsonText, readSourceText } from '../../internal/source-text.js';
 import { openStore, withStoreScope } from '../../store/index.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import type { ReadInput } from './authoring/types.js';
@@ -43,12 +43,12 @@ const readAgentTestInput = Effect.fn('readAgentTestInput')(function* (
       workingDirectory: options.workingDirectory,
     });
 
-    return yield* parseJsonTextEffect(text, { path: '--input-file', hint });
+    return yield* parseJsonText(text, { path: '--input-file', hint });
   }
 
   return options.input === undefined
     ? {}
-    : yield* parseJsonTextEffect(options.input, { path: '--input', hint });
+    : yield* parseJsonText(options.input, { path: '--input', hint });
 });
 
 /** Probes one adapter, finalizing recorded evidence before the store owner closes. */

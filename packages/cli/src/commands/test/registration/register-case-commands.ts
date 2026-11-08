@@ -84,7 +84,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                   prompt,
                 );
 
-                const input = parseJsonFlag(inputText, '--input');
+                const input = yield* parseJsonFlag(inputText, '--input');
 
                 if (input === undefined)
                   return yield* Effect.die(new Error('Required input JSON was not parsed.'));
@@ -93,16 +93,16 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 if (options.id !== undefined) authoredCase.id = options.id;
 
                 if (options.expected !== undefined)
-                  authoredCase.expected = parseJsonFlag(options.expected, '--expected');
+                  authoredCase.expected = yield* parseJsonFlag(options.expected, '--expected');
 
                 if (options.params !== undefined)
-                  authoredCase.params = parseJsonFlag(options.params, '--params');
+                  authoredCase.params = yield* parseJsonFlag(options.params, '--params');
 
                 if (options.tag !== undefined) authoredCase.tags = options.tag;
 
                 if (options.folder !== undefined) authoredCase.folder = options.folder;
 
-                return validateCommandRequest('test.case.add', {
+                return yield* validateCommandRequest('test.case.add', {
                   ...mutationRequestFields('test.case.add', options),
                   test_id: yield* requiredInput(
                     testId,

@@ -55,7 +55,7 @@ const runConfirmedDatasetImport = (
     );
 
     const preview = yield* runPreparedImport(
-      validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
+      yield* validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
       options,
       context,
       prepared.source,
@@ -74,7 +74,7 @@ const runConfirmedDatasetImport = (
       );
     }
 
-    const confirmed = validateCommandRequest('test.dataset.import', {
+    const confirmed = yield* validateCommandRequest('test.dataset.import', {
       ...request,
       dry_run: false,
       if_project_hash: projectHashBefore,
@@ -162,7 +162,7 @@ const withSuggestedMappings = (
       return null;
     }
 
-    return validateCommandRequest(request.command, {
+    return yield* validateCommandRequest(request.command, {
       ...request,
       import: { ...request.import, mapping: suggestions },
     });
@@ -191,7 +191,7 @@ const runGuidedImport = (
     if (guided === null) return;
 
     const preview = yield* runPreparedImport(
-      validateCommandRequest(guided.command, { ...guided, dry_run: true }),
+      yield* validateCommandRequest(guided.command, { ...guided, dry_run: true }),
       options,
       context,
       prepared.source,
@@ -213,7 +213,7 @@ const runGuidedImport = (
       return;
     }
 
-    const applied = validateCommandRequest(guided.command, {
+    const applied = yield* validateCommandRequest(guided.command, {
       ...guided,
       dry_run: false,
       if_project_hash: preview.projectHashBefore,

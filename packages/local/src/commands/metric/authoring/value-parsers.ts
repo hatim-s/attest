@@ -9,8 +9,8 @@ import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseJsonTextEffect, readSourceText } from '../../../internal/source-text.js';
-import { parseSecretBindingsEffect } from '../../shared/secret-bindings.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
+import { parseSecretBindings } from '../../shared/secret-bindings.js';
 import type { MetricAddFields } from './types.js';
 
 const attributeValueSchema = Schema.Union([Schema.String, Schema.Number, Schema.Boolean]);
@@ -56,7 +56,7 @@ const parseNonnegativeInteger = Effect.fn('parseNonnegativeInteger')(function* (
 });
 
 const parseJsonValue = Effect.fn('parseJsonValue')(function* (value: string, path: string) {
-  return yield* parseJsonTextEffect(value, {
+  return yield* parseJsonText(value, {
     path,
     hint: 'Pass one JSON scalar, array, or object.',
   });
@@ -69,7 +69,7 @@ const parseOptionalSecretBindings = Effect.fn('parseOptionalSecretBindings')(fun
 ) {
   return values === undefined || values.length === 0
     ? undefined
-    : yield* parseSecretBindingsEffect(values, path);
+    : yield* parseSecretBindings(values, path);
 });
 
 const parsePathValueMatchers = Effect.fn('parsePathValueMatchers')(function* (
@@ -137,7 +137,7 @@ const parseAssertionJson = Effect.fn('parseAssertionJson')(function* (values: re
   for (const [index, value] of values.entries()) {
     const parsed = parseWithSchema(
       assertionCheckSchema,
-      yield* parseJsonTextEffect(value, {
+      yield* parseJsonText(value, {
         path: '--assert-json',
         hint: 'Pass one assertion check object.',
       }),

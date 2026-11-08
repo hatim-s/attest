@@ -13,8 +13,8 @@ import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseJsonTextEffect } from '../../../internal/source-text.js';
-import { parseArgvJsonEffect, parseDurationEffect } from '../../agent/authoring/input-parsers.js';
+import { parseJsonText } from '../../../internal/source-text.js';
+import { parseArgvJson, parseDuration } from '../../agent/authoring/input-parsers.js';
 import {
   parseAssertionJson,
   parseAttributes,
@@ -77,7 +77,7 @@ const jsonSchemaSchema = Schema.Union([Schema.Boolean, Schema.Record(Schema.Stri
 const parseJsonSchema = Effect.fn('parseJsonSchema')(function* (value: string) {
   const parsed = parseWithSchema(
     jsonSchemaSchema,
-    yield* parseJsonTextEffect(value, {
+    yield* parseJsonText(value, {
       path: '--json-schema',
       hint: 'Pass a JSON Schema object or boolean.',
     }),
@@ -357,7 +357,7 @@ const createMetricResource = Effect.fn('createMetricResource')(function* (fields
     const env = yield* parseOptionalSecretBindings(fields.env, '--env');
     definition = {
       kind: 'exec' as const,
-      argv: yield* parseArgvJsonEffect(yield* requireValue(fields.argvJson, '--argv-json')),
+      argv: yield* parseArgvJson(yield* requireValue(fields.argvJson, '--argv-json')),
     };
 
     if (fields.cwd !== undefined) definition = { ...definition, cwd: fields.cwd };
@@ -365,7 +365,7 @@ const createMetricResource = Effect.fn('createMetricResource')(function* (fields
     if (env !== undefined) definition = { ...definition, env: env };
 
     if (fields.timeout !== undefined)
-      definition = { ...definition, timeout_ms: yield* parseDurationEffect(fields.timeout) };
+      definition = { ...definition, timeout_ms: yield* parseDuration(fields.timeout) };
   } else if (fields.preset === 'http') {
     yield* assertOnlyFields(
       fields,
@@ -425,7 +425,7 @@ const createMetricResource = Effect.fn('createMetricResource')(function* (fields
       };
 
     if (fields.timeout !== undefined)
-      definition = { ...definition, timeout_ms: yield* parseDurationEffect(fields.timeout) };
+      definition = { ...definition, timeout_ms: yield* parseDuration(fields.timeout) };
   } else if (fields.preset !== undefined) {
     yield* assertOnlyFields(fields, ASSERTION_PRESET_FIELDS[fields.preset]);
     definition = yield* buildAssertionDefinition(fields);

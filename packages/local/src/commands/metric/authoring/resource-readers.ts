@@ -8,7 +8,7 @@ import {
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseJsonTextEffect, readSourceText } from '../../../internal/source-text.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import type { ReadInput } from '../../agent/authoring/types.js';
 import { assertSafeMetricResource } from './validation.js';
 
@@ -22,7 +22,7 @@ const readImportedMetricResource = Effect.fn('readImportedMetricResource')(funct
 ) {
   const text = yield* readSourceText(source, { path: '<path|->', readStdin, workingDirectory });
 
-  const value = yield* parseJsonTextEffect(text, {
+  const value = yield* parseJsonText(text, {
     path: '<path|->',
     hint: 'Provide one canonical metric resource or metric.add request.',
   });
@@ -55,7 +55,7 @@ const readMetricTestFixture = Effect.fn('readMetricTestFixture')(function* (
 ) {
   const text = yield* readSourceText(source, { path: '--fixture', readStdin, workingDirectory });
 
-  const value = yield* parseJsonTextEffect(text, {
+  const value = yield* parseJsonText(text, {
     path: '--fixture',
     hint: 'Provide one attest.metric-test-fixture document.',
   });

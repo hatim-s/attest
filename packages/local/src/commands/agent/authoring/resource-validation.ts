@@ -3,7 +3,11 @@ import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
-import { assertSafeHttpTemplate, findSensitiveBodyField } from './http-template-validation.js';
+import {
+  assertSafeHttpTemplate,
+  findLiteralSensitiveEntry,
+  findSensitiveBodyField,
+} from './http-template-validation.js';
 
 type TimeoutField = keyof NonNullable<AgentResource['timeouts']>;
 
@@ -41,17 +45,17 @@ const isLoopbackHost = (host: string): boolean =>
   host === 'localhost' || host === '::1' || host.startsWith('127.');
 
 /** Every header and query name the agent redacts must exist on one of its request templates. */
-const assertRedactionTargets = (
+const assertRedactionTargets = Effect.fn('assertRedactionTargets')(function* (
   agent: AgentResource,
   requests: readonly Pick<HttpRequestTemplate, 'headers' | 'query'>[],
-): void => {
+) {
   for (const name of agent.redaction?.headers ?? []) {
     const exists = requests.some(({ headers }) =>
       Object.keys(headers ?? {}).some((header) => header.toLowerCase() === name.toLowerCase()),
     );
 
     if (!exists) {
-      throw new LocalError('project_invalid', 'A header redaction target does not exist.', {
+      return yield* new LocalError('project_invalid', 'A header redaction target does not exist.', {
         path: `/agent/redaction/headers/${name}`,
       });
     }
@@ -59,16 +63,18 @@ const assertRedactionTargets = (
 
   for (const name of agent.redaction?.query ?? []) {
     if (!requests.some(({ query }) => Object.hasOwn(query ?? {}, name))) {
-      throw new LocalError('project_invalid', 'A query redaction target does not exist.', {
+      return yield* new LocalError('project_invalid', 'A query redaction target does not exist.', {
         path: `/agent/redaction/query/${name}`,
       });
     }
   }
-};
+});
 
 /** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
 // BOUNDARY: Authored transport resources cross the execution boundary here; secret references, headers and credential arguments are checked before invocation.
-const assertSafeNativeAgentResource = (agent: AgentResource): void => {
+const validateNativeAgentResource = Effect.fn('validateNativeAgentResource')(function* (
+  agent: AgentResource,
+) {
   const transport = agent.transport;
   const kind = transport.kind;
 
@@ -86,23 +92,32 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   if (unsupportedTimeout !== undefined || unsupportedLimit !== undefined) {
     const section = unsupportedTimeout === undefined ? 'limits' : 'timeouts';
     const field = unsupportedTimeout ?? unsupportedLimit!;
-    throw new LocalError('project_invalid', 'This runtime policy is unsupported by the adapter.', {
-      path: `/agent/${section}/${field}`,
-      hint: 'Remove the unsupported phase or select an adapter that enforces it.',
-    });
+
+    return yield* new LocalError(
+      'project_invalid',
+      'This runtime policy is unsupported by the adapter.',
+      {
+        path: `/agent/${section}/${field}`,
+        hint: 'Remove the unsupported phase or select an adapter that enforces it.',
+      },
+    );
   }
 
   if (
     (kind === 'native_cli' && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') ||
     (kind === 'jsonl_bridge' && (agent.retry?.retries ?? 0) > 0)
   ) {
-    throw new LocalError('project_invalid', 'This retry policy is unsafe for the adapter.', {
-      path: '/agent/retry',
-      hint:
-        kind === 'jsonl_bridge'
-          ? 'Set retries to zero; a sent bridge request is never replayed.'
-          : 'Use deterministic no-backoff retries for native per-case probes.',
-    });
+    return yield* new LocalError(
+      'project_invalid',
+      'This retry policy is unsafe for the adapter.',
+      {
+        path: '/agent/retry',
+        hint:
+          kind === 'jsonl_bridge'
+            ? 'Set retries to zero; a sent bridge request is never replayed.'
+            : 'Use deterministic no-backoff retries for native per-case probes.',
+      },
+    );
   }
 
   if (
@@ -114,16 +129,20 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
 
     for (const position of agent.redaction?.argv_positions ?? []) {
       if (position >= argv.length) {
-        throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
-          path: `/agent/redaction/argv_positions/${position}`,
-        });
+        return yield* new LocalError(
+          'project_invalid',
+          'An argv redaction position is out of range.',
+          {
+            path: `/agent/redaction/argv_positions/${position}`,
+          },
+        );
       }
     }
 
     const sensitivePosition = argv.findIndex((argument) => isSensitiveFieldName(argument));
 
     if (sensitivePosition >= 0) {
-      throw new LocalError(
+      return yield* new LocalError(
         'project_invalid',
         'Native argv cannot contain credential-like literals.',
         {
@@ -138,14 +157,15 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     if (transport.kind === 'native_cli') return;
 
     if (transport.readiness.kind === 'stderr') {
-      try {
-        new RegExp(transport.readiness.pattern, 'u');
-      } catch (error: unknown) {
-        throw new LocalError('project_invalid', 'Background readiness regex is invalid.', {
-          path: '/agent/transport/readiness/pattern',
-          cause: error,
-        });
-      }
+      const { pattern } = transport.readiness;
+      yield* Effect.try({
+        try: () => new RegExp(pattern, 'u'),
+        catch: (cause) =>
+          new LocalError('project_invalid', 'Background readiness regex is invalid.', {
+            path: '/agent/transport/readiness/pattern',
+            cause,
+          }),
+      });
     }
 
     const requests = [
@@ -157,17 +177,17 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
 
     const readinessUrl =
       transport.readiness.kind === 'http'
-        ? assertSafeHttpTemplate(
+        ? yield* assertSafeHttpTemplate(
             { url: transport.readiness.url, method: 'GET' },
             '/agent/transport/readiness/url',
           )
         : undefined;
 
     for (const { request, path } of requests) {
-      const url = assertSafeHttpTemplate(request, path);
+      const url = yield* assertSafeHttpTemplate(request, path);
 
       if (!isLoopbackHost(url.hostname)) {
-        throw new LocalError(
+        return yield* new LocalError(
           'project_invalid',
           'Background agents require loopback HTTP endpoints.',
           {
@@ -178,13 +198,17 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     }
 
     if (readinessUrl !== undefined && !isLoopbackHost(readinessUrl.hostname)) {
-      throw new LocalError('project_invalid', 'Background readiness requires a loopback URL.', {
-        path: '/agent/transport/readiness/url',
-      });
+      return yield* new LocalError(
+        'project_invalid',
+        'Background readiness requires a loopback URL.',
+        {
+          path: '/agent/transport/readiness/url',
+        },
+      );
     }
 
     if (transport.readiness.kind === 'tcp' && !isLoopbackHost(transport.readiness.host)) {
-      throw new LocalError(
+      return yield* new LocalError(
         'project_invalid',
         'Background TCP readiness requires a loopback host.',
         {
@@ -200,7 +224,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     const sensitiveTemplateField = findSensitiveBodyField(transport.request_template);
 
     if (sensitiveTemplateField !== undefined) {
-      throw new LocalError(
+      return yield* new LocalError(
         'project_invalid',
         'WebSocket request templates cannot contain credential-like fields.',
         {
@@ -210,40 +234,44 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       );
     }
 
-    let url: URL;
+    const templateUrl = transport.url;
 
-    try {
-      url = new URL(transport.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
-    } catch (error: unknown) {
-      throw new LocalError('project_invalid', 'WebSocket URL template is invalid.', {
-        path: '/agent/transport/url',
-        cause: error,
-      });
-    }
+    const url = yield* Effect.try({
+      try: () => new URL(templateUrl.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder')),
+      catch: (cause) =>
+        new LocalError('project_invalid', 'WebSocket URL template is invalid.', {
+          path: '/agent/transport/url',
+          cause,
+        }),
+    });
 
     if (url.username.length > 0 || url.password.length > 0) {
-      throw new LocalError('project_invalid', 'WebSocket URLs cannot contain credentials.', {
-        path: '/agent/transport/url',
-        hint: 'Move credentials to an environment-backed header reference.',
-      });
+      return yield* new LocalError(
+        'project_invalid',
+        'WebSocket URLs cannot contain credentials.',
+        {
+          path: '/agent/transport/url',
+          hint: 'Move credentials to an environment-backed header reference.',
+        },
+      );
     }
 
-    for (const [name, value] of Object.entries(transport.headers ?? {})) {
-      if (isSensitiveFieldName(name) && typeof value === 'string') {
-        throw new LocalError(
-          'project_invalid',
-          'Sensitive WebSocket headers must use references.',
-          {
-            path: `/agent/transport/headers/${name}`,
-            hint: 'Use `{ "from_env": "VARIABLE_NAME" }`; literal secrets are never authored.',
-          },
-        );
-      }
+    const literalHeader = findLiteralSensitiveEntry(transport.headers);
+
+    if (literalHeader !== undefined) {
+      return yield* new LocalError(
+        'project_invalid',
+        'Sensitive WebSocket headers must use references.',
+        {
+          path: `/agent/transport/headers/${literalHeader}`,
+          hint: 'Use `{ "from_env": "VARIABLE_NAME" }`; literal secrets are never authored.',
+        },
+      );
     }
 
     for (const [name, value] of url.searchParams) {
       if (isSensitiveFieldName(name) && value.length > 0) {
-        throw new LocalError(
+        return yield* new LocalError(
           'project_invalid',
           'Sensitive WebSocket query values are unsupported.',
           {
@@ -267,7 +295,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     ).flatMap(([field, request]) => (request === undefined ? [] : [{ field, request }]));
 
     for (const { field, request } of templates) {
-      assertSafeHttpTemplate(request, `/agent/transport/${field}`);
+      yield* assertSafeHttpTemplate(request, `/agent/transport/${field}`);
     }
 
     const publicUrl = transport.receiver?.public_url;
@@ -275,13 +303,13 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     // The agent sends the bearer token to this URL, so it must not cross the network in clear text.
     if (publicUrl !== undefined) {
       const path = '/agent/transport/receiver/public_url';
-      const url = assertSafeHttpTemplate({ url: publicUrl, method: 'POST' }, path);
+      const url = yield* assertSafeHttpTemplate({ url: publicUrl, method: 'POST' }, path);
 
       if (
         publicUrl.includes('{{') ||
         (url.protocol !== 'https:' && !isLoopbackHost(url.hostname))
       ) {
-        throw new LocalError(
+        return yield* new LocalError(
           'project_invalid',
           'The callback public URL must use HTTPS unless it is loopback.',
           { path, hint: 'Use an https:// URL without placeholders.' },
@@ -289,7 +317,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       }
     }
 
-    assertRedactionTargets(
+    yield* assertRedactionTargets(
       agent,
       templates.map(({ request }) => request),
     );
@@ -311,24 +339,32 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       transport.extraction.trace_pointer !== undefined ||
       transport.extraction.remote_job_id_pointer !== undefined)
   ) {
-    throw new LocalError('project_invalid', 'Native-envelope HTTP mapping is inconsistent.', {
-      path: '/agent/transport/response_mode',
-      hint: 'Use the canonical POST envelope shape or select mapped response mode.',
-    });
+    return yield* new LocalError(
+      'project_invalid',
+      'Native-envelope HTTP mapping is inconsistent.',
+      {
+        path: '/agent/transport/response_mode',
+        hint: 'Use the canonical POST envelope shape or select mapped response mode.',
+      },
+    );
   }
 
-  const origin = assertSafeHttpTemplate(request, requestPath);
+  const origin = yield* assertSafeHttpTemplate(request, requestPath);
 
   if (transport.kind === 'polling' && transport.status_url_template !== undefined) {
-    const status = assertSafeHttpTemplate(
+    const status = yield* assertSafeHttpTemplate(
       { url: transport.status_url_template.replaceAll('{{job_id}}', 'job'), method: 'GET' },
       '/agent/transport/status_url_template',
     );
 
     if (status.origin !== origin.origin) {
-      throw new LocalError('project_invalid', 'Polling status URL must retain submit origin.', {
-        path: '/agent/transport/status_url_template',
-      });
+      return yield* new LocalError(
+        'project_invalid',
+        'Polling status URL must retain submit origin.',
+        {
+          path: '/agent/transport/status_url_template',
+        },
+      );
     }
   }
 
@@ -337,24 +373,16 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     transport.incremental_output_pointer !== undefined &&
     transport.incremental_output_mode === undefined
   ) {
-    throw new LocalError('project_invalid', 'Streaming accumulation requires an explicit mode.', {
-      path: '/agent/transport/incremental_output_mode',
-    });
+    return yield* new LocalError(
+      'project_invalid',
+      'Streaming accumulation requires an explicit mode.',
+      {
+        path: '/agent/transport/incremental_output_mode',
+      },
+    );
   }
 
-  assertRedactionTargets(agent, [request]);
-};
-
-/** Runs native agent validation in the typed error channel while preserving unexpected defects. */
-const validateNativeAgentResource = Effect.fn('validateNativeAgentResource')(function* (
-  agent: AgentResource,
-) {
-  return yield* Effect.try({
-    try: () => assertSafeNativeAgentResource(agent),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
+  yield* assertRedactionTargets(agent, [request]);
 });
 
-export { assertSafeNativeAgentResource, validateNativeAgentResource };
+export { validateNativeAgentResource };

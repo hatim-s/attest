@@ -221,7 +221,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
 
                 return {
                   ...mutationRequestFields('agent.add', options),
-                  agent: createAgentResource(guided),
+                  agent: yield* createAgentResource(guided),
                 };
               }),
           });

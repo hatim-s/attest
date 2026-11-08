@@ -187,11 +187,7 @@ const createEvalRunRequest = Effect.fn('createEvalRunRequest')(function* (
   if (fields.timeout !== undefined)
     request = {
       ...request,
-      timeout_ms: yield* Effect.try({
-        try: () => parseDuration(fields.timeout ?? ''),
-        catch: (cause) =>
-          cause instanceof Error ? cause : new Error('Duration parsing failed.', { cause }),
-      }),
+      timeout_ms: yield* parseDuration(fields.timeout),
     };
 
   if (fields.baseline !== undefined) request = { ...request, baseline_run_id: fields.baseline };

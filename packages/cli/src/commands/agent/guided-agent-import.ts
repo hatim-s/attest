@@ -28,11 +28,7 @@ const promptCredentialBindings = Effect.fn('promptCredentialBindings')(function*
 
   // Reparse after each binding; the captured value is never copied into a prompt.
   for (let asked = 0; asked < MAX_CREDENTIAL_PROMPTS; asked += 1) {
-    const credential = yield* Effect.try({
-      try: () => findUnboundCurlCredential(curlSource, { headerEnv, queryEnv }),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error('Credential parsing failed.', { cause }),
-    });
+    const credential = yield* findUnboundCurlCredential(curlSource, { headerEnv, queryEnv });
 
     if (credential === undefined) break;
     const flag = credential.kind === 'header' ? '--header-env' : '--query-env';

@@ -150,7 +150,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
             };
 
             if (options.name !== undefined) request = { ...request, name: options.name };
-            yield* runImport(validateCommandRequest('agent.import', request));
+            yield* runImport(yield* validateCommandRequest('agent.import', request));
 
             return;
           }
@@ -175,7 +175,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
           for (let attempt = 1; ; attempt += 1) {
             const attempted = yield* Effect.exit(
               Effect.gen(function* () {
-                yield* runImport(createCurlImportRequest(fields), curlSource);
+                yield* runImport(yield* createCurlImportRequest(fields), curlSource);
               }),
             );
 

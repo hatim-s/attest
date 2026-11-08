@@ -1,8 +1,13 @@
-import { LocalError } from '../../errors/index.js';
 import * as Effect from 'effect/Effect';
 
+import { LocalError } from '../../errors/index.js';
+
 /** Parses repeatable `NAME=VALUE` flags into a record; a repeated name keeps the last value. */
-const parseNameValuePairs = (values: readonly string[], path: string, hint: string) => {
+const parseNameValuePairs = Effect.fn('parseNameValuePairs')(function* (
+  values: readonly string[],
+  path: string,
+  hint: string,
+) {
   const pairs: Record<string, string> = {};
 
   for (const value of values) {
@@ -11,41 +16,32 @@ const parseNameValuePairs = (values: readonly string[], path: string, hint: stri
     const content = value.slice(separator + 1).trim();
 
     if (separator <= 0 || name.length === 0 || content.length === 0) {
-      throw new LocalError('cli_usage', `Invalid ${path} value: ${value}.`, { path, hint });
+      return yield* new LocalError('cli_usage', `Invalid ${path} value: ${value}.`, { path, hint });
     }
 
     pairs[name] = content;
   }
 
   return pairs;
-};
+});
 
 /**
  * Parses repeatable `TARGET=SOURCE_ENV` flags into environment secret references. Only the
  * environment variable name is stored; the secret value is read at invocation time.
  */
-const parseSecretBindings = (values: readonly string[], path: string) =>
-  Object.fromEntries(
-    Object.entries(
-      parseNameValuePairs(
-        values,
-        path,
-        'Use TARGET_NAME=SOURCE_ENV; only the environment variable name is stored.',
-      ),
-    ).map(([target, source]) => [target, { from_env: source }]),
-  );
-
-/** Parses secret bindings in the typed channel for native Effect command builders. */
-const parseSecretBindingsEffect = Effect.fn('parseSecretBindingsEffect')(function* (
+const parseSecretBindings = Effect.fn('parseSecretBindings')(function* (
   values: readonly string[],
   path: string,
 ) {
-  return yield* Effect.try({
-    try: () => parseSecretBindings(values, path),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  const pairs = yield* parseNameValuePairs(
+    values,
+    path,
+    'Use TARGET_NAME=SOURCE_ENV; only the environment variable name is stored.',
+  );
+
+  return Object.fromEntries(
+    Object.entries(pairs).map(([target, source]) => [target, { from_env: source }]),
   );
 });
 
-export { parseNameValuePairs, parseSecretBindings, parseSecretBindingsEffect };
+export { parseNameValuePairs, parseSecretBindings };

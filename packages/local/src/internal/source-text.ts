@@ -5,8 +5,6 @@ import { resolve } from 'node:path';
 import * as Effect from 'effect/Effect';
 import * as Schema from 'effect/Schema';
 
-import type { JsonValue } from '@attest/contracts';
-
 import { LocalError } from '../errors/index.js';
 
 type ReadSourceTextOptions = {
@@ -43,30 +41,23 @@ const readSourceText = Effect.fn('readSourceText')(function* (
   });
 });
 
-/** Parses one JSON document; the error never echoes the text because it may hold secrets. */
-const parseJsonText = (text: string, options: ParseJsonTextOptions): JsonValue => {
-  try {
-    return parseWithSchemaSync(Schema.Json, JSON.parse(text));
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', `${options.path} is not valid JSON.`, {
-      path: options.path,
-      hint: options.hint ?? 'Provide exactly one valid JSON document.',
-      cause: error,
-    });
-  }
-};
-
-/** Parses JSON in the typed channel while preserving unexpected parser failures as defects. */
-const parseJsonTextEffect = Effect.fn('parseJsonTextEffect')(function* (
+/**
+ * Parses one JSON document. The synchronous `JSON.parse` failure maps once to a LocalError
+ * that never echoes the text, because the text may hold secrets.
+ */
+const parseJsonText = Effect.fn('parseJsonText')(function* (
   text: string,
   options: ParseJsonTextOptions,
 ) {
   return yield* Effect.try({
-    try: () => parseJsonText(text, options),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
-  );
+    try: () => parseWithSchemaSync(Schema.Json, JSON.parse(text)),
+    catch: (cause) =>
+      new LocalError('cli_usage', `${options.path} is not valid JSON.`, {
+        path: options.path,
+        hint: options.hint ?? 'Provide exactly one valid JSON document.',
+        cause,
+      }),
+  });
 });
 
-export { parseJsonText, parseJsonTextEffect, readSourceText };
+export { parseJsonText, readSourceText };
