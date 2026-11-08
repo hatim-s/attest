@@ -22,7 +22,6 @@ import * as Schema from 'effect/Schema';
 import { runsQueryOptions } from './api/queries.js';
 import { projectOverviewQueryOptions } from './api/queries/projects.js';
 import type { DashboardSource } from './api/dashboard-source.js';
-import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
 import { DirectoryPage } from './routes/directory/directory-page.js';
 import { ProjectPage } from './routes/project/project-page.js';
@@ -164,12 +163,6 @@ const compareRoute = createRoute({
   component: ComparePage,
 });
 
-const evalsRoute = createRoute({
-  getParentRoute: () => workspaceRoute,
-  path: 'evals',
-  component: EvalsPage,
-});
-
 const evalRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'evals/$suiteName',
@@ -192,7 +185,6 @@ const routeTree = rootRoute.addChildren([
     workspaceRoute.addChildren([
       runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
       compareRoute,
-      evalsRoute,
       evalRoute,
     ]),
   ]),

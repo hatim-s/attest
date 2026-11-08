@@ -33,8 +33,6 @@ const useCurrentTarget = (sourceId: string): ShellTarget =>
             projectKey: match.params.projectKey,
             runId: match.params.candidateRunId,
           };
-        case '/projects/$projectKey/workspace/evals':
-          return { kind: 'project', sourceId, projectKey: match.params.projectKey };
         case '/projects/$projectKey/workspace/evals/$suiteName':
           return {
             kind: 'runs',

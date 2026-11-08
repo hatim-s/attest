@@ -137,39 +137,12 @@ const runSuitesQueryOptions = (
     refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
   });
 
-/** Shares suite totals between a run and the evals index. */
+/** Suite totals for the run page. */
 const useRunSuites = (
   projectKey: string,
   runId: string | undefined,
   status: RunStatus | undefined,
 ) => useQuery(runSuitesQueryOptions(useApiClient(), projectKey, runId, status));
-
-/** Walks past running-only pages so evals always starts from the newest finished run. */
-const newestCompletedRunQueryOptions = (client: ApiClient, projectKey: string) =>
-  queryOptions({
-    queryKey: ['newest-completed-run', projectKey],
-    queryFn: async ({ signal }) => {
-      let cursor: string | undefined;
-
-      do {
-        const page = await Effect.runPromise(
-          client.listRuns({ projectKey }, { cursor }, { signal }),
-        );
-
-        const run = page.items.find((item) => item.status !== 'running');
-
-        if (run !== undefined) return run;
-        cursor = page.nextCursor;
-      } while (cursor !== undefined);
-
-      return null;
-    },
-    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
-  });
-
-/** Refreshes the eval catalog when a new run completes. */
-const useNewestCompletedRun = (projectKey: string) =>
-  useQuery(newestCompletedRunQueryOptions(useApiClient(), projectKey));
 
 /** Reads an eval's newest slices from stored totals; refreshes on focus instead of polling. */
 const evalRunsQueryOptions = (
@@ -227,9 +200,7 @@ const useCancelRun = (projectKey: string, runId: string) => {
 };
 
 export {
-  newestCompletedRunQueryOptions,
   evalRunsQueryOptions,
-  useNewestCompletedRun,
   useEvalRuns,
   runSuitesQueryOptions,
   useRunSuites,
