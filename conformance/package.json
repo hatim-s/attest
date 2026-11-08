@@ -6,7 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:fuzz": "FUZZ=1 vitest run src/fuzz",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node ../node_modules/typescript7/bin/tsc --noEmit"
   },
   "devDependencies": {
     "@attest/contracts": "workspace:*",

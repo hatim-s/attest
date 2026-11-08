@@ -21,9 +21,9 @@
     "effect": "4.1.2"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node ../../node_modules/typescript7/bin/tsc -p tsconfig.build.json",
     "test": "vitest run --maxWorkers=1 --exclude 'src/acceptance/**'",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../node_modules/typescript7/bin/tsc --noEmit -p tsconfig.json",
     "prepublishOnly": "node ../../scripts/block-source-publish.mjs",
     "test:acceptance": "vitest run --config vitest.acceptance.config.ts"
   },

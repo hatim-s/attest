@@ -19,16 +19,16 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck && bun run typecheck:scripts",
-    "lint": "eslint .",
+    "lint": "eslint . --cache --cache-strategy content --cache-location node_modules/.cache/eslint/",
     "test": "turbo run test --concurrency=1",
-    "generate:schemas": "bun run --cwd packages/schemas generate",
+    "generate:schemas": "turbo run generate --filter=@attest/schemas",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "lint:fix": "eslint --fix .",
     "test:fuzz": "turbo run test:fuzz --filter=@attest/conformance",
     "release:pack": "bun run build && bun run generate:schemas && bun scripts/pack-release.ts",
     "release:check": "bun run release:pack && bun scripts/check-release.ts",
-    "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
+    "typecheck:scripts": "node node_modules/typescript7/bin/tsc --noEmit -p scripts/tsconfig.json",
     "test:portability": "bun run --cwd packages/executor test:node && bun run --cwd packages/executor test:bun && bun run --cwd packages/runtime test:node && bun run --cwd packages/runtime test:bun",
     "test:acceptance": "bun run build && bun run --cwd packages/cli test:acceptance",
     "test:lint-rules": "node tools/anti-slop/_tests_/run.mjs"
@@ -38,8 +38,9 @@
     "eslint": "^9",
     "prettier": "^3",
     "turbo": "^2",
-    "typescript": "^5",
+    "typescript": "5.9.3",
     "typescript-eslint": "^8",
+    "typescript7": "npm:typescript@7.0.2",
     "vitest": "^3"
   }
 }

@@ -1,17 +1,32 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["tsconfig.base.json"],
+  "globalDependencies": ["tsconfig.base.json", "package.json", "bun.lock"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "*.tsbuildinfo"],
+      "env": ["NODE_ENV", "VITE_*"]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "outputs": ["*.tsbuildinfo"]
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/schemas/generated/**"]
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/schemas/generated/**"],
+      "env": [
+        "CI",
+        "FUZZ",
+        "FUZZ_ITERATIONS",
+        "VITEST_MAX_THREADS",
+        "VITEST_MAX_FORKS",
+        "ATTEST_HOME",
+        "ATTEST_CLOUD_URL",
+        "ATTEST_CLOUD_TOKEN",
+        "ATTEST_WS_TOKEN",
+        "ATTEST_EVAL_METRIC_SECRET",
+        "ATTEST_SOURCE_SECRET"
+      ]
     },
     "test:acceptance": {
       "dependsOn": ["^build", "build"],
@@ -21,6 +36,13 @@
       "dependsOn": ["^build"],
       "cache": false,
       "env": ["FUZZ_ITERATIONS"]
+    },
+    "generate": {
+      "dependsOn": ["^build"],
+      "outputs": ["generated/**"]
+    },
+    "@attest/site#typecheck": {
+      "outputs": []
     }
   }
 }
