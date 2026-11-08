@@ -68,7 +68,7 @@ type InvokeResolvedAgentOptions = {
 const startAgentRuntime = Effect.fn('startAgentRuntime')(function* (
   resolved: ResolvedNativeAgent,
   signal?: AbortSignal,
-): Effect.fn.Return<AgentRuntime, Error, Scope.Scope> {
+): Effect.fn.Return<AgentRuntime, AgentInvocationError, Scope.Scope> {
   switch (resolved.kind) {
     case 'background':
       return {

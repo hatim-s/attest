@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect';
 import type { StoredMetricEvaluation } from '@attest/core';
 import type { MetricContext } from '@attest/runtime';
 
-import { LocalError } from '../../errors/index.js';
+import { LocalError, classifyForeignFailure } from '../../errors/index.js';
 import { redactProbeValue } from '../agent/adapter/evidence-redaction.js';
 import { evaluateMetricResource } from '../eval/eval-metric-runner.js';
 import { loadCommandProject } from '../project/load-command-project.js';
@@ -86,7 +86,7 @@ const runMetricTestCommand = Effect.fn('runMetricTestCommand')(function* (
     id: metric.id,
     projectRoot: loaded.root,
     signal: options.signal,
-  });
+  }).pipe(Effect.mapError(classifyForeignFailure));
 
   const redacted = redactProbeValue(withoutDuration(evaluation), secrets);
 

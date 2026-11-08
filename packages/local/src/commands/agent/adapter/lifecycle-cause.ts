@@ -20,22 +20,25 @@ const recoverOrdinary = <A, B, E extends Error, E2 extends Error, R, R2>(
   });
 
 /** Keeps the primary Cause and attaches every release Cause without replacing its classification. */
-const finishWithRelease = <A, E extends Error>(
+const finishWithRelease = <A, E, E2 extends Error>(
   primary: Exit.Exit<A, E>,
-  releases: readonly Exit.Exit<unknown, Error>[],
-) => {
+  releases: readonly Exit.Exit<unknown, E2>[],
+): Effect.Effect<A, E | E2> => {
   const causes = releases.flatMap((exit) => (Exit.isFailure(exit) ? [exit.cause] : []));
 
   if (Exit.isFailure(primary))
     return Effect.failCause(
       causes.length === 0
         ? primary.cause
-        : causes.reduce((left, right) => Cause.combine(left, right), primary.cause),
+        : causes.reduce<Cause.Cause<E | E2>>(
+            (left, right) => Cause.combine(left, right),
+            primary.cause,
+          ),
     );
 
   if (causes.length > 0)
     return Effect.failCause(
-      causes.reduce((left, right) => Cause.combine(left, right), Cause.empty),
+      causes.reduce<Cause.Cause<E2>>((left, right) => Cause.combine(left, right), Cause.empty),
     );
 
   return Effect.succeed(primary.value);

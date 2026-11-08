@@ -12,6 +12,7 @@ import {
   type EvalEvent,
   type EvalEventStream,
 } from '@attest/contracts';
+import { classifyForeignFailure } from '@attest/local';
 
 import {
   AttestCliError,
@@ -203,7 +204,7 @@ const collectEvalEvents = (source: EvalEventSource, options: CollectEvalEventsOp
       Effect.gen(function* () {
         const stream =
           Symbol.asyncIterator in source
-            ? Stream.fromAsyncIterable(source, (cause: unknown) => cause)
+            ? Stream.fromAsyncIterable(source, classifyForeignFailure)
             : Stream.fromIterable(source);
 
         yield* Stream.runForEach(stream, (value) =>

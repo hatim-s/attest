@@ -156,7 +156,9 @@ describe('runCli', () => {
           eval: {
             runConfiguration: (request, options) =>
               runConfiguration(request, options).pipe(
-                Effect.flatMap(() => (kind === 'typed' ? Effect.fail(error) : Effect.die(error))),
+                Effect.flatMap(() =>
+                  error instanceof LocalError ? Effect.fail(error) : Effect.die(error),
+                ),
                 Effect.onExit(() => Effect.promise(() => replaceOpeningAlias(root))),
               ),
           },

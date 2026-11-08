@@ -202,7 +202,8 @@ const loadMutationState = Effect.fn('loadMutationState')(function* (
 /** Rolls back a failed publication while retaining its primary Cause and cleanup uncertainty. */
 const runPreparedTransaction = Effect.fn('runPreparedTransaction')(function* <
   E extends Error,
-  E2 extends Error,
+  // Without the default, a call with no beforePublish infers E2 as its Error constraint.
+  E2 extends Error = never,
 >(options: {
   root: string;
   prepared: PreparedTransaction;

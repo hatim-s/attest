@@ -1,7 +1,9 @@
 import { AttestError, type CliError, type CliExitCode, type JsonValue } from '@attest/contracts';
-import { LocalError } from '@attest/local';
+import { LocalError, classifyForeignFailure, type LocalInfrastructureFailure } from '@attest/local';
 import { StoreError } from '@attest/core';
 import { CommanderError } from 'commander';
+import * as Cause from 'effect/Cause';
+import * as Result from 'effect/Result';
 
 import { getCliErrorDefinition, type CliErrorCode } from './error-catalog.js';
 
@@ -33,33 +35,75 @@ class AttestCliError extends AttestError {
 }
 
 /**
- * Maps any thrown value to a catalog error and exit code. Unknown errors lose their message
- * because it can carry paths, secrets, or stack details.
+ * Every failure a command program can end with. Any `AttestError` subclass, including a future
+ * one, renders by design as `unclassified` with its `cause_code`. Only the tagged members outside
+ * `AttestError` are checked at compile time: a new one fails `serializeCliFailure`'s exhaustive
+ * switch until it gets a rendering.
  */
-const serializeCliError = (cause: unknown): SerializedCliFailure => {
-  if (cause instanceof AttestCliError || cause instanceof LocalError) {
-    const definition = getCliErrorDefinition(cause.code);
+type CliCommandFailure =
+  /** CLI flag, prompt and output failures with catalog codes. */
+  | AttestCliError
+  /** Local application failures with catalog codes, including project load and transactions. */
+  | LocalError
+  /** Coded errors from core, executor and runtime that the CLI catalog does not name. */
+  | AttestError
+  | StoreError
+  /** Uncoded filesystem, process and listener failures inside local operations. */
+  | LocalInfrastructureFailure
+  /** Failures of foreign code: agent transports, metrics, the eval event stream, callbacks. */
+  | Cause.UnknownError;
+
+/** What the root renders: a command failure, or Commander's own usage error from parsing. */
+type CliFailure = CliCommandFailure | CommanderError;
+
+/** Builds the catalog envelope shared by every internal error. */
+const internalFailure = (message: string, details?: JsonValue): SerializedCliFailure => {
+  const definition = getCliErrorDefinition('internal_error');
+
+  return {
+    error: {
+      code: definition.code,
+      message,
+      hint: definition.repairs[0],
+      retryable: definition.retryable,
+      details,
+    },
+    exitCode: definition.exit_code,
+  };
+};
+
+/** A coded error outside the CLI catalog keeps only its code, under `details.cause_code`. */
+const unclassifiedFailure = (code: string): SerializedCliFailure =>
+  internalFailure('The command failed with an unclassified Attest error.', { cause_code: code });
+
+/**
+ * Maps one typed failure to its catalog error and exit code. An uncoded failure loses its
+ * message because it can carry paths, secrets, or stack details.
+ */
+const serializeCliFailure = (failure: CliFailure): SerializedCliFailure => {
+  if (failure instanceof AttestCliError || failure instanceof LocalError) {
+    const definition = getCliErrorDefinition(failure.code);
 
     return {
       error: {
-        code: cause.code,
-        message: cause.message,
-        path: cause.path,
-        hint: cause.hint,
+        code: failure.code,
+        message: failure.message,
+        path: failure.path,
+        hint: failure.hint,
         retryable: definition.retryable,
-        details: cause.details,
+        details: failure.details,
       },
       exitCode: definition.exit_code,
     };
   }
 
-  if (cause instanceof CommanderError) {
+  if (failure instanceof CommanderError) {
     const definition = getCliErrorDefinition('cli_usage');
 
     return {
       error: {
         code: definition.code,
-        message: cause.message,
+        message: failure.message,
         hint: definition.repairs[0],
         retryable: definition.retryable,
       },
@@ -67,24 +111,35 @@ const serializeCliError = (cause: unknown): SerializedCliFailure => {
     };
   }
 
-  const definition = getCliErrorDefinition('internal_error');
+  if (failure instanceof AttestError) return unclassifiedFailure(failure.code);
 
-  const applicationCause =
-    cause instanceof AttestError || cause instanceof StoreError ? cause : undefined;
+  switch (failure._tag) {
+    case 'StoreError':
+      return unclassifiedFailure(failure.code);
+    case 'AnchoredFileFailure':
+    case 'AnchoredCleanupFailure':
+    case 'ProcessPresenceFailure':
+    case 'ViewServerFailure':
+    case 'UnknownError':
+      return internalFailure('The command failed with an unknown internal error.');
+  }
+};
 
-  return {
-    error: {
-      code: definition.code,
-      message:
-        applicationCause === undefined
-          ? 'The command failed with an unknown internal error.'
-          : 'The command failed with an unclassified Attest error.',
-      hint: definition.repairs[0],
-      retryable: definition.retryable,
-      details: applicationCause === undefined ? undefined : { cause_code: applicationCause.code },
-    },
-    exitCode: definition.exit_code,
-  };
+/** Maps a squashed Cause, a failure or a defect value, the way `serializeCliFailure` maps it. */
+const serializeCliError = (cause: unknown): SerializedCliFailure =>
+  serializeCliFailure(cause instanceof CommanderError ? cause : classifyForeignFailure(cause));
+
+/**
+ * Maps a failed command Cause. Its first typed failure renders by type; only a Cause without one,
+ * a defect or an interruption, renders its squashed value. `Cause.squash` also picks the first
+ * failure, so both paths report the same value.
+ */
+const serializeCliCause = (cause: Cause.Cause<CliFailure>): SerializedCliFailure => {
+  const failure = Cause.findError(cause);
+
+  return Result.isSuccess(failure)
+    ? serializeCliFailure(failure.success)
+    : serializeCliError(Cause.squash(cause));
 };
 
 /** Renders an error for stderr as code, message, path, and hint lines, never a stack. */
@@ -98,4 +153,13 @@ const renderCliError = (error: CliError): string => {
   return lines.join('\n');
 };
 
-export { AttestCliError, renderCliError, serializeCliError, type SerializedCliFailure };
+export {
+  AttestCliError,
+  renderCliError,
+  serializeCliCause,
+  serializeCliError,
+  serializeCliFailure,
+  type CliCommandFailure,
+  type CliFailure,
+  type SerializedCliFailure,
+};

@@ -111,7 +111,7 @@ const startFixtureServer = async (
 
   const server = await startOwnedServer({
     catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
-    close: () => Effect.tryPromise(() => store.close()),
+    close: () => Effect.promise(() => store.close()),
     control,
     indexHtml: dashboardHtml,
   });
@@ -318,7 +318,7 @@ describe('view server', () => {
               if (Exit.isFailure(primary))
                 expect(primary.cause.reasons[0]).toMatchObject({ error: { code: 'EADDRINUSE' } });
 
-              return Effect.fail(cleanup);
+              return Effect.die(cleanup);
             },
           }),
         ),
@@ -335,7 +335,7 @@ describe('view server', () => {
         );
 
         expect(receipts).toHaveLength(1);
-        expect(receipts?.[0]).toEqual(Exit.fail(cleanup));
+        expect(receipts?.[0]).toEqual(Exit.die(cleanup));
         expect(Cause.hasDies(outcome.cause)).toBe(false);
       }
     } finally {

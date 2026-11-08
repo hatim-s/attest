@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import type { JsonValue } from '@attest/contracts';
 
-import { LocalError } from '../../errors/index.js';
+import { LocalError, classifyForeignFailure } from '../../errors/index.js';
 import { anchoredCall } from '../../internal/open-anchored.js';
 import { parseJsonText, readSourceText } from '../../internal/source-text.js';
 import { openStore, withStoreScope } from '../../store/index.js';
@@ -77,7 +77,7 @@ const runAgentTestCommand = Effect.fn('runAgentTestCommand')(function* (
       projectRoot: loaded.root,
       runId: recording?.runId,
       signal: options.signal,
-    });
+    }).pipe(Effect.mapError(classifyForeignFailure));
 
   const result =
     request.record !== true
