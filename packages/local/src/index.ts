@@ -7,6 +7,7 @@ export {
 
 export {
   LocalError,
+  classifyForeignFailure,
   type AnchoredCleanupFailure,
   type AnchoredFileFailure,
   type LocalErrorCode,

@@ -10,7 +10,7 @@ import type * as CloudAdapter from '@attest/local/cloud';
 import type * as EvalAdapter from '@attest/local/eval';
 
 import type { CliInteraction } from './cli-interaction.js';
-import type { SerializedCliFailure } from '../../errors/cli-error.js';
+import type { CliCommandFailure, SerializedCliFailure } from '../../errors/cli-error.js';
 
 type CliIo = {
   error: (message: string) => void;
@@ -42,7 +42,7 @@ type CliServices = {
  */
 type CommandProgram = Effect.Effect<
   CliExitCode | void,
-  unknown,
+  CliCommandFailure,
   EvalApplication | CancellationRegistry
 >;
 

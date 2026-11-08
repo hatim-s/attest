@@ -1,7 +1,7 @@
 import * as Effect from 'effect/Effect';
 import * as Cause from 'effect/Cause';
 import * as Exit from 'effect/Exit';
-import { tryPromiseClassify } from '@attest/contracts';
+import { tryPromiseClassify, type CliExitCode } from '@attest/contracts';
 import { withEvalApplication } from '@attest/local/eval';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -39,7 +39,9 @@ import { registerTestCommands } from './commands/test/registration/register-test
 import {
   AttestCliError,
   renderCliError,
+  serializeCliCause,
   serializeCliError,
+  type CliFailure,
   type SerializedCliFailure,
 } from './errors/cli-error.js';
 import { resultCommandName, setCliCommandHelpMetadata } from './help/command-help.js';
@@ -247,77 +249,70 @@ const runCliApplication = (
       return failure === undefined ? 0 : reportFailure(failure);
     };
 
-    let commandCause: Cause.Cause<unknown> | undefined;
+    const parsed = yield* Effect.exit(
+      // Parsing rejects with Commander usage errors and option validation; anything else is a
+      // defect. Both reach the same report through `Cause.squash`.
+      tryPromiseClassify(
+        () => program.parseAsync(argv, { from: 'user' }),
+        (error) =>
+          error instanceof CommanderError || error instanceof AttestCliError ? error : undefined,
+      ),
+    );
 
-    try {
-      const parsed = yield* Effect.exit(
-        // Parsing rejects with Commander usage errors and option validation; anything else is a
-        // defect. Both reach the same report through `Cause.squash`.
-        tryPromiseClassify(
-          () => program.parseAsync(argv, { from: 'user' }),
-          (error) =>
-            error instanceof CommanderError || error instanceof AttestCliError ? error : undefined,
-        ),
-      );
+    const cancelled = Effect.callback<never, AttestCliError>((resume) => {
+      const abort = () =>
+        resume(Effect.fail(new AttestCliError('cancelled', 'Command cancelled.')));
 
-      const cancelled = Effect.callback<never, AttestCliError>((resume) => {
-        const abort = () =>
-          resume(Effect.fail(new AttestCliError('cancelled', 'Command cancelled.')));
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
 
-        if (signal.aborted) abort();
-        else signal.addEventListener('abort', abort, { once: true });
+      return Effect.sync(() => signal.removeEventListener('abort', abort));
+    });
 
-        return Effect.sync(() => signal.removeEventListener('abort', abort));
-      });
+    // Owners join terminal evidence or normal shutdown before the root reports failures.
+    const execution =
+      selected === undefined
+        ? undefined
+        : cancellation?.cancellation === 'owned'
+          ? selected.pipe(
+              Effect.catchCause((cause) => {
+                const error = Cause.squash(cause);
 
-      // Owners join terminal evidence or normal shutdown before the root reports failures.
-      const execution =
-        selected === undefined
-          ? undefined
-          : cancellation?.cancellation === 'owned'
-            ? selected.pipe(
-                Effect.catchCause((cause) => {
-                  const error = Cause.squash(cause);
+                if (!signal.aborted) return Effect.failCause(cause);
 
-                  if (!signal.aborted) return Effect.failCause(cause);
+                return Effect.fail(
+                  new AttestCliError(
+                    'cancelled',
+                    cancellation?.cancellationMessage ?? 'Command cancelled.',
+                    { cause: error },
+                  ),
+                );
+              }),
+            )
+          : cancellation?.cancellation === 'shutdown'
+            ? selected
+            : Effect.raceFirst(selected, cancelled);
 
-                  return Effect.fail(
-                    new AttestCliError(
-                      'cancelled',
-                      cancellation?.cancellationMessage ?? 'Command cancelled.',
-                      { cause: error },
-                    ),
-                  );
-                }),
-              )
-            : cancellation?.cancellation === 'shutdown'
-              ? selected
-              : Effect.raceFirst(selected, cancelled);
+    // Commander selects the program; its application owner observes the complete command Exit.
+    const executed: Exit.Exit<CliExitCode | void, CliFailure> =
+      Exit.isFailure(parsed) || execution === undefined
+        ? Exit.asVoid(parsed)
+        : yield* Effect.exit(execution.pipe(Effect.provideContext(evalContext)));
 
-      // Commander selects the program; its application owner observes the complete command Exit.
-      const executed =
-        Exit.isFailure(parsed) || execution === undefined
-          ? Exit.asVoid(parsed)
-          : yield* Effect.exit(execution.pipe(Effect.provideContext(evalContext)));
+    // A command that published its own verdict, such as a failed eval gate, returns its code;
+    // store release can still replace that verdict.
+    if (Exit.isSuccess(executed)) return executed.value ?? 0;
 
-      if (Exit.isFailure(executed)) {
-        commandCause = executed.cause;
-        throw Cause.squash(executed.cause);
-      }
+    const error = Cause.squash(executed.cause);
 
-      // A command that published its own verdict, such as a failed eval gate, returns its code;
-      // store release can still replace that verdict.
-      return executed.value ?? 0;
-    } catch (error: unknown) {
-      if (error instanceof CommanderError && error.exitCode === 0) return 0;
+    if (error instanceof CommanderError && error.exitCode === 0) return 0;
 
-      const failure = serializeCliError(error);
-      // Commander already owns this primary failure; a later store release cannot replace it.
-      completion.publish = () => reportFailure(failure, error instanceof CommanderError);
+    const failure = serializeCliCause(executed.cause);
+    // Commander already owns this primary failure; a later store release cannot replace it.
+    completion.publish = () => reportFailure(failure, error instanceof CommanderError);
 
-      // The application must see failure before joining admitted runs. Publication waits for release.
-      return yield* Effect.failCause(commandCause ?? Cause.die(error));
-    }
+    // The application must see failure before joining admitted runs. Publication waits for release.
+    return yield* Effect.failCause(executed.cause);
   });
 
 export { runCli, type RunCliOptions };
