@@ -1,5 +1,7 @@
 export { AttestError } from './errors/attest-error.js';
 
+export { tryOwned } from './errors/try-owned.js';
+
 export type { Result } from './result.js';
 
 export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './schema/json-schema.js';

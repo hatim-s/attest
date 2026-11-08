@@ -459,6 +459,11 @@ const effectRoots = [
     owner: 'contracts decoder invariant tests',
   },
   {
+    file: 'packages/contracts/src/_tests_/error.test.ts',
+    operations: ['Effect.runSyncExit'],
+    owner: 'contracts owned-error invariant tests',
+  },
+  {
     file: 'packages/local/src/_tests_/support/project-transaction.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'transaction and caller invariant test root',
