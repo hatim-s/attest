@@ -25,13 +25,14 @@ type ReadRequestDocumentOptions = ReadCommandRequestOptions & {
   hint: string;
 };
 
-// BOUNDARY: CLI command documents are untrusted JSON; commandRequestSchema validates the complete document and expected command discriminant.
-const parseCommandRequest = <TCommand extends CommandRequest['command']>(
-  command: TCommand,
-  value: unknown,
-  path: string | undefined,
-) =>
-  Effect.gen(function* () {
+/** Validates one command request document or flag draft and checks it targets `command`. */
+const parseCommandRequest = Effect.fn('parseCommandRequest')(
+  // BOUNDARY: CLI command documents are untrusted JSON; commandRequestSchema validates the complete document and expected command discriminant.
+  function* <TCommand extends CommandRequest['command']>(
+    command: TCommand,
+    value: unknown,
+    path: string | undefined,
+  ) {
     const parsed = parseWithSchema(commandRequestSchema, value);
 
     if (!parsed.ok) {
@@ -51,7 +52,8 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
 
     // SAFETY: The complete request schema passed and its command discriminant equals the generic command argument above.
     return parsed.value as CommandRequestFor<TCommand>;
-  });
+  },
+);
 
 /**
  * Validates a request built from CLI flags through the same published schema as `--from-json`,

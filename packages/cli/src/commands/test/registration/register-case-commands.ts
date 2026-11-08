@@ -85,9 +85,6 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 );
 
                 const input = yield* parseJsonFlag(inputText, '--input');
-
-                if (input === undefined)
-                  return yield* Effect.die(new Error('Required input JSON was not parsed.'));
                 const authoredCase: AuthoredCaseDraft = { input };
 
                 if (options.id !== undefined) authoredCase.id = options.id;

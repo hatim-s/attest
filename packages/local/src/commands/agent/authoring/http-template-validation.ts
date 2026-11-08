@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
+import { isLiteralTemplateValue } from '../../../internal/template-value.js';
 
 const isJsonObject = (value: JsonValue): value is { [key: string]: JsonValue } =>
   value !== null && typeof value === 'object' && !isJsonArray(value);
@@ -32,12 +33,11 @@ const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined
 };
 
 /** Names the first credential-like entry authored as a literal instead of a secret reference. */
-// BOUNDARY: Authored header and query maps mix literal strings with secret references; a sensitive name must carry a reference.
 const findLiteralSensitiveEntry = (
   entries: Readonly<Record<string, string | SecretReference>> | undefined,
 ): string | undefined => {
   for (const [name, value] of Object.entries(entries ?? {})) {
-    if (isSensitiveFieldName(name) && typeof value === 'string') return name;
+    if (isSensitiveFieldName(name) && isLiteralTemplateValue(value)) return name;
   }
 
   return undefined;

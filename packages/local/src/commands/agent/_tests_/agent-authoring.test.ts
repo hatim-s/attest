@@ -1,5 +1,7 @@
 import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
 import { symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -299,19 +301,24 @@ describe('agent import', () => {
 
 describe('agent add authoring', () => {
   it('rejects credential-like WebSocket request-template fields from flags', async () => {
-    const error = await rejection(
-      Effect.runPromiseExit(
-        createAgentResource({
-          agentId: 'unsafe-flags',
-          webSocketUrl: 'wss://agent.example/socket',
-          requestTemplate: JSON.stringify({
-            request_id: '{{request_id}}',
-            nested: { api_key: 'flag-template-secret' },
-          }),
+    const exit = await Effect.runPromiseExit(
+      createAgentResource({
+        agentId: 'unsafe-flags',
+        webSocketUrl: 'wss://agent.example/socket',
+        requestTemplate: JSON.stringify({
+          request_id: '{{request_id}}',
+          nested: { api_key: 'flag-template-secret' },
         }),
-      ).then((exit) => valueFromExit(exit)),
+      }),
     );
 
+    // A typed failure, not a defect that merely carries a LocalError.
+    const [error, ...others] = Exit.isFailure(exit)
+      ? exit.cause.reasons.map((reason) => (Cause.isFailReason(reason) ? reason.error : reason))
+      : [];
+
+    if (!(error instanceof LocalError)) throw new Error('Expected one typed LocalError failure.');
+    expect(others).toEqual([]);
     expect(error).toMatchObject({
       code: 'project_invalid',
       message: 'WebSocket request templates cannot contain credential-like fields.',

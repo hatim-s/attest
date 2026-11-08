@@ -4,6 +4,7 @@ import { delimiter, isAbsolute, resolve } from 'node:path';
 import type { SecretReference } from '@attest/contracts';
 import { LocalError } from '../../../errors/index.js';
 import { openAnchored } from '../../../internal/open-anchored.js';
+import { isLiteralTemplateValue } from '../../../internal/template-value.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import { foreign, withRelease } from './metric-operation.js';
 
@@ -119,10 +120,6 @@ type ResolvedRequestSecrets = {
   secrets: string[];
 };
 
-/** Distinguishes a literal header/query value from its authored secret reference. */
-const isLiteralRequestValue = (value: string | SecretReference): value is string =>
-  typeof value === 'string';
-
 /** Resolves one request template's secret references without changing the authored resource. */
 const resolveHttpSecrets = (
   request: {
@@ -140,7 +137,7 @@ const resolveHttpSecrets = (
         const resolved: Record<string, string> = {};
 
         for (const [name, value] of Object.entries(values ?? {})) {
-          if (isLiteralRequestValue(value)) {
+          if (isLiteralTemplateValue(value)) {
             resolved[name] = value;
             continue;
           }
