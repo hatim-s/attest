@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { StoreError, type ProjectCatalog, type RunSource } from '@attest/core';
 
 import { storeDecode } from '../store/internal/store-effect.js';
-import { activityBounds } from '../store/internal/dashboard-boundary.js';
+import { activityBounds } from '@attest/core/records';
 import { errnoCode } from '../internal/errno-code.js';
 import { openReadonlyRunStore, type StoreScope } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
-import { useSuiteHistory } from '../api/queries.js';
+import { useEvalRuns } from '../api/queries.js';
 import { AnalyticsChart } from '../components/runs/analytics-chart.js';
 import { ErrorNotice, Heading, Loading } from '../components/shared/ui.js';
 import { formatCount, formatDateTime, formatPercent, shortId } from '../lib/format.js';
@@ -14,20 +14,20 @@ const EvalPage = () => {
   const { projectKey, suiteName } = route.useParams();
   const { limit } = route.useSearch();
   const navigate = useNavigate();
-  const historyQuery = useSuiteHistory(projectKey, suiteName, limit);
+  const historyQuery = useEvalRuns(projectKey, suiteName, limit);
   const history = historyQuery.data;
-  const points = useMemo(() => [...(history?.points ?? [])].reverse(), [history?.points]);
+  const points = useMemo(() => [...(history?.items ?? [])].reverse(), [history?.items]);
 
   const { runs, passRates, meanScores } = useMemo(
     () => ({
       runs: points.map(({ runId, createdAt, gitBranch, gitSha }) => ({
         id: runId,
         createdAt,
-        gitBranch,
-        gitSha,
+        gitBranch: gitBranch ?? undefined,
+        gitSha: gitSha ?? undefined,
       })),
-      passRates: points.map((point) => point.aggregate.passRate),
-      meanScores: points.map((point) => point.aggregate.meanScore),
+      passRates: points.map((point) => point.passRate),
+      meanScores: points.map((point) => point.meanScore),
     }),
     [points],
   );
@@ -41,9 +41,9 @@ const EvalPage = () => {
         meta={
           history === undefined
             ? undefined
-            : history.exhausted
+            : history.nextCursor === undefined
               ? `All ${formatCount(points.length, 'run')}`
-              : `Last ${formatCount(points.length, 'run')}, from the newest ${formatCount(history.runsExamined, 'finished run')}`
+              : `Newest ${formatCount(points.length, 'run')}`
         }
       >
         <label className="control">
@@ -58,13 +58,11 @@ const EvalPage = () => {
               })
             }
           >
-            {[10, 20, 50, ...([10, 20, 50].includes(limit) ? [] : [limit])]
-              .sort((a, b) => a - b)
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value} runs
-                </option>
-              ))}
+            {[10, 20, 50].map((value) => (
+              <option key={value} value={value}>
+                {value} runs
+              </option>
+            ))}
           </select>
         </label>
       </Heading>
@@ -73,11 +71,7 @@ const EvalPage = () => {
       {history !== undefined ? (
         <>
           {points.length === 0 ? (
-            <p className="empty-compact">
-              {history.exhausted
-                ? `No finished run includes ${suiteName} yet.`
-                : `None of the newest ${formatCount(history.runsExamined, 'finished run')} include ${suiteName}.`}
-            </p>
+            <p className="empty-compact">{`No run includes ${suiteName} yet.`}</p>
           ) : (
             <>
               <div className="chart-grid">
@@ -101,7 +95,10 @@ const EvalPage = () => {
               </div>
               <div className="case-table-frame analytics-table-scroll">
                 <table className="analytics-table">
-                  <caption>Oldest first. An unscored run leaves a gap in the score chart.</caption>
+                  <caption>
+                    Oldest first. A run that did not complete has no pass rate, and an unscored run
+                    leaves a gap in the score chart.
+                  </caption>
                   <thead>
                     <tr>
                       {['Run', 'Created', 'Branch', 'SHA', 'Pass rate', 'Mean score'].map(
@@ -128,11 +125,13 @@ const EvalPage = () => {
                         </th>
                         <td>{formatDateTime(point.createdAt)}</td>
                         <td>{point.gitBranch ?? '—'}</td>
-                        <td className="mono" title={point.gitSha}>
-                          {point.gitSha === undefined ? '—' : shortId(point.gitSha, 7)}
+                        <td className="mono" title={point.gitSha ?? undefined}>
+                          {point.gitSha === null ? '—' : shortId(point.gitSha, 7)}
                         </td>
-                        <td>{formatPercent(point.aggregate.passRate)}</td>
-                        <td>{point.aggregate.meanScore?.toFixed(3) ?? 'Unscored'}</td>
+                        <td>
+                          {point.passRate === null ? 'Incomplete' : formatPercent(point.passRate)}
+                        </td>
+                        <td>{point.meanScore?.toFixed(3) ?? 'Unscored'}</td>
                       </tr>
                     ))}
                   </tbody>

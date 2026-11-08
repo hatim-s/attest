@@ -9,10 +9,16 @@ import {
   projectRecordSchema,
   runCancelOutcomeSchema,
   testSummarySchema,
+  activitySchema,
+  caseHistoryPageSchema,
+  evalCaseWindowSchema,
+  evalPageSchema,
+  evalRunPageSchema,
+  evalSliceSchema,
+  projectRunOverviewSchema,
 } from '@attest/core/records';
-import type { CaseSummary, RunRecord } from '@attest/core/records';
-import { aggregateCases, caseAggregateSchema, suiteAggregateSchema } from '@attest/core/analytics';
 import type { ApiRoute } from './routes.js';
+import { projectOverviewListSchema } from './overview.js';
 
 const projectListSchema = stripStruct({ items: Schema.Array(projectRecordSchema) });
 
@@ -24,48 +30,7 @@ const runCancelResponseSchema = stripStruct({ outcome: runCancelOutcomeSchema })
 
 const runSuitesSchema = stripStruct({
   runId: Schema.String.check(Schema.isMinLength(1)),
-  suites: Schema.Array(suiteAggregateSchema),
-});
-
-const suiteHistoryPointSchema = stripStruct({
-  runId: Schema.String.check(Schema.isMinLength(1)),
-  createdAt: Schema.String,
-  status: Schema.Union([
-    runRecordSchema.members[0].from.schema.fields.status,
-    runRecordSchema.members[1].from.schema.fields.status,
-  ]),
-  gitBranch: Schema.optional(Schema.String),
-  gitSha: Schema.optional(Schema.String),
-  aggregate: caseAggregateSchema,
-});
-
-type SuiteHistoryPoint = typeof suiteHistoryPointSchema.Type;
-
-/** Keeps live and snapshot history points consistent as their contract evolves. */
-const toSuiteHistoryPoint = (
-  run: RunRecord,
-  summaries: readonly CaseSummary[],
-  suiteName: string,
-): SuiteHistoryPoint | undefined => {
-  const [first, ...rest] = summaries.filter((summary) => summary.suiteName === suiteName);
-
-  if (first === undefined) return undefined;
-
-  return {
-    runId: run.id,
-    createdAt: run.createdAt,
-    status: run.status,
-    gitBranch: run.gitBranch,
-    gitSha: run.gitSha,
-    aggregate: aggregateCases([first, ...rest]),
-  };
-};
-
-const suiteHistorySchema = stripStruct({
-  suiteName: Schema.String.check(Schema.isMinLength(1)),
-  exhausted: Schema.Boolean,
-  runsExamined: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
-  points: Schema.Array(suiteHistoryPointSchema),
+  suites: Schema.Array(evalSliceSchema),
 });
 
 type ProjectList = typeof projectListSchema.Type;
@@ -78,12 +43,38 @@ type RunCancelResponse = typeof runCancelResponseSchema.Type;
 
 type RunSuites = typeof runSuitesSchema.Type;
 
-type SuiteHistory = typeof suiteHistorySchema.Type;
+// Named with `typeof` so declaration output references each schema instead of expanding it;
+// the inferred object type is too large for the compiler to serialise.
+type ApiResponseSchemas = {
+  readonly listOverviews: typeof projectOverviewListSchema;
+  readonly listProjects: typeof projectListSchema;
+  readonly getProjectOverview: typeof projectRunOverviewSchema;
+  readonly listEvals: typeof evalPageSchema;
+  readonly listEvalRuns: typeof evalRunPageSchema;
+  readonly getEvalCaseWindow: typeof evalCaseWindowSchema;
+  readonly getCaseHistory: typeof caseHistoryPageSchema;
+  readonly getActivity: typeof activitySchema;
+  readonly listRunSuites: typeof runSuitesSchema;
+  readonly listRuns: typeof runPageSchema;
+  readonly getRun: typeof runRecordSchema;
+  readonly listCaseSummaries: typeof caseSummaryPageSchema;
+  readonly getCase: typeof caseRecordSchema;
+  readonly getDiff: typeof runDiffSchema;
+  readonly listTests: typeof testListSchema;
+  readonly startRun: typeof runStartResponseSchema;
+  readonly cancelRun: typeof runCancelResponseSchema;
+};
 
-const apiResponses = {
+const apiResponses: ApiResponseSchemas = {
+  listOverviews: projectOverviewListSchema,
   listProjects: projectListSchema,
+  getProjectOverview: projectRunOverviewSchema,
+  listEvals: evalPageSchema,
+  listEvalRuns: evalRunPageSchema,
+  getEvalCaseWindow: evalCaseWindowSchema,
+  getCaseHistory: caseHistoryPageSchema,
+  getActivity: activitySchema,
   listRunSuites: runSuitesSchema,
-  getSuiteHistory: suiteHistorySchema,
   listRuns: runPageSchema,
   getRun: runRecordSchema,
   listCaseSummaries: caseSummaryPageSchema,
@@ -99,15 +90,11 @@ export {
   projectListSchema,
   projectRecordSchema,
   runSuitesSchema,
-  suiteHistoryPointSchema,
-  toSuiteHistoryPoint,
-  suiteHistorySchema,
   testListSchema,
   runStartResponseSchema,
   runCancelResponseSchema,
   type ProjectList,
   type RunSuites,
-  type SuiteHistory,
   type TestList,
   type RunStartResponse,
   type RunCancelResponse,

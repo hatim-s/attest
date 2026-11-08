@@ -6,13 +6,15 @@ export {
   caseParamsSchema,
   diffParamsSchema,
   pageQuerySchema,
-  suiteParamsSchema,
-  suiteHistoryQuerySchema,
-  suiteHistoryRequestSchema,
+  evalParamsSchema,
+  caseHistoryParamsSchema,
+  caseSummariesQuerySchema,
+  evalRunsQuerySchema,
+  activityQuerySchema,
   runStartRequestSchema,
-  MAX_SUITE_HISTORY_RUNS,
-  DEFAULT_SUITE_HISTORY_RUNS,
-  type SuiteHistoryQuery,
+  type CaseSummariesQuery,
+  type EvalRunsQuery,
+  type ActivityQuery,
 } from './requests.js';
 
 export {
@@ -20,21 +22,26 @@ export {
   projectListSchema,
   projectRecordSchema,
   runSuitesSchema,
-  suiteHistoryPointSchema,
-  suiteHistorySchema,
   testListSchema,
   runStartResponseSchema,
   runCancelResponseSchema,
   type ProjectList,
   type RunSuites,
-  type SuiteHistory,
   type TestList,
   type RunStartResponse,
   type RunCancelResponse,
 } from './responses.js';
 
 export {
+  projectOverviewEntrySchema,
+  projectOverviewListSchema,
+  type ProjectOverviewEntry,
+  type ProjectOverviewList,
+} from './overview.js';
+
+export {
   API_ERROR_CODES,
+  apiErrorCodeSchema,
   apiErrorEnvelopeSchema,
   API_ERROR_STATUS,
   type ApiErrorCode,

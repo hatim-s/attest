@@ -49,6 +49,7 @@ const API_ERROR_STATUS = {
 
 export {
   API_ERROR_CODES,
+  apiErrorCodeSchema,
   apiErrorEnvelopeSchema,
   API_ERROR_STATUS,
   type ApiErrorCode,

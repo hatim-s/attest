@@ -1,5 +1,4 @@
 import * as SchemaGetter from 'effect/SchemaGetter';
-import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import {
@@ -45,29 +44,36 @@ const pageQuerySchema = stripStruct({
   ),
 });
 
-const suiteParamsSchema = stripStruct({
+const evalParamsSchema = stripStruct({
   ...projectParamsSchema.from.schema.fields,
   suiteName: idSchema,
 });
 
-const MAX_SUITE_HISTORY_RUNS = 50;
-
-const DEFAULT_SUITE_HISTORY_RUNS = 20;
-
-const suiteHistoryQuerySchema = stripStruct({
-  limit: coercedNumberSchema
-    .check(Schema.isInt())
-    .check(Schema.isGreaterThanOrEqualTo(1))
-    .check(Schema.isLessThanOrEqualTo(MAX_SUITE_HISTORY_RUNS))
-    .pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_SUITE_HISTORY_RUNS))),
+const caseHistoryParamsSchema = stripStruct({
+  ...evalParamsSchema.from.schema.fields,
+  caseId: idSchema,
 });
 
-const suiteHistoryRequestSchema = stripStruct({
-  ...suiteParamsSchema.from.schema.fields,
-  ...suiteHistoryQuerySchema.from.schema.fields,
+const caseSummariesQuerySchema = stripStruct({
+  ...pageQuerySchema.from.schema.fields,
+  suiteName: Schema.optional(idSchema),
 });
 
-type SuiteHistoryQuery = Partial<typeof suiteHistoryQuerySchema.Type>;
+// The store owns timestamp and interval rules (`canonicalTime`, `activityBounds`); the edge only
+// requires the fields to be present.
+const evalRunsQuerySchema = stripStruct({
+  ...pageQuerySchema.from.schema.fields,
+  since: Schema.optional(idSchema),
+  until: Schema.optional(idSchema),
+});
+
+const activityQuerySchema = stripStruct({ from: idSchema, to: idSchema });
+
+type CaseSummariesQuery = Partial<typeof caseSummariesQuerySchema.Type>;
+
+type EvalRunsQuery = Partial<typeof evalRunsQuerySchema.Type>;
+
+type ActivityQuery = typeof activityQuerySchema.Type;
 
 export {
   projectParamsSchema,
@@ -75,11 +81,13 @@ export {
   caseParamsSchema,
   diffParamsSchema,
   pageQuerySchema,
-  suiteParamsSchema,
-  suiteHistoryQuerySchema,
-  suiteHistoryRequestSchema,
-  MAX_SUITE_HISTORY_RUNS,
-  DEFAULT_SUITE_HISTORY_RUNS,
+  evalParamsSchema,
+  caseHistoryParamsSchema,
+  caseSummariesQuerySchema,
+  evalRunsQuerySchema,
+  activityQuerySchema,
   runStartRequestSchema,
-  type SuiteHistoryQuery,
+  type CaseSummariesQuery,
+  type EvalRunsQuery,
+  type ActivityQuery,
 };

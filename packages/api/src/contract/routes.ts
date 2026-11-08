@@ -1,12 +1,21 @@
 /** Every route is scoped to one catalog project; only the project list sits outside one. */
 const apiRoutes = {
+  listOverviews: { method: 'GET', path: '/overview' },
   listProjects: { method: 'GET', path: '/projects' },
+  getProjectOverview: { method: 'GET', path: '/projects/:projectKey/overview' },
+  listEvals: { method: 'GET', path: '/projects/:projectKey/evals' },
+  listEvalRuns: { method: 'GET', path: '/projects/:projectKey/evals/:suiteName/runs' },
+  getEvalCaseWindow: { method: 'GET', path: '/projects/:projectKey/evals/:suiteName/cases' },
+  getCaseHistory: {
+    method: 'GET',
+    path: '/projects/:projectKey/evals/:suiteName/cases/:caseId/history',
+  },
+  getActivity: { method: 'GET', path: '/projects/:projectKey/activity' },
   listRuns: { method: 'GET', path: '/projects/:projectKey/runs' },
   getRun: { method: 'GET', path: '/projects/:projectKey/runs/:runId' },
   listCaseSummaries: { method: 'GET', path: '/projects/:projectKey/runs/:runId/cases' },
   getCase: { method: 'GET', path: '/projects/:projectKey/runs/:runId/cases/:suiteName/:caseId' },
   listRunSuites: { method: 'GET', path: '/projects/:projectKey/runs/:runId/suites' },
-  getSuiteHistory: { method: 'GET', path: '/projects/:projectKey/suites/:suiteName/history' },
   getDiff: { method: 'GET', path: '/projects/:projectKey/diffs/:baseRunId/:candidateRunId' },
   listTests: { method: 'GET', path: '/projects/:projectKey/tests' },
   startRun: { method: 'POST', path: '/projects/:projectKey/runs' },

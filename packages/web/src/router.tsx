@@ -8,9 +8,7 @@ import {
   diffParamsSchema,
   projectParamsSchema,
   runParamsSchema,
-  suiteParamsSchema,
-  suiteHistoryQuerySchema,
-  DEFAULT_SUITE_HISTORY_RUNS,
+  evalParamsSchema,
 } from '@attest/api/contract';
 import type { QueryClient } from '@tanstack/react-query';
 import {
@@ -167,12 +165,12 @@ const evalsRoute = createRoute({
 const evalRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'evals/$suiteName',
-  params: { parse: (params) => parseWithSchemaSync(suiteParamsSchema, params) },
+  params: { parse: (params) => parseWithSchemaSync(evalParamsSchema, params) },
   validateSearch: Schema.toStandardSchemaV1(
     stripStruct({
-      limit: suiteHistoryQuerySchema.from.schema.fields.limit
-        .pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_SUITE_HISTORY_RUNS)))
-        .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(DEFAULT_SUITE_HISTORY_RUNS)))),
+      limit: Schema.Finite.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 }))
+        .pipe(Schema.withDecodingDefault(Effect.succeed(20)))
+        .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(20)))),
     }),
     { parseOptions: { onExcessProperty: 'error', errors: 'all' } },
   ),

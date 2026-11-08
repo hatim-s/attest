@@ -82,9 +82,9 @@ const effectRoots = [
     owner: 'native server Scope and assertion roots',
   },
   {
-    file: 'packages/api/src/client/_tests_/suite-analytics.test.ts',
+    file: 'packages/api/src/client/_tests_/snapshot-dashboard.test.ts',
     operations: ['Effect.runPromiseExit'],
-    owner: 'native client analytics assertions',
+    owner: 'native snapshot dashboard assertions',
   },
   ...[
     'packages/client/src/_tests_/support/native-owner.ts',

@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
-import type { SuiteAggregate } from '@attest/core/analytics';
-import { formatDuration, formatPercent } from '../../lib/format.js';
+import type { EvalSlice } from '@attest/core/records';
+import { formatPercent } from '../../lib/format.js';
 import { useProjectKey } from '../../routes/use-project-key.js';
 
-/** Keeps server aggregates intact so every suite view uses the same definitions. */
-const SuiteTable = ({ suites }: { suites: readonly SuiteAggregate[] }) => {
+/** Shows each eval's stored slice counts; only a complete slice has a pass rate. */
+const SuiteTable = ({ suites }: { suites: readonly EvalSlice[] }) => {
   const projectKey = useProjectKey();
 
   return (
@@ -18,10 +18,9 @@ const SuiteTable = ({ suites }: { suites: readonly SuiteAggregate[] }) => {
               'Passed',
               'Failed',
               'Errors',
+              'Skipped',
               'Pass rate',
               'Mean score',
-              'p50 duration',
-              'p95 duration',
               'Metric errors',
             ].map((name) => (
               <th key={name} scope="col">
@@ -44,15 +43,14 @@ const SuiteTable = ({ suites }: { suites: readonly SuiteAggregate[] }) => {
                     {suite.suiteName}
                   </Link>
                 </th>
-                <td>{suite.caseCount}</td>
-                <td>{suite.verdicts.pass}</td>
-                <td>{suite.verdicts.fail}</td>
-                <td>{suite.verdicts.error}</td>
-                <td>{formatPercent(suite.passRate)}</td>
+                <td>{suite.counts.recorded}</td>
+                <td>{suite.counts.passed}</td>
+                <td>{suite.counts.failed}</td>
+                <td>{suite.counts.errored}</td>
+                <td>{suite.counts.skipped}</td>
+                <td>{suite.passRate === null ? 'Incomplete' : formatPercent(suite.passRate)}</td>
                 <td>{suite.meanScore?.toFixed(3) ?? 'Unscored'}</td>
-                <td>{formatDuration(suite.durationMs.p50)}</td>
-                <td>{formatDuration(suite.durationMs.p95)}</td>
-                <td>{suite.metricErrorCount}</td>
+                <td>{suite.counts.metricErrors}</td>
               </tr>
             ))}
         </tbody>
