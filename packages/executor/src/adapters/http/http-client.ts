@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect';
-import { httpSync, awaitAbort, withHttpCleanup } from './http-effects.js';
+import { tryOwned } from '@attest/contracts';
+import { awaitAbort, withHttpCleanup } from './http-effects.js';
 import { parseJson } from '../../internal/json-value.js';
 import type { JsonValue } from '@attest/contracts';
 import { createHash } from 'node:crypto';
@@ -242,7 +243,7 @@ const requestHttp = Effect.fn('http.request')(function* (
     }
 
     const redirected = new URL(location, response.url);
-    yield* httpSync(() => requireSameOrigin(redirected, origin));
+    yield* tryOwned(AgentInvocationError, () => requireSameOrigin(redirected, origin));
     current = { ...current, url: redirected.toString() };
   }
 

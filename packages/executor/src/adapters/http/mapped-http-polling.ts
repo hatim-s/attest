@@ -1,8 +1,8 @@
 import * as Effect from 'effect/Effect';
-import { httpDelay, httpSync } from './http-effects.js';
+import { httpDelay } from './http-effects.js';
 import { isDeepStrictEqual } from 'node:util';
 
-import { isNumber, isString, type AgentRequest } from '@attest/contracts';
+import { isNumber, isString, tryOwned, type AgentRequest } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
@@ -134,11 +134,13 @@ const runPolling = Effect.fn('http.polling')(function* (
   context: ExchangeContext,
 ): Effect.fn.Return<ExchangeOutcome, AgentInvocationError> {
   const { policy, retry: retryPolicy, signal } = context;
-  yield* httpSync(() => assertStatusUrlTemplate(transport));
+  yield* tryOwned(AgentInvocationError, () => assertStatusUrlTemplate(transport));
   const idempotencyHeader = transport.idempotency_header;
 
   if (idempotencyHeader !== undefined) {
-    yield* httpSync(() => setIdempotencyHeader(submission.headers, idempotencyHeader, request));
+    yield* tryOwned(AgentInvocationError, () =>
+      setIdempotencyHeader(submission.headers, idempotencyHeader, request),
+    );
   }
 
   const pollingDelay = (retry: number, retryAfter: string | undefined): number =>
@@ -159,7 +161,9 @@ const runPolling = Effect.fn('http.polling')(function* (
     );
   }
 
-  const statusUrl = yield* httpSync(() => pollingUrl(transport, submitted.response, jobId));
+  const statusUrl = yield* tryOwned(AgentInvocationError, () =>
+    pollingUrl(transport, submitted.response, jobId),
+  );
 
   const pollRequest: MaterializedHttpRequest = {
     method: 'GET',
@@ -194,7 +198,7 @@ const runPolling = Effect.fn('http.polling')(function* (
         durationMs: polledDurationMs,
         response: polled,
         remoteJobId:
-          (yield* httpSync(() =>
+          (yield* tryOwned(AgentInvocationError, () =>
             extractRemoteJobId(polled.raw, transport.extraction.remote_job_id_pointer),
           )) ?? jobId,
       };

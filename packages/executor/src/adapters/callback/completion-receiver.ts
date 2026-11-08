@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
 import * as Queue from 'effect/Queue';
 import * as Semaphore from 'effect/Semaphore';
-import { httpSync, withHttpCleanup } from '../http/http-effects.js';
+import { withHttpCleanup } from '../http/http-effects.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   createServer,
@@ -482,7 +482,7 @@ const createLoopbackCompletionReceiver = Effect.fn('callback.makeReceiver')(func
 
           if (closed || signal?.aborted) return yield* Effect.fail(stopped);
           const completion = yield* Deferred.make<AgentCompletion, AgentInvocationError>();
-          const token = yield* httpSync(() => randomBytes(32).toString('base64url'));
+          const token = yield* Effect.sync(() => randomBytes(32).toString('base64url'));
 
           const entry: Entry = {
             key: registrationKey(runId, caseId),

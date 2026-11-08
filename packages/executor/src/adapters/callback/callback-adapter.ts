@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect';
 import {
   AGENT_PROTOCOL,
   parseAgentResponse,
+  tryOwned,
   type AgentCompletion,
   type AgentRequest,
   type AgentResource,
@@ -11,7 +12,7 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
-import { httpSync, withHttpSignal, withHttpCleanup } from '../http/http-effects.js';
+import { withHttpSignal, withHttpCleanup } from '../http/http-effects.js';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
   DEFAULT_ARTIFACT_BYTES,
@@ -197,7 +198,7 @@ const triggerCallbackAgent = Effect.fn('callback.triggerCallbackAgent')(function
           body_encoding: 'json',
         };
 
-        const materialized = yield* httpSync(() =>
+        const materialized = yield* tryOwned(AgentInvocationError, () =>
           materializeHttpRequest(
             resolveRequestTemplate(template, options),
             { ...request, callback: { url, token } },
@@ -208,7 +209,7 @@ const triggerCallbackAgent = Effect.fn('callback.triggerCallbackAgent')(function
         const idempotencyHeader = transport.idempotency_header;
 
         if (idempotencyHeader !== undefined) {
-          yield* httpSync(() =>
+          yield* tryOwned(AgentInvocationError, () =>
             setIdempotencyHeader(materialized.headers, idempotencyHeader, request),
           );
         }
@@ -309,7 +310,7 @@ const fetchReference = Effect.fn('callback.fetchReference')(function* (
 
   const template = reference.template;
 
-  const materialized = yield* httpSync(() =>
+  const materialized = yield* tryOwned(AgentInvocationError, () =>
     materializeStaticRequest(
       fillPlaceholder(
         resolveRequestTemplate(template, reference.overrides ?? {}),
@@ -427,7 +428,9 @@ const completeCallbackAgent = Effect.fn('callback.completeCallbackAgent')(functi
           );
         const artifacts = completion.artifacts ?? [];
         // Count and path checks first, so an over-limit completion triggers no fetches.
-        yield* httpSync(() => assertArtifactManifest(artifacts, agent.limits));
+        yield* tryOwned(AgentInvocationError, () =>
+          assertArtifactManifest(artifacts, agent.limits),
+        );
 
         const perArtifact = agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES;
         let remaining = agent.limits?.total_artifact_bytes ?? DEFAULT_TOTAL_ARTIFACT_BYTES;
@@ -453,7 +456,7 @@ const completeCallbackAgent = Effect.fn('callback.completeCallbackAgent')(functi
           resolved.push(inline);
         }
 
-        yield* httpSync(() => assertArtifactSizes(resolved, agent.limits));
+        yield* tryOwned(AgentInvocationError, () => assertArtifactSizes(resolved, agent.limits));
 
         const trace =
           completion.trace_ref === undefined
