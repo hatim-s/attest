@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DailyActivity } from '../daily-activity.js';
 import { PassRateTrend } from '../pass-rate-trend.js';
-import type { TrendRun } from '../trend-model.js';
+import type { EvalSlice } from '@attest/core/records';
 
 const counts = {
   planned: 10,
@@ -13,17 +13,28 @@ const counts = {
   failed: 2,
   errored: 0,
   skipped: 0,
+  metricErrors: 0,
+  scored: 0,
+  scoreSum: 0,
   notRun: 0,
 };
 
-const run = (id: string, startedAt: number): TrendRun => ({
-  id,
-  label: id,
-  startedAt,
+const base = {
+  suiteName: 'smoke',
+  finishedAt: null,
+  gitBranch: null,
+  gitSha: null,
+  meanScore: null,
+  counts,
+};
+
+const run = (runId: string, startedAt: number): EvalSlice => ({
+  ...base,
+  runId,
+  createdAt: new Date(startedAt).toISOString(),
   state: 'complete',
   passRate: 0.8,
   runStatus: 'failed',
-  counts,
 });
 
 const a = run('a', 100),
@@ -82,13 +93,12 @@ it('resolves stale hover and focus separately, keeps selection, and disconnects 
     DOMRect.fromRect({ width }),
   );
 
-  const render = (runs: readonly TrendRun[]) => (
+  const render = (runs: readonly EvalSlice[]) => (
     <PassRateTrend
       runs={runs}
       axis="run"
-      utcOffsetMinutes={330}
       onAxisChange={() => {}}
-      runHref={({ id }) => `#${id}`}
+      runHref={({ runId }) => `#${runId}`}
       selectedRunId="b"
       label="Trend"
     />
@@ -111,16 +121,16 @@ it('resolves stale hover and focus separately, keeps selection, and disconnects 
 it('offers every dense identity including rail slices with real links at unchanged timestamps', async () => {
   const mounted = root();
 
-  const runs = Array.from({ length: 200 }, (_, index): TrendRun =>
+  const runs = Array.from({ length: 200 }, (_, index): EvalSlice =>
     index % 2
       ? run(String(index), 100)
       : {
-          id: String(index),
-          label: String(index),
-          startedAt: 100,
+          ...base,
+          runId: String(index),
+          createdAt: new Date(100).toISOString(),
           state: 'incomplete',
+          passRate: null,
           runStatus: 'completed',
-          counts,
         },
   );
 
@@ -129,9 +139,8 @@ it('offers every dense identity including rail slices with real links at unchang
       <PassRateTrend
         runs={runs}
         axis="date"
-        utcOffsetMinutes={0}
         onAxisChange={() => {}}
-        runHref={({ id }) => `#run/${id}`}
+        runHref={({ runId }) => `#run/${runId}`}
         selectedRunId="0"
         label="Dense"
       />,
@@ -157,14 +166,14 @@ it('daily hover beats clicked focus, stale props resolve selection, zero days ar
 
   const day = (day: string) => ({
     day,
-    runCount: 1,
+    slices: 1,
     passed: 1000,
     failed: 1,
     errored: 0,
     skipped: 0,
   });
 
-  const window = { from: '2026-11-01', to: '2026-11-04', utcOffsetMinutes: 330 };
+  const window = { from: '2026-11-01', to: '2026-11-04' };
 
   const render = (days: ReturnType<typeof day>[]) => (
     <DailyActivity days={days} window={window} selectedDay="2026-11-02" onSelectDay={onSelectDay} />
@@ -207,7 +216,7 @@ it('dense 28-day slots at 500px retain pointer selection and a chooser with exac
 
   const days = Array.from({ length: 28 }, (_, i) => ({
     day: `2026-11-${String(i + 1).padStart(2, '0')}`,
-    runCount: 1,
+    slices: 1,
     passed: i + 1,
     failed: 0,
     errored: 0,
@@ -218,7 +227,7 @@ it('dense 28-day slots at 500px retain pointer selection and a chooser with exac
     mounted.render(
       <DailyActivity
         days={days}
-        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        window={{ from: '2026-11-01', to: '2026-11-28' }}
         onSelectDay={onSelectDay}
       />,
     ),
@@ -251,9 +260,8 @@ it('dense 30-run nearest-point hover works and inspection ends on controlled cha
     <PassRateTrend
       runs={runs}
       axis="date"
-      utcOffsetMinutes={0}
       onAxisChange={() => {}}
-      runHref={({ id }) => `#${id}`}
+      runHref={({ runId }) => `#${runId}`}
       selectedRunId={selectedRunId}
       label="Trend"
     />
@@ -300,14 +308,14 @@ it('daily inspection survives movement to its action and clears on selection and
   const mounted = root();
 
   const days = [
-    { day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
-    { day: '2026-11-02', runCount: 1, passed: 2, failed: 0, errored: 0, skipped: 0 },
+    { day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+    { day: '2026-11-02', slices: 1, passed: 2, failed: 0, errored: 0, skipped: 0 },
   ];
 
   const render = (selectedDay?: string, from = '2026-11-01') => (
     <DailyActivity
       days={days.filter((day) => day.day >= from)}
-      window={{ from, to: '2026-11-28', utcOffsetMinutes: 0 }}
+      window={{ from, to: '2026-11-28' }}
       selectedDay={selectedDay}
       onSelectDay={() => {}}
     />
@@ -355,14 +363,14 @@ it('updates equal daily maxima across mounted frames without duplicate keys or s
       days={[
         {
           day: '2026-11-01',
-          runCount: passed + failed > 0 ? 1 : 0,
+          slices: passed + failed > 0 ? 1 : 0,
           passed,
           failed,
           errored: 0,
           skipped: 0,
         },
       ]}
-      window={{ from: '2026-11-01', to: '2026-11-01', utcOffsetMinutes: 0 }}
+      window={{ from: '2026-11-01', to: '2026-11-01' }}
       onSelectDay={() => {}}
     />
   );
@@ -386,13 +394,12 @@ it('updates equal daily maxima across mounted frames without duplicate keys or s
 it('keeps a focused run action and chooser fixed across hover and appended polling data', async () => {
   const mounted = root();
 
-  const render = (runs: TrendRun[]) => (
+  const render = (runs: EvalSlice[]) => (
     <PassRateTrend
       runs={runs}
       axis="run"
-      utcOffsetMinutes={0}
       onAxisChange={() => {}}
-      runHref={({ id }) => `#${id}`}
+      runHref={({ runId }) => `#${runId}`}
       label="Trend"
     />
   );
@@ -419,16 +426,15 @@ it('keeps a focused run action and chooser fixed across hover and appended polli
   await settle(() => mounted.unmount());
 });
 
-it('pins a default action on focus and expires inspection on removal, departure, axis or offset changes', async () => {
+it('pins a default action on focus and expires inspection on removal, departure or axis changes', async () => {
   const mounted = root();
 
-  const render = (runs: TrendRun[], axis: 'run' | 'date' = 'run', offset = 0) => (
+  const render = (runs: EvalSlice[], axis: 'run' | 'date' = 'run') => (
     <PassRateTrend
       runs={runs}
       axis={axis}
-      utcOffsetMinutes={offset}
       onAxisChange={() => {}}
-      runHref={({ id }) => `#${id}`}
+      runHref={({ runId }) => `#${runId}`}
       label="Trend"
     />
   );
@@ -456,22 +462,18 @@ it('pins a default action on focus and expires inspection on removal, departure,
   await inspectA();
   await settle(() => mounted.render(render([a, b, c], 'date')));
   expect(action.getAttribute('href')).toBe('#c');
-  await inspectA();
-  await settle(() => mounted.render(render([a, b, c], 'date', 330)));
-  expect(action.getAttribute('href')).toBe('#c');
   await settle(() => mounted.unmount());
 });
 
 it('pins the displayed default when the chooser receives focus without a value change', async () => {
   const mounted = root();
 
-  const render = (runs: TrendRun[]) => (
+  const render = (runs: EvalSlice[]) => (
     <PassRateTrend
       runs={runs}
       axis="run"
-      utcOffsetMinutes={0}
       onAxisChange={() => {}}
-      runHref={({ id }) => `#${id}`}
+      runHref={({ runId }) => `#${runId}`}
       label="Trend"
     />
   );
@@ -494,8 +496,8 @@ it('commits daily selection once across real controlled updates and retains acti
 
     return (
       <DailyActivity
-        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
-        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        days={[{ day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-28' }}
         selectedDay={selectedDay}
         onSelectDay={(day) => {
           selected(day);
@@ -539,8 +541,8 @@ it('sparse daily click, Enter and Space do not repeat controlled selection', asy
 
     return (
       <DailyActivity
-        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
-        window={{ from: '2026-11-01', to: '2026-11-02', utcOffsetMinutes: 0 }}
+        days={[{ day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-02' }}
         selectedDay={selectedDay}
         onSelectDay={(day) => {
           selected(day);
@@ -574,9 +576,8 @@ it('transfers owned sparse focus into the dense chooser on resize without steali
       <PassRateTrend
         runs={runs}
         axis="run"
-        utcOffsetMinutes={0}
         onAxisChange={() => {}}
-        runHref={({ id }) => `#${id}`}
+        runHref={({ runId }) => `#${runId}`}
         label="Trend"
       />,
     ),
@@ -608,8 +609,8 @@ it('dense nonmouse taps use bounded day identity without mousemove and reject dr
   await settle(() =>
     mounted.render(
       <DailyActivity
-        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
-        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        days={[{ day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-28' }}
         onSelectDay={selected}
       />,
     ),
@@ -659,9 +660,8 @@ it('moves focus to the staged trend action before pointer activation without cha
       <PassRateTrend
         runs={[a, b, c]}
         axis="run"
-        utcOffsetMinutes={0}
         onAxisChange={() => {}}
-        runHref={({ id }) => `#${id}`}
+        runHref={({ runId }) => `#${runId}`}
         label="Trend"
       />,
     ),
@@ -699,8 +699,8 @@ it('commits the inspected day without relying on browser click-focus behavior', 
   await settle(() =>
     mounted.render(
       <DailyActivity
-        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
-        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        days={[{ day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-28' }}
         onSelectDay={selected}
       />,
     ),
@@ -733,10 +733,10 @@ it.each(['chooser', 'action'])(
       mounted.render(
         <DailyActivity
           days={[
-            { day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
-            { day: '2026-11-02', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+            { day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+            { day: '2026-11-02', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
           ]}
-          window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+          window={{ from: '2026-11-01', to: '2026-11-28' }}
           onSelectDay={() => {}}
         />,
       ),
@@ -773,12 +773,13 @@ it.each(['chooser', 'action'])(
 it('explains the missing current rate without denying an earlier complete slice', async () => {
   const mounted = root();
 
-  const incomplete: TrendRun = {
-    id: 'pending',
-    startedAt: 400,
+  const incomplete: EvalSlice = {
+    ...base,
+    runId: 'pending',
+    createdAt: new Date(400).toISOString(),
     state: 'running',
+    passRate: null,
     runStatus: 'running',
-    counts,
   };
 
   await settle(() =>
@@ -787,9 +788,8 @@ it('explains the missing current rate without denying an earlier complete slice'
         runs={[a, incomplete]}
         selectedRunId="pending"
         axis="run"
-        utcOffsetMinutes={0}
         onAxisChange={() => {}}
-        runHref={({ id }) => `#${id}`}
+        runHref={({ runId }) => `#${runId}`}
         label="Trend"
       />,
     ),
@@ -814,17 +814,14 @@ it.each(['trend', 'daily'])(
           <PassRateTrend
             runs={[a, b, c]}
             axis="run"
-            utcOffsetMinutes={0}
             onAxisChange={() => {}}
-            runHref={({ id }) => `#${id}`}
+            runHref={({ runId }) => `#${runId}`}
             label="Trend"
           />
         ) : (
           <DailyActivity
-            days={[
-              { day: '2026-11-02', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
-            ]}
-            window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+            days={[{ day: '2026-11-02', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+            window={{ from: '2026-11-01', to: '2026-11-28' }}
             onSelectDay={selected}
           />
         ),
@@ -864,10 +861,10 @@ it('transfers a sparse daily mark identity to the new chooser and its action', a
     mounted.render(
       <DailyActivity
         days={[
-          { day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
-          { day: '2026-11-02', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+          { day: '2026-11-01', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+          { day: '2026-11-02', slices: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
         ]}
-        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        window={{ from: '2026-11-01', to: '2026-11-28' }}
         onSelectDay={selected}
       />,
     ),

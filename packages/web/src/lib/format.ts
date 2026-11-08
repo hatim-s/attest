@@ -38,6 +38,32 @@ const formatDurationRange = (lowerMs: number, upperMs: number): string => {
   return `${formatDuration(lowerMs)} to ${formatDuration(upperMs)}`;
 };
 
+const startOfLocalDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+/**
+ * When something started, in the viewer's time zone: "Today 11:05", "Yesterday 09:12",
+ * "Oct 5 17:20", with the year only when it is not the current one.
+ */
+const formatStarted = (value: string, now = new Date()): string => {
+  const date = new Date(value);
+  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  // Rounding absorbs the hour a daylight-saving change adds or removes.
+  const days = Math.round((startOfLocalDay(now) - startOfLocalDay(date)) / 86_400_000);
+
+  if (days <= 0) return `Today ${time}`;
+
+  if (days === 1) return `Yesterday ${time}`;
+
+  const day = date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+  });
+
+  return `${day} ${time}`;
+};
+
 /** Formats a zero-to-one rate as a percentage. */
 const formatPercent = (rate: number | undefined): string =>
   rate === undefined ? '—' : `${(rate * 100).toFixed(rate === 0 || rate === 1 ? 0 : 1)}%`;
@@ -64,5 +90,6 @@ export {
   formatPassRate,
   formatPercent,
   formatShortDateTime,
+  formatStarted,
   shortId,
 };

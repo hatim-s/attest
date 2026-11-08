@@ -1,16 +1,9 @@
-type ActivityDay = {
-  /** Backend-owned calendar bucket, YYYY-MM-DD. Production activity buckets are UTC. */
-  day: string;
-  runCount: number;
-  passed: number;
-  failed: number;
-  errored: number;
-  skipped: number;
-};
+import type { Activity } from '@attest/core/records';
 
-/** Inclusive 1–92 day window. Offset labels a fixed-offset source, never a DST timezone.
- * The production mapper must use offset 0 for backend UTC activity buckets. */
-type ActivityWindow = { from: string; to: string; utcOffsetMinutes: number };
+type ActivityDay = Activity['days'][number];
+
+/** Inclusive window of UTC calendar days, 1 to 92 long. Activity buckets are always UTC. */
+type ActivityWindow = { from: string; to: string };
 
 const ACTIVITY_LIMIT = 92;
 
@@ -33,13 +26,6 @@ function prepareActivity(days: readonly ActivityDay[], window: ActivityWindow) {
   if (!Number.isInteger(length) || length < 1 || length > ACTIVITY_LIMIT)
     throw new RangeError('Activity window must contain 1 to 92 inclusive days');
 
-  if (
-    !Number.isInteger(window.utcOffsetMinutes) ||
-    window.utcOffsetMinutes < -720 ||
-    window.utcOffsetMinutes > 840
-  )
-    throw new RangeError('Invalid activity UTC offset');
-
   if (days.length > ACTIVITY_LIMIT)
     throw new RangeError(`Activity window exceeds ${ACTIVITY_LIMIT} days`);
   const supplied = new Map(days.map((day) => [day.day, day]));
@@ -50,11 +36,11 @@ function prepareActivity(days: readonly ActivityDay[], window: ActivityWindow) {
   )
     throw new RangeError('Duplicate or out-of-window activity day');
 
-  // Calendar labels already use the declared offset; UTC arithmetic avoids host DST drift.
+  // UTC arithmetic matches the backend buckets and avoids host DST drift.
   const ordered = Array.from({ length }, (_, index) => {
     const day = new Date(from + index * 86_400_000).toISOString().slice(0, 10);
 
-    return supplied.get(day) ?? { day, runCount: 0, passed: 0, failed: 0, errored: 0, skipped: 0 };
+    return supplied.get(day) ?? { day, slices: 0, passed: 0, failed: 0, errored: 0, skipped: 0 };
   });
 
   const up = Math.max(0, ...ordered.map((day) => day.passed));
@@ -62,16 +48,30 @@ function prepareActivity(days: readonly ActivityDay[], window: ActivityWindow) {
 
   const totals = ordered.reduce(
     (sum, day) => ({
-      runCount: sum.runCount + day.runCount,
+      slices: sum.slices + day.slices,
       passed: sum.passed + day.passed,
       failed: sum.failed + day.failed,
       errored: sum.errored + day.errored,
       skipped: sum.skipped + day.skipped,
     }),
-    { runCount: 0, passed: 0, failed: 0, errored: 0, skipped: 0 },
+    { slices: 0, passed: 0, failed: 0, errored: 0, skipped: 0 },
   );
 
   return { ordered, up, down, totals };
 }
 
-export { prepareActivity, ACTIVITY_LIMIT, type ActivityDay, type ActivityWindow };
+/**
+ * The days an activity response actually covers. `coveredTo` is exclusive and a truncated read
+ * moves `coveredFrom` forward, so the chart never draws a partial day as if it were complete.
+ * Returns null when nothing is covered.
+ */
+function activityWindow(
+  activity: Pick<Activity, 'coveredFrom' | 'coveredTo'>,
+): ActivityWindow | null {
+  const from = new Date(Date.parse(activity.coveredFrom)).toISOString().slice(0, 10);
+  const to = new Date(Date.parse(activity.coveredTo) - 1).toISOString().slice(0, 10);
+
+  return from <= to ? { from, to } : null;
+}
+
+export { prepareActivity, activityWindow, ACTIVITY_LIMIT, type ActivityDay, type ActivityWindow };

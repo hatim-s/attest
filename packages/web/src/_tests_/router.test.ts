@@ -1,9 +1,10 @@
-import { createApiClient } from '@attest/api/client';
+import { createDashboardSource } from '../api/dashboard-source.js';
 import type { ProjectRecord, RunRecord } from '@attest/core/records';
 import { QueryClient } from '@tanstack/react-query';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { expect, it } from 'vitest';
 import { createDashboardRouter } from '../router.js';
+import { overviewResponse } from './overview-responses.js';
 
 const run: RunRecord = {
   id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -17,35 +18,37 @@ const run: RunRecord = {
 const project: ProjectRecord = { key: 'demo', name: 'Demo' };
 
 const snapshotClient = () =>
-  createApiClient({
+  createDashboardSource({
     kind: 'snapshot',
     snapshot: { project, run, cases: [], generatedAt: run.createdAt, truncated: false },
   });
 
 /** Answers `/api/projects` with `projects` and every runs page with `runs`. */
 const httpClient = (projects: readonly ProjectRecord[], runs: readonly RunRecord[]) =>
-  createApiClient({
+  createDashboardSource({
     kind: 'http',
+    host: 'local',
     baseUrl: '/api',
     capabilities: { control: false },
     fetch: (input) => {
       const path = input instanceof Request ? input.url : input.toString();
 
       return Promise.resolve(
-        Response.json(path.endsWith('/api/projects') ? { items: projects } : { items: runs }),
+        overviewResponse(path, projects) ??
+          Response.json(path.endsWith('/api/projects') ? { items: projects } : { items: runs }),
       );
     },
   });
 
 /** Loads `path` in a memory router and hands the router to `inspect` before cleaning up. */
 const loadAt = async (
-  client: ReturnType<typeof createApiClient>,
+  client: ReturnType<typeof createDashboardSource>,
   path: string,
   inspect: (router: ReturnType<typeof createDashboardRouter>) => void,
 ): Promise<void> => {
   const queryClient = new QueryClient();
   const history = createMemoryHistory({ initialEntries: [path] });
-  const router = createDashboardRouter(history, { client, queryClient });
+  const router = createDashboardRouter(history, { source: client, queryClient });
   router.update({ ...router.options, isServer: false, origin: 'http://localhost' });
 
   try {
@@ -82,7 +85,7 @@ it('encodes suite segments and restores their raw route identity', async () => {
   const client = snapshotClient();
   const queryClient = new QueryClient();
   const history = createMemoryHistory({ initialEntries: ['/projects/demo/runs'] });
-  const router = createDashboardRouter(history, { client, queryClient });
+  const router = createDashboardRouter(history, { source: client, queryClient });
   router.update({ ...router.options, isServer: false, origin: 'http://localhost' });
 
   try {
@@ -96,7 +99,8 @@ it('encodes suite segments and restores their raw route identity', async () => {
     await router.load();
 
     const match = router.state.matches.find(
-      (item) => item.routeId === '/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId',
+      (item) =>
+        item.routeId === '/projects/$projectKey/workspace/runs/$runId/cases/$suiteName/$caseId',
     );
 
     expect(match?.params).toMatchObject({
@@ -111,21 +115,6 @@ it('encodes suite segments and restores their raw route identity', async () => {
   }
 });
 
-it('opens the only project from / and lists projects otherwise', async () => {
-  const other: ProjectRecord = { key: 'other', name: 'Other' };
-
-  await loadAt(httpClient([project], [run]), '/', (router) => {
-    expect(router.state.location.pathname).toBe(`/projects/demo/runs/${run.id}`);
-  });
-
-  for (const projects of [[project, other], []]) {
-    await loadAt(httpClient(projects, []), '/', (router) => {
-      expect(router.state.location.pathname).toBe('/projects');
-      expect(router.state.matches.at(-1)?.routeId).toBe('/projects');
-    });
-  }
-});
-
 it('redirects a project to its newest run and leaves an empty project at its runs index', async () => {
   for (const runs of [[run, { ...run, id: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }], []]) {
     await loadAt(httpClient([project], runs), '/projects/demo/runs?branch=main', (router) => {
@@ -134,7 +123,7 @@ it('redirects a project to its newest run and leaves an empty project at its run
         expect(router.state.location.search).toEqual({ branch: 'main', tab: 'cases' });
       } else {
         expect(router.state.location.pathname).toBe('/projects/demo/runs');
-        expect(router.state.matches.at(-1)?.routeId).toBe('/projects/$projectKey/runs/');
+        expect(router.state.matches.at(-1)?.routeId).toBe('/projects/$projectKey/workspace/runs/');
       }
     });
   }

@@ -111,9 +111,10 @@ type ApiClient = {
   ): Effect.Effect<RunCancelResponse, ApiError | Error>;
 };
 
+/** The client reads the same way from every HTTP host, so it ignores which host serves it. */
 type ApiClientConfig =
   | Exclude<DashboardBootstrap, { kind: 'http' }>
-  | (Extract<DashboardBootstrap, { kind: 'http' }> & { fetch?: typeof fetch });
+  | (Omit<Extract<DashboardBootstrap, { kind: 'http' }>, 'host'> & { fetch?: typeof fetch });
 
 /** Keeps host selection at startup so dashboard queries share one read interface. */
 const createApiClient = (config: ApiClientConfig): ApiClient =>

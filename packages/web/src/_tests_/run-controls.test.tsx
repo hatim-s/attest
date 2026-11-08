@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-import { createApiClient } from '@attest/api/client';
+import { createDashboardSource } from '../api/dashboard-source.js';
 import type { ProjectRecord, RunRecord, TestSummary } from '@attest/core/records';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-import { ApiClientProvider } from '../api/api-client-context.js';
+import { DashboardSourceProvider } from '../api/api-client-context.js';
 import { createDashboardRouter } from '../router.js';
+import { overviewResponse } from './overview-responses.js';
 
 const run: RunRecord = {
   id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -58,8 +59,9 @@ const renderRunsPage = ({
 }) => {
   const posts: Post[] = [];
 
-  const client = createApiClient({
+  const client = createDashboardSource({
     kind: 'http',
+    host: 'local',
     baseUrl: '/api',
     capabilities: { control },
     fetch: async (input, init) => {
@@ -78,6 +80,10 @@ const renderRunsPage = ({
 
       if (path.endsWith('/api/projects')) return Response.json({ items: [project] });
 
+      const overview = overviewResponse(path, [project]);
+
+      if (overview !== undefined) return overview;
+
       if (path.endsWith('/tests')) return Response.json({ items: tests });
 
       if (path.endsWith(`/runs/${run.id}`)) return Response.json(run);
@@ -88,17 +94,17 @@ const renderRunsPage = ({
 
   const queryClient = new QueryClient();
   const history = createMemoryHistory({ initialEntries: ['/projects/demo/runs'] });
-  const router = createDashboardRouter(history, { client, queryClient });
+  const router = createDashboardRouter(history, { source: client, queryClient });
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
 
   root.render(
-    <ApiClientProvider client={client}>
+    <DashboardSourceProvider source={client}>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>
-    </ApiClientProvider>,
+    </DashboardSourceProvider>,
   );
 
   const cleanup = () => {

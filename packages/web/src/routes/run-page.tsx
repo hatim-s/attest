@@ -11,7 +11,7 @@ import { RunTabs } from '../components/runs/run-tabs.js';
 import { useApiClient } from '../api/api-client-context.js';
 import { CancelRun } from './cancel-run.js';
 
-const route = getRouteApi('/projects/$projectKey/runs/$runId');
+const route = getRouteApi('/projects/$projectKey/workspace/runs/$runId');
 
 const RunCases = ({ run }: { run: RunRecord }) => {
   const { projectKey } = route.useParams();

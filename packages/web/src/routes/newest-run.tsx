@@ -2,7 +2,7 @@ import { getRouteApi, Navigate } from '@tanstack/react-router';
 import { useApiClient } from '../api/api-client-context.js';
 import { useRuns } from '../api/queries.js';
 
-const route = getRouteApi('/projects/$projectKey/runs/');
+const route = getRouteApi('/projects/$projectKey/workspace/runs/');
 
 /** Also redirects when polling discovers the first run after an empty initial load. */
 const NewestRun = () => {

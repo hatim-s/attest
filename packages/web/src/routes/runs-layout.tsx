@@ -6,7 +6,7 @@ import { RunList } from '../components/runs/run-list.js';
 import { Button } from '../components/shared/ui.js';
 import { NewRunDrawer } from './new-run-drawer.js';
 
-const route = getRouteApi('/projects/$projectKey');
+const route = getRouteApi('/projects/$projectKey/workspace');
 
 /**
  * Keeps the project's run navigation available on every workspace page. Hosts that can start runs
@@ -44,9 +44,9 @@ const RunsLayout = () => {
           ) : null
         }
       />
-      <main className="main-content">
+      <div className="main-content">
         <Outlet />
-      </main>
+      </div>
       {isNewRunOpen ? (
         <NewRunDrawer
           projectKey={projectKey}

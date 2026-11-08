@@ -39,6 +39,7 @@ const isAllowedRequest = (request: Request, allowedOrigin: string | undefined): 
 const createViewApp = (options: CreateViewAppOptions): Hono => {
   const dashboardHtml = createDashboardHtml(options.indexHtml, {
     kind: 'http',
+    host: 'local',
     baseUrl: '/api',
     capabilities: { control: options.control !== undefined },
   });

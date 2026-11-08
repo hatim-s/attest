@@ -5,7 +5,7 @@ import { ErrorNotice, Loading } from '../components/shared/ui.js';
 import { RunHeader } from '../components/runs/run-header.js';
 import { RunTabs } from '../components/runs/run-tabs.js';
 
-const route = getRouteApi('/projects/$projectKey/compare/$baseRunId/$candidateRunId');
+const route = getRouteApi('/projects/$projectKey/workspace/compare/$baseRunId/$candidateRunId');
 
 /** Makes a comparison reproducible from its baseline and candidate identities. */
 const ComparePage = () => {

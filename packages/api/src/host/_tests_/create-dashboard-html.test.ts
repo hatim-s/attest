@@ -8,13 +8,22 @@ const capabilities = { control: false };
 
 describe('createDashboardHtml', () => {
   it('injects the bootstrap before the deferred dashboard module', () => {
-    const result = createDashboardHtml(html, { kind: 'http', baseUrl: '/api', capabilities });
+    const result = createDashboardHtml(html, {
+      kind: 'http',
+      host: 'local',
+      baseUrl: '/api',
+      capabilities,
+    });
+
     expect(result).toContain('</script>\n    <script type="module">boot()');
-    expect(result).toContain('{"kind":"http","baseUrl":"/api","capabilities":{"control":false}}');
+    expect(result).toContain(
+      '{"kind":"http","host":"local","baseUrl":"/api","capabilities":{"control":false}}',
+    );
   });
   it('escapes script terminators and JavaScript line separators', () => {
     const result = createDashboardHtml(html, {
       kind: 'http',
+      host: 'local',
       baseUrl: '</script>\u2028\u2029',
       capabilities,
     });
@@ -49,7 +58,12 @@ describe('createDashboardHtml', () => {
   });
   it('rejects HTML that cannot boot the dashboard', () => {
     expect(() =>
-      createDashboardHtml('<html></html>', { kind: 'http', baseUrl: '/api', capabilities }),
+      createDashboardHtml('<html></html>', {
+        kind: 'http',
+        host: 'local',
+        baseUrl: '/api',
+        capabilities,
+      }),
     ).toThrow('The embedded dashboard does not contain its module script marker.');
   });
 });

@@ -1,4 +1,6 @@
-/* Approved Compact tokens, inherited only by shell descendants. */
+/* Approved Compact tokens. The document root takes them too while a shell is mounted, so the
+   body, overscroll and native scrollbars follow the shell theme instead of the legacy palette. */
+:root:has(.attest-compact),
 .attest-compact {
   --bg: light-dark(#ffffff, #0c0c0d);
   --on-ink: light-dark(#ffffff, #0c0c0d);
@@ -61,17 +63,25 @@
   --warning: var(--muted);
   --warning-soft: var(--panel);
 }
+:root:has(.attest-compact[data-theme='dark']),
 .attest-compact[data-theme='dark'] {
   color-scheme: dark;
   --shadow-y: 10px;
   --shadow-blur: 32px;
 }
+:root:has(.attest-compact[data-theme='system']),
 .attest-compact[data-theme='system'] {
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
+  :root:has(.attest-compact[data-theme='system']),
   .attest-compact[data-theme='system'] {
     --shadow-y: 10px;
     --shadow-blur: 32px;
   }
+}
+
+:root:has(.attest-compact) body {
+  background: var(--bg);
+  color: var(--text);
 }
