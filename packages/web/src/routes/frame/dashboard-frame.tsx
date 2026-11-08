@@ -7,6 +7,7 @@ import { CompactShell } from '../../shell/compact-shell.js';
 import { breadcrumbsFor, targetLink } from './shell-targets.js';
 import { navigationData, recentLabel, shellEvals, shellProjects } from './shell-data.js';
 import { useCurrentTarget } from './use-current-target.js';
+import { useTargetHref } from './use-target-href.js';
 
 /**
  * Root layout for every route. The sidebar reads the catalog overview and, for the open project
@@ -15,6 +16,7 @@ import { useCurrentTarget } from './use-current-target.js';
 const DashboardFrame = () => {
   const source = useDashboardSource();
   const router = useRouter();
+  const hrefFor = useTargetHref();
   const current = useCurrentTarget(source.id);
   const projectKey = current.kind === 'projects' ? undefined : current.projectKey;
   const overviews = useQuery(overviewsQueryOptions(source));
@@ -42,7 +44,7 @@ const DashboardFrame = () => {
         project: (key) =>
           overviews.data?.items.find((item) => item.project.key === key)?.project.name ?? key,
       })}
-      hrefFor={(target) => router.history.createHref(router.buildLocation(targetLink(target)).href)}
+      hrefFor={hrefFor}
       onNavigate={(target) => void router.navigate(targetLink(target))}
       // One source per host: there is nothing to switch to.
       onSourceChange={() => {}}

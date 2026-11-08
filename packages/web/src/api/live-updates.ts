@@ -8,10 +8,11 @@ import { queryKeys, type ProjectScope } from './query-keys.js';
  * starting (`lastRunAt`) or finishing (`runningRunCount`), every other read of that project is
  * invalidated by key prefix, so open charts pick up the change once instead of on a timer.
  */
-const useProjectChangeSignal = (scope: ProjectScope, overview: ProjectRunOverview | undefined) => {
+const useProjectChangeSignal = (
+  { sourceId, projectKey }: ProjectScope,
+  overview: ProjectRunOverview | undefined,
+) => {
   const queryClient = useQueryClient();
-  const owner = hashKey(queryKeys.project(scope));
-  const overviewKey = hashKey(queryKeys.projectOverview(scope));
 
   const signal =
     overview === undefined ? undefined : `${overview.lastRunAt}:${overview.runningRunCount}`;
@@ -20,6 +21,9 @@ const useProjectChangeSignal = (scope: ProjectScope, overview: ProjectRunOvervie
 
   useEffect(() => {
     if (signal === undefined) return;
+    const scope = { sourceId, projectKey };
+    const owner = hashKey(queryKeys.project(scope));
+    const overviewHash = hashKey(queryKeys.projectOverview(scope));
     const previous = seen.current;
     seen.current = { owner, signal };
 
@@ -28,9 +32,9 @@ const useProjectChangeSignal = (scope: ProjectScope, overview: ProjectRunOvervie
 
     void queryClient.invalidateQueries({
       queryKey: queryKeys.project(scope),
-      predicate: (query) => query.queryHash !== overviewKey,
+      predicate: (query) => query.queryHash !== overviewHash,
     });
-  }, [owner, overviewKey, queryClient, scope, signal]);
+  }, [projectKey, queryClient, signal, sourceId]);
 };
 
 export { useProjectChangeSignal };

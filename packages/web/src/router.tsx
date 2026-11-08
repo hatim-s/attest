@@ -25,6 +25,8 @@ import type { DashboardSource } from './api/dashboard-source.js';
 import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
 import { DirectoryPage } from './routes/directory/directory-page.js';
+import { ProjectPage } from './routes/project/project-page.js';
+import { PROJECT_RANGES } from './routes/project/project-range.js';
 import { RunsLayout } from './routes/runs-layout.js';
 import { DashboardFrame } from './routes/frame/dashboard-frame.js';
 import { NewestRun } from './routes/newest-run.js';
@@ -74,10 +76,23 @@ const projectRoute = createRoute({
     ),
 });
 
+/** `range` is the period in days; `eval` picks the eval on the pass-rate chart. */
+const projectSearchSchema = stripStruct({
+  range: Schema.Literals(PROJECT_RANGES)
+    .pipe(Schema.withDecodingDefault(Effect.succeed(PROJECT_RANGES[0])))
+    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(PROJECT_RANGES[0])))),
+  eval: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
+    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+  ),
+});
+
 const projectIndexRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/',
-  beforeLoad: ({ params }) => redirect({ to: '/projects/$projectKey/runs', params }),
+  validateSearch: Schema.toStandardSchemaV1(projectSearchSchema, {
+    parseOptions: { onExcessProperty: 'error', errors: 'all' },
+  }),
+  component: ProjectPage,
 });
 
 /** The run list, run, comparison and eval pages that the compact eval routes will replace. */
