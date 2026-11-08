@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from '@tanstack/react-router';
 import type { EvalSlice } from '@attest/core/records';
 import { shortRunId } from '../../lib/format.js';
 import { CaseHistoryStrip, type HistoryMark } from './case-history-strip.js';
@@ -68,7 +69,13 @@ const CaseWindowTable = ({ projectKey, suiteName, runs, rows, empty }: CaseWindo
             <tr key={row.caseId}>
               <td className="attest-num attest-dim attest-mono attest-pos-c">{row.position}</td>
               <td className="attest-case-id">
-                <span className="attest-mono">{row.caseId}</span>
+                <Link
+                  className="attest-rowlink"
+                  to="/projects/$projectKey/evals/$suiteName/cases/$caseId"
+                  params={{ projectKey, suiteName, caseId: row.caseId }}
+                >
+                  {row.caseId}
+                </Link>
               </td>
               <td className="attest-nw attest-hide-narrow">
                 {marks.length === 0 ? (

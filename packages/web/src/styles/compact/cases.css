@@ -73,6 +73,19 @@
 .attest-compact .attest-cases-table .attest-strip-key {
   display: none;
 }
+/* The case page's strip and "Passed 8 of 10 runs" under its title. */
+.attest-compact .attest-hist-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.attest-compact .attest-hist-sum .attest-case-strip {
+  max-width: 100%;
+}
 
 @media (max-width: 800px) {
   .attest-compact .attest-chips button {

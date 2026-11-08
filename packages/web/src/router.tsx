@@ -3,6 +3,7 @@ import * as Option from 'effect/Option';
 import { stripStruct, SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import {
+  caseHistoryParamsSchema,
   caseParamsSchema,
   evalParamsSchema,
   projectParamsSchema,
@@ -26,6 +27,7 @@ import { DirectoryPage } from './routes/directory/directory-page.js';
 import { EvalRunsPage } from './routes/eval/eval-runs-page.js';
 import { CASE_FILTERS } from './routes/eval-cases/case-standing.js';
 import { EvalCasesPage } from './routes/eval-cases/eval-cases-page.js';
+import { EvalCasePage } from './routes/eval-case/eval-case-page.js';
 import { EvalRunPage } from './routes/eval-run/eval-run-page.js';
 import { DashboardFrame } from './routes/frame/dashboard-frame.js';
 import { ProjectPage } from './routes/project/project-page.js';
@@ -169,6 +171,19 @@ const evalCasesRoute = createRoute({
   component: EvalCasesPage,
 });
 
+const evalCaseRoute = createRoute({
+  getParentRoute: () => evalRoute,
+  path: 'cases/$caseId',
+  params: {
+    parse: (params) =>
+      parseWithSchemaSync(
+        stripStruct({ caseId: caseHistoryParamsSchema.from.schema.fields.caseId }),
+        params,
+      ),
+  },
+  component: EvalCasePage,
+});
+
 const evalRunRoute = createRoute({
   getParentRoute: () => evalRoute,
   path: 'runs/$runId',
@@ -205,6 +220,7 @@ const routeTree = rootRoute.addChildren([
       evalIndexRoute,
       evalRunsRoute,
       evalCasesRoute,
+      evalCaseRoute,
       evalRunRoute,
       runCaseRoute,
     ]),

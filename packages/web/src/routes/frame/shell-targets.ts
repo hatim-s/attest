@@ -45,11 +45,19 @@ const targetLink = (target: ShellTarget) => {
         search: { x: 'run' },
       });
     case 'cases':
-    case 'case':
       return linkOptions({
         to: '/projects/$projectKey/evals/$suiteName/cases',
         params: { projectKey: target.projectKey, suiteName: target.evalId },
         search: { filter: 'all' },
+      });
+    case 'case':
+      return linkOptions({
+        to: '/projects/$projectKey/evals/$suiteName/cases/$caseId',
+        params: {
+          projectKey: target.projectKey,
+          suiteName: target.evalId,
+          caseId: target.caseId,
+        },
       });
   }
 };
