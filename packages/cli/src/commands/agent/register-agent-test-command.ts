@@ -65,15 +65,11 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
                 let request: Extract<CommandRequest, { command: 'agent.test' }> = {
                   schema: COMMAND_REQUEST_SCHEMA_ID,
                   command: 'agent.test',
-                  agent_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        agentId,
-                        { path: '<agent-id>', question: 'Agent id: ' },
-                        { interactive, prompt: context.interaction.prompt, signal },
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  agent_id: yield* requiredInput(
+                    agentId,
+                    { path: '<agent-id>', question: 'Agent id: ' },
+                    { interactive, prompt: context.interaction.prompt, signal },
+                  ),
                   input: yield* readAgentTestInput({
                     input: options.input,
                     inputFile: options.inputFile,

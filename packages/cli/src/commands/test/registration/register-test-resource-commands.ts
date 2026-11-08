@@ -49,21 +49,17 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
             options,
             build: () =>
               Effect.gen(function* () {
-                const id = yield* Effect.tryPromise({
-                  try: () =>
-                    requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                  catch: (cause) => cause,
-                });
+                const id = yield* requiredInput(
+                  testId,
+                  { path: '<test-id>', question: 'Test id: ' },
+                  prompt,
+                );
 
-                const agentId = yield* Effect.tryPromise({
-                  try: () =>
-                    requiredInput(
-                      options.agent,
-                      { path: '--agent', question: 'Existing agent id: ' },
-                      prompt,
-                    ),
-                  catch: (cause) => cause,
-                });
+                const agentId = yield* requiredInput(
+                  options.agent,
+                  { path: '--agent', question: 'Existing agent id: ' },
+                  prompt,
+                );
 
                 return {
                   ...mutationRequestFields('test.add', options),
@@ -111,18 +107,14 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
     .action((testId: string | undefined, options: CommonCliOptions) =>
       context.submit(
         Effect.gen(function* () {
-          const id = yield* Effect.tryPromise({
-            try: () =>
-              requiredInput(
-                testId,
-                { path: '<test-id>', question: 'Test id: ' },
-                {
-                  interactive: isInteractive(options, context.interaction),
-                  prompt: context.interaction.prompt,
-                },
-              ),
-            catch: (cause) => cause,
-          });
+          const id = yield* requiredInput(
+            testId,
+            { path: '<test-id>', question: 'Test id: ' },
+            {
+              interactive: isInteractive(options, context.interaction),
+              prompt: context.interaction.prompt,
+            },
+          );
 
           const result = yield* runTestShowCommand({
             project: options.project,
@@ -161,24 +153,16 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('test.rename', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          testId,
-                          { path: '<test-id>', question: 'Current test id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
-                    new_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          newId,
-                          { path: '<new-id>', question: 'New test id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Current test id: ' },
+                      prompt,
+                    ),
+                    new_id: yield* requiredInput(
+                      newId,
+                      { path: '<new-id>', question: 'New test id: ' },
+                      prompt,
+                    ),
                   };
                 }),
             });
@@ -204,32 +188,19 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
               Effect.gen(function* () {
                 return {
                   ...mutationRequestFields('test.remove', options),
-                  test_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        testId,
-                        { path: '<test-id>', question: 'Test id: ' },
-                        {
-                          interactive: isInteractive(
-                            options,
-                            context.interaction,
-                            options.fromJson,
-                          ),
-                          prompt: context.interaction.prompt,
-                        },
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  test_id: yield* requiredInput(
+                    testId,
+                    { path: '<test-id>', question: 'Test id: ' },
+                    {
+                      interactive: isInteractive(options, context.interaction, options.fromJson),
+                      prompt: context.interaction.prompt,
+                    },
+                  ),
                 };
               }),
           });
 
-          if (
-            !(yield* Effect.tryPromise({
-              try: () => confirmRemoval(request, `test ${request.test_id}`, options, context),
-              catch: (cause) => cause,
-            }))
-          )
+          if (!(yield* confirmRemoval(request, `test ${request.test_id}`, options, context)))
             return;
           yield* runTestMutation(request, options, context);
         }),

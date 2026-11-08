@@ -1,3 +1,4 @@
+import { promptWithSignal } from '../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import { METRIC_PRESETS, type MetricPresetId } from '@attest/contracts';
 import { loadCommandProject } from '@attest/local/project';
@@ -56,10 +57,8 @@ const guidedChoice = <Choice extends string>(
 ) =>
   Effect.gen(function* () {
     const answer =
-      (yield* Effect.tryPromise({
-        try: () => context.interaction.prompt(question),
-        catch: (cause) => cause,
-      })).trim() || defaultChoice;
+      (yield* promptWithSignal(context.interaction.prompt, question, context.signal)).trim() ||
+      defaultChoice;
 
     const choice = choices.find((candidate) => candidate === answer);
 
@@ -98,13 +97,11 @@ const guidedTraceCapability = (options: MetricAddOptions, context: CommandContex
       .join('\n');
 
     const selectedId =
-      (yield* Effect.tryPromise({
-        try: () =>
-          context.interaction.prompt(
-            `Agent trace capabilities:\n${catalog}\nAgent for capability guidance [${defaultAgent.id}]: `,
-          ),
-        catch: (cause) => cause,
-      })).trim() || defaultAgent.id;
+      (yield* promptWithSignal(
+        context.interaction.prompt,
+        `Agent trace capabilities:\n${catalog}\nAgent for capability guidance [${defaultAgent.id}]: `,
+        context.signal,
+      )).trim() || defaultAgent.id;
 
     const selected = loaded.agents.find(({ id }) => id === selectedId);
 
@@ -196,12 +193,7 @@ const selectGuidedMetricFields = (
 
     const step = OPERATOR_PROMPTS.get(operator);
 
-    return step === undefined
-      ? guided
-      : yield* Effect.tryPromise({
-          try: () => askGuidedPrompt(step, guided, context),
-          catch: (cause) => cause,
-        });
+    return step === undefined ? guided : yield* askGuidedPrompt(step, guided, context);
   });
 
 /** Asks for whatever the chosen preset still needs, in the order the preset lists it. */
@@ -217,11 +209,7 @@ const fillGuidedMetricFields = (
     let guided = options;
 
     for (const step of PRESET_PROMPTS[preset] ?? []) {
-      if (step.needed(guided))
-        guided = yield* Effect.tryPromise({
-          try: () => askGuidedPrompt(step, guided, context),
-          catch: (cause) => cause,
-        });
+      if (step.needed(guided)) guided = yield* askGuidedPrompt(step, guided, context);
     }
 
     return guided;

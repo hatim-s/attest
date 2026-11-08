@@ -36,7 +36,12 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
       context.submit(
         Effect.gen(function* () {
           const interactive = isInteractive(options, context.interaction, options.fromJson);
-          const prompt = { interactive, prompt: context.interaction.prompt };
+
+          const prompt = {
+            interactive,
+            prompt: context.interaction.prompt,
+            signal: context.signal,
+          };
 
           const request = yield* readOrBuildRequest({
             command: 'agent.rename',
@@ -47,24 +52,16 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
               Effect.gen(function* () {
                 return {
                   ...mutationRequestFields('agent.rename', options),
-                  agent_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        agentId,
-                        { path: '<agent-id>', question: 'Agent id: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  }),
-                  new_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        newId,
-                        { path: '<new-id>', question: 'New agent id: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  agent_id: yield* requiredInput(
+                    agentId,
+                    { path: '<agent-id>', question: 'Agent id: ' },
+                    prompt,
+                  ),
+                  new_id: yield* requiredInput(
+                    newId,
+                    { path: '<new-id>', question: 'New agent id: ' },
+                    prompt,
+                  ),
                 };
               }),
           });
@@ -105,15 +102,11 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
               Effect.gen(function* () {
                 let request: Extract<CommandRequest, { command: 'agent.remove' }> = {
                   ...mutationRequestFields('agent.remove', options),
-                  agent_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        agentId,
-                        { path: '<agent-id>', question: 'Agent id: ' },
-                        { interactive, prompt: context.interaction.prompt },
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  agent_id: yield* requiredInput(
+                    agentId,
+                    { path: '<agent-id>', question: 'Agent id: ' },
+                    { interactive, prompt: context.interaction.prompt, signal: context.signal },
+                  ),
                 };
 
                 if (options.detach !== undefined) {

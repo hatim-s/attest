@@ -1,3 +1,4 @@
+import { promptWithSignal } from '../../shared/required-input.js';
 import * as Effect from 'effect/Effect';
 import type { DatasetImportMapping } from '@attest/contracts';
 import {
@@ -145,13 +146,11 @@ const withSuggestedMappings = (
 
     const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);
 
-    const answer = (yield* Effect.tryPromise({
-      try: () =>
-        context.interaction.prompt(
-          `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
-        ),
-      catch: (cause) => cause,
-    }))
+    const answer = (yield* promptWithSignal(
+      context.interaction.prompt,
+      `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
+      context.signal,
+    ))
       .trim()
       .toLowerCase();
 
@@ -202,10 +201,11 @@ const runGuidedImport = (
 
     if (
       !confirmed(
-        yield* Effect.tryPromise({
-          try: () => context.interaction.prompt('Apply this import? [y/N]: '),
-          catch: (cause) => cause,
-        }),
+        yield* promptWithSignal(
+          context.interaction.prompt,
+          'Apply this import? [y/N]: ',
+          context.signal,
+        ),
       )
     ) {
       context.io.output('No changes made; import was not applied.');

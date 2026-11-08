@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
@@ -105,26 +106,26 @@ const assertNoEvalFlags = (fromJson: string | undefined, command: Command): void
 };
 
 /** Asks which tests to run; an empty answer or `all` selects every test. */
-const promptForSelection = async (
+const promptForSelection = Effect.fn('promptForSelection')(function* (
   context: PromptContext,
-): Promise<{ all: true } | { test_ids: readonly string[] }> => {
+): Effect.fn.Return<{ all: true } | { test_ids: readonly string[] }, Error> {
   const question = 'Test ids (space-separated) or all [all]: ';
-  const answer = (await promptWithSignal(context.prompt, question, context.signal)).trim();
+  const answer = (yield* promptWithSignal(context.prompt, question, context.signal)).trim();
 
   if (answer.length === 0 || answer.toLowerCase() === 'all') return { all: true };
 
   return { test_ids: answer.split(/[\s,]+/u).filter((value) => value.length > 0) };
-};
+});
 
 /** Turns run flags, or the selection wizard when no tests were named, into one run request. */
-const createEvalRunRequest = async (
+const createEvalRunRequest = Effect.fn('createEvalRunRequest')(function* (
   fields: EvalRunRequestFields,
   context: PromptContext,
-): Promise<EvalRunRequest> => {
+): Effect.fn.Return<EvalRunRequest, Error> {
   const testIds = fields.testIds ?? [];
 
   if (fields.all === true && testIds.length > 0) {
-    throw new AttestCliError('cli_usage', '`--all` conflicts with explicit test ids.', {
+    return yield* new AttestCliError('cli_usage', '`--all` conflicts with explicit test ids.', {
       path: '--all',
       hint: 'Pass either --all or one or more test ids.',
       details: { conflicting_fields: ['--all', '<test-id>'] },
@@ -132,13 +133,13 @@ const createEvalRunRequest = async (
   }
 
   if (fields.seed !== undefined && fields.sample === undefined) {
-    throw new AttestCliError('cli_usage', '`--seed` requires `--sample`.');
+    return yield* new AttestCliError('cli_usage', '`--seed` requires `--sample`.');
   }
 
   const output = fields.output ?? 'human';
 
   if (fields.watch === true && output !== 'human') {
-    throw new AttestCliError('cli_usage', '`--watch` requires human output.', {
+    return yield* new AttestCliError('cli_usage', '`--watch` requires human output.', {
       path: '--watch',
       hint: 'Remove --watch or use --output human.',
       details: { conflicting_fields: ['--output', '--watch'] },
@@ -149,9 +150,9 @@ const createEvalRunRequest = async (
 
   if (fields.all === true) selection = { all: true };
   else if (testIds.length > 0) selection = { test_ids: [...testIds] };
-  else if (context.interactive) selection = await promptForSelection(context);
+  else if (context.interactive) selection = yield* promptForSelection(context);
   else {
-    throw new AttestCliError('cli_missing_input', 'Eval run selection is missing.', {
+    return yield* new AttestCliError('cli_missing_input', 'Eval run selection is missing.', {
       path: '<test-id>|--all',
       hint: 'Pass one or more test ids, --all, or a complete --from-json request.',
     });
@@ -184,7 +185,14 @@ const createEvalRunRequest = async (
     request = { ...request, concurrency: Number(fields.concurrency) };
 
   if (fields.timeout !== undefined)
-    request = { ...request, timeout_ms: parseDuration(fields.timeout) };
+    request = {
+      ...request,
+      timeout_ms: yield* Effect.try({
+        try: () => parseDuration(fields.timeout ?? ''),
+        catch: (cause) =>
+          cause instanceof Error ? cause : new Error('Duration parsing failed.', { cause }),
+      }),
+    };
 
   if (fields.baseline !== undefined) request = { ...request, baseline_run_id: fields.baseline };
 
@@ -192,8 +200,12 @@ const createEvalRunRequest = async (
 
   if (fields.watch !== undefined) request.watch = fields.watch;
 
-  return parseEvalRunRequest(request);
-};
+  return yield* Effect.try({
+    try: () => parseEvalRunRequest(request),
+    catch: (cause) =>
+      cause instanceof Error ? cause : new Error('Eval request parsing failed.', { cause }),
+  });
+});
 
 /** Turns cancellation flags into one cancel request. */
 const createEvalCancelRequest = (fields: EvalCancelRequestFields): EvalCancelRequest => {

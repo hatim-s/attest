@@ -1,3 +1,5 @@
+import { promptWithSignal } from '../shared/required-input.js';
+import * as Effect from 'effect/Effect';
 import type { AgentAddFields } from '@attest/local/agent';
 
 import { AttestCliError } from '../../errors/cli-error.js';
@@ -16,8 +18,14 @@ const TRANSPORT_FLAGS = [
   'webSocketUrl',
 ] as const satisfies readonly (keyof AgentAddFields)[];
 
-const readTransport = async (context: PromptContext): Promise<GuidedTransport> => {
-  const answer = (await context.prompt('Transport [cli/http/background/jsonl/stream/websocket]: '))
+const readTransport = Effect.fn('readTransport')(function* (
+  context: PromptContext,
+): Effect.fn.Return<GuidedTransport, Error> {
+  const answer = (yield* promptWithSignal(
+    context.prompt,
+    'Transport [cli/http/background/jsonl/stream/websocket]: ',
+    context.signal,
+  ))
     .trim()
     .toLowerCase();
 
@@ -35,77 +43,90 @@ const readTransport = async (context: PromptContext): Promise<GuidedTransport> =
   const transport = transports.find((candidate) => candidate === answer);
 
   if (transport !== undefined) return transport;
-  throw new AttestCliError(
+
+  return yield* new AttestCliError(
     'cli_usage',
     'Transport must be cli, http, background, jsonl, stream, or websocket.',
     { path: 'transport' },
   );
-};
+});
 
-const promptBackgroundFields = async (
+const promptBackgroundFields = Effect.fn('promptBackgroundFields')(function* (
   context: PromptContext,
-): Promise<Partial<AgentAddFields>> => ({
-  backgroundCommand: await requiredInput(
-    undefined,
-    { path: '--background-command', question: 'Background start command: ' },
-    context,
-  ),
-  readinessHttp: await requiredInput(
-    undefined,
-    { path: '--readiness-http', question: 'Readiness HTTP URL: ' },
-    context,
-  ),
-  invokeUrl: await requiredInput(
-    undefined,
-    { path: '--invoke-url', question: 'Invoke HTTP URL: ' },
-    context,
-  ),
-  responsePointer: await promptDefault(undefined, 'Result JSON Pointer', '/output', context),
-  stopTimeout: await promptDefault(undefined, 'Stop timeout', '5s', context),
+): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+  return {
+    backgroundCommand: yield* requiredInput(
+      undefined,
+      { path: '--background-command', question: 'Background start command: ' },
+      context,
+    ),
+    readinessHttp: yield* requiredInput(
+      undefined,
+      { path: '--readiness-http', question: 'Readiness HTTP URL: ' },
+      context,
+    ),
+    invokeUrl: yield* requiredInput(
+      undefined,
+      { path: '--invoke-url', question: 'Invoke HTTP URL: ' },
+      context,
+    ),
+    responsePointer: yield* promptDefault(undefined, 'Result JSON Pointer', '/output', context),
+    stopTimeout: yield* promptDefault(undefined, 'Stop timeout', '5s', context),
+  };
 });
 
-const promptJsonlFields = async (context: PromptContext): Promise<Partial<AgentAddFields>> => ({
-  jsonlCommand: await requiredInput(
-    undefined,
-    { path: '--jsonl-command', question: 'JSONL bridge command: ' },
-    context,
-  ),
-  bridgeConcurrency: await promptChoice(
-    'Bridge concurrency',
-    ['serial', 'multiplexed'],
-    'serial',
-    '--bridge-concurrency',
-    context,
-  ),
-  cancellationGrace: await promptDefault(undefined, 'Cancellation grace', '1s', context),
+const promptJsonlFields = Effect.fn('promptJsonlFields')(function* (
+  context: PromptContext,
+): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+  return {
+    jsonlCommand: yield* requiredInput(
+      undefined,
+      { path: '--jsonl-command', question: 'JSONL bridge command: ' },
+      context,
+    ),
+    bridgeConcurrency: yield* promptChoice(
+      'Bridge concurrency',
+      ['serial', 'multiplexed'],
+      'serial',
+      '--bridge-concurrency',
+      context,
+    ),
+    cancellationGrace: yield* promptDefault(undefined, 'Cancellation grace', '1s', context),
+  };
 });
 
-const promptStreamFields = async (context: PromptContext): Promise<Partial<AgentAddFields>> => ({
-  streamUrl: await requiredInput(
-    undefined,
-    { path: '--stream-url', question: 'Stream HTTP URL: ' },
-    context,
-  ),
-  streamFraming: await promptChoice(
-    'Stream framing',
-    ['sse', 'jsonl'],
-    'sse',
-    '--stream-framing',
-    context,
-  ),
-  terminalPointer: await promptDefault(undefined, 'Terminal JSON Pointer', '/type', context),
-  terminalValues: [await promptDefault(undefined, 'Terminal JSON value', '"result"', context)],
-  responsePointer: await promptDefault(undefined, 'Result JSON Pointer', '/output', context),
+const promptStreamFields = Effect.fn('promptStreamFields')(function* (
+  context: PromptContext,
+): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+  return {
+    streamUrl: yield* requiredInput(
+      undefined,
+      { path: '--stream-url', question: 'Stream HTTP URL: ' },
+      context,
+    ),
+    streamFraming: yield* promptChoice(
+      'Stream framing',
+      ['sse', 'jsonl'],
+      'sse',
+      '--stream-framing',
+      context,
+    ),
+    terminalPointer: yield* promptDefault(undefined, 'Terminal JSON Pointer', '/type', context),
+    terminalValues: [yield* promptDefault(undefined, 'Terminal JSON value', '"result"', context)],
+    responsePointer: yield* promptDefault(undefined, 'Result JSON Pointer', '/output', context),
+  };
 });
 
-const promptWebSocketFields = async (context: PromptContext): Promise<Partial<AgentAddFields>> => {
-  const webSocketUrl = await requiredInput(
+const promptWebSocketFields = Effect.fn('promptWebSocketFields')(function* (
+  context: PromptContext,
+): Effect.fn.Return<Partial<AgentAddFields>, Error> {
+  const webSocketUrl = yield* requiredInput(
     undefined,
     { path: '--websocket-url', question: 'WebSocket URL: ' },
     context,
   );
 
-  const webSocketLifecycle = await promptChoice(
+  const webSocketLifecycle = yield* promptChoice(
     'WebSocket lifecycle',
     ['per_run', 'per_case'],
     'per_run',
@@ -113,7 +134,7 @@ const promptWebSocketFields = async (context: PromptContext): Promise<Partial<Ag
     context,
   );
 
-  const connectionMode = await promptChoice(
+  const connectionMode = yield* promptChoice(
     'Connection mode',
     ['serial', 'multiplexed'],
     webSocketLifecycle === 'per_case' ? 'serial' : 'multiplexed',
@@ -126,58 +147,62 @@ const promptWebSocketFields = async (context: PromptContext): Promise<Partial<Ag
     webSocketLifecycle,
     connectionMode,
     headerEnv: commaSeparated(
-      await context.prompt('Header environment references HEADER=ENV, comma-separated [none]: '),
+      yield* promptWithSignal(
+        context.prompt,
+        'Header environment references HEADER=ENV, comma-separated [none]: ',
+        context.signal,
+      ),
     ),
-    webSocketSubprotocol: await promptOptional(undefined, 'WebSocket subprotocol', context),
-    requestTemplate: await promptDefault(
+    webSocketSubprotocol: yield* promptOptional(undefined, 'WebSocket subprotocol', context),
+    requestTemplate: yield* promptDefault(
       undefined,
       'Request template JSON',
       '{"request_id":"{{request_id}}","request":"{{request}}"}',
       context,
     ),
-    requestIdPointer: await promptDefault(
+    requestIdPointer: yield* promptDefault(
       undefined,
       'Request id JSON Pointer',
       '/request_id',
       context,
     ),
-    acknowledgementPointer: await promptDefault(
+    acknowledgementPointer: yield* promptDefault(
       undefined,
       'Acknowledgement JSON Pointer',
       '/type',
       context,
     ),
     acknowledgementValues: [
-      await promptDefault(undefined, 'Acknowledgement JSON value', '"acknowledgement"', context),
+      yield* promptDefault(undefined, 'Acknowledgement JSON value', '"acknowledgement"', context),
     ],
-    responsePointer: await promptDefault(undefined, 'Result JSON Pointer', '/output', context),
-    errorPointer: await promptDefault(undefined, 'Error JSON Pointer', '/error', context),
-    tracePointer: await promptOptional(undefined, 'Trace JSON Pointer', context),
-    openTimeout: await promptDefault(undefined, 'Open timeout', '10s', context),
-    idleTimeout: await promptDefault(undefined, 'Message idle timeout', '30s', context),
-    attemptTimeout: await promptDefault(undefined, 'Attempt timeout', '60s', context),
-    pingInterval: await promptDefault(undefined, 'Ping interval', '15s', context),
-    closeTimeout: await promptDefault(undefined, 'Close timeout', '5s', context),
+    responsePointer: yield* promptDefault(undefined, 'Result JSON Pointer', '/output', context),
+    errorPointer: yield* promptDefault(undefined, 'Error JSON Pointer', '/error', context),
+    tracePointer: yield* promptOptional(undefined, 'Trace JSON Pointer', context),
+    openTimeout: yield* promptDefault(undefined, 'Open timeout', '10s', context),
+    idleTimeout: yield* promptDefault(undefined, 'Message idle timeout', '30s', context),
+    attemptTimeout: yield* promptDefault(undefined, 'Attempt timeout', '60s', context),
+    pingInterval: yield* promptDefault(undefined, 'Ping interval', '15s', context),
+    closeTimeout: yield* promptDefault(undefined, 'Close timeout', '5s', context),
   };
-};
+});
 
 /**
  * Asks for the transport and its fields when no transport flag was passed. The answers replace
  * the matching flags; everything else the user passed is kept as-is.
  */
-const promptTransportFields = async (
+const promptTransportFields = Effect.fn('promptTransportFields')(function* (
   fields: AgentAddFields,
   context: PromptContext,
-): Promise<AgentAddFields> => {
+): Effect.fn.Return<AgentAddFields, Error> {
   if (!context.interactive || TRANSPORT_FLAGS.some((flag) => fields[flag] !== undefined)) {
     return fields;
   }
 
-  switch (await readTransport(context)) {
+  switch (yield* readTransport(context)) {
     case 'cli':
       return {
         ...fields,
-        nativeCommand: await requiredInput(
+        nativeCommand: yield* requiredInput(
           undefined,
           { path: '--native-command', question: 'Native command: ' },
           context,
@@ -186,21 +211,21 @@ const promptTransportFields = async (
     case 'http':
       return {
         ...fields,
-        nativeHttp: await requiredInput(
+        nativeHttp: yield* requiredInput(
           undefined,
           { path: '--native-http', question: 'Native HTTP URL: ' },
           context,
         ),
       };
     case 'background':
-      return { ...fields, ...(await promptBackgroundFields(context)) };
+      return { ...fields, ...(yield* promptBackgroundFields(context)) };
     case 'jsonl':
-      return { ...fields, ...(await promptJsonlFields(context)) };
+      return { ...fields, ...(yield* promptJsonlFields(context)) };
     case 'stream':
-      return { ...fields, ...(await promptStreamFields(context)) };
+      return { ...fields, ...(yield* promptStreamFields(context)) };
     case 'websocket':
-      return { ...fields, ...(await promptWebSocketFields(context)) };
+      return { ...fields, ...(yield* promptWebSocketFields(context)) };
   }
-};
+});
 
 export { promptTransportFields };

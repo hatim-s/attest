@@ -197,7 +197,12 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
         Effect.gen(function* () {
           const fields = agentAddFields(agentId, options);
           const interactive = isInteractive(options, context.interaction, options.fromJson);
-          const prompt = { interactive, prompt: context.interaction.prompt };
+
+          const prompt = {
+            interactive,
+            prompt: context.interaction.prompt,
+            signal: context.signal,
+          };
 
           const request = yield* readOrBuildRequest({
             command: 'agent.add',
@@ -206,16 +211,13 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
             options,
             build: () =>
               Effect.gen(function* () {
-                const id = yield* Effect.tryPromise({
-                  try: () =>
-                    requiredInput(agentId, { path: '<agent-id>', question: 'Agent id: ' }, prompt),
-                  catch: (cause) => cause,
-                });
+                const id = yield* requiredInput(
+                  agentId,
+                  { path: '<agent-id>', question: 'Agent id: ' },
+                  prompt,
+                );
 
-                const guided = yield* Effect.tryPromise({
-                  try: () => promptTransportFields({ ...fields, agentId: id }, prompt),
-                  catch: (cause) => cause,
-                });
+                const guided = yield* promptTransportFields({ ...fields, agentId: id }, prompt);
 
                 return {
                   ...mutationRequestFields('agent.add', options),

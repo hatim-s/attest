@@ -44,24 +44,16 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
                 return {
                   schema: COMMAND_REQUEST_SCHEMA_ID,
                   command: 'metric.test',
-                  metric_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        metricId,
-                        { path: '<metric-id>', question: 'Metric id: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  }),
-                  fixture: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        options.fixture,
-                        { path: '--fixture', question: 'Fixture path or -: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  metric_id: yield* requiredInput(
+                    metricId,
+                    { path: '<metric-id>', question: 'Metric id: ' },
+                    prompt,
+                  ),
+                  fixture: yield* requiredInput(
+                    options.fixture,
+                    { path: '--fixture', question: 'Fixture path or -: ' },
+                    prompt,
+                  ),
                 };
               }),
           });

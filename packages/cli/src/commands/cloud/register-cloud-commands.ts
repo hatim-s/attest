@@ -321,26 +321,22 @@ const registerCloudCommands = ({
               ),
             );
 
-          const request = yield* Effect.tryPromise({
-            try: () =>
-              createEvalRunRequest(
-                {
-                  all: options.all,
-                  testIds,
-                  caseIds: options.case,
-                  tags: options.tag,
-                  folders: options.folder,
-                  datasetIds: options.dataset,
-                  sample: options.sample,
-                  seed: options.seed,
-                  concurrency: options.concurrency,
-                  timeout: options.timeout,
-                  output: 'json',
-                },
-                { interactive: false, prompt: interaction.prompt },
-              ),
-            catch: (cause) => cause,
-          });
+          const request = yield* createEvalRunRequest(
+            {
+              all: options.all,
+              testIds,
+              caseIds: options.case,
+              tags: options.tag,
+              folders: options.folder,
+              datasetIds: options.dataset,
+              sample: options.sample,
+              seed: options.seed,
+              concurrency: options.concurrency,
+              timeout: options.timeout,
+              output: 'json',
+            },
+            { interactive: false, prompt: interaction.prompt },
+          );
 
           const idempotencyKey = options.idempotencyKey ?? randomUUID();
           // Print the key before submission so a lost response can be retried safely.

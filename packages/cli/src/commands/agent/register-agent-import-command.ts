@@ -91,7 +91,12 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
       context.submit(
         Effect.gen(function* () {
           const interactive = isInteractive(options, context.interaction, options.fromJson);
-          const prompt = { interactive, prompt: context.interaction.prompt };
+
+          const prompt = {
+            interactive,
+            prompt: context.interaction.prompt,
+            signal: context.signal,
+          };
 
           const runImport = (
             request: Parameters<typeof runAgentImportCommand>[0]['request'],
@@ -124,21 +129,17 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
             return;
           }
 
-          const importSource = yield* Effect.tryPromise({
-            try: () =>
-              requiredInput(
-                source,
-                { path: '<path|url|->', question: 'Agent import source: ' },
-                prompt,
-              ),
-            catch: (cause) => cause,
-          });
+          const importSource = yield* requiredInput(
+            source,
+            { path: '<path|url|->', question: 'Agent import source: ' },
+            prompt,
+          );
 
-          const importId = yield* Effect.tryPromise({
-            try: () =>
-              requiredInput(options.as, { path: '--as', question: 'Imported agent id: ' }, prompt),
-            catch: (cause) => cause,
-          });
+          const importId = yield* requiredInput(
+            options.as,
+            { path: '--as', question: 'Imported agent id: ' },
+            prompt,
+          );
 
           if ((options.type ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
             let request: Extract<CommandRequest, { command: 'agent.import' }> = {
@@ -160,20 +161,16 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
             context.interaction.readStdin,
           );
 
-          let fields: CurlImportFields = yield* Effect.tryPromise({
-            try: () =>
-              promptCurlImportFields(
-                {
-                  ...options,
-                  agentId: importId,
-                  expectedProjectHash: options.ifProjectHash,
-                  source: importSource,
-                },
-                curlSource,
-                prompt,
-              ),
-            catch: (cause) => cause,
-          });
+          let fields: CurlImportFields = yield* promptCurlImportFields(
+            {
+              ...options,
+              agentId: importId,
+              expectedProjectHash: options.ifProjectHash,
+              source: importSource,
+            },
+            curlSource,
+            prompt,
+          );
 
           for (let attempt = 1; ; attempt += 1) {
             const attempted = yield* Effect.exit(
@@ -191,10 +188,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
 
             fields = {
               ...fields,
-              mapBody: yield* Effect.tryPromise({
-                try: () => promptBodyMappings(prompt),
-                catch: (cause) => cause,
-              }),
+              mapBody: yield* promptBodyMappings(prompt),
             };
           }
         }),

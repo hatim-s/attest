@@ -78,19 +78,16 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
             options,
             build: () =>
               Effect.gen(function* () {
-                const inputText = yield* Effect.tryPromise({
-                  try: () =>
-                    requiredInput(
-                      options.input,
-                      { path: '--input', question: 'Case input JSON: ' },
-                      prompt,
-                    ),
-                  catch: (cause) => cause,
-                });
+                const inputText = yield* requiredInput(
+                  options.input,
+                  { path: '--input', question: 'Case input JSON: ' },
+                  prompt,
+                );
 
                 const input = parseJsonFlag(inputText, '--input');
 
-                if (input === undefined) throw new Error('Required input JSON was not parsed.');
+                if (input === undefined)
+                  return yield* Effect.die(new Error('Required input JSON was not parsed.'));
                 const authoredCase: AuthoredCaseDraft = { input };
 
                 if (options.id !== undefined) authoredCase.id = options.id;
@@ -107,11 +104,11 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
 
                 return validateCommandRequest('test.case.add', {
                   ...mutationRequestFields('test.case.add', options),
-                  test_id: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                    catch: (cause) => cause,
-                  }),
+                  test_id: yield* requiredInput(
+                    testId,
+                    { path: '<test-id>', question: 'Test id: ' },
+                    prompt,
+                  ),
                   case: authoredCase,
                 });
               }),
@@ -151,20 +148,16 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('test.case.import', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    source: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          source,
-                          { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
+                    source: yield* requiredInput(
+                      source,
+                      { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
+                      prompt,
+                    ),
                     import: importRequestFields(options),
                   };
                 }),
@@ -197,15 +190,11 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .action((testId: string | undefined, options: CommonCliOptions) =>
       context.submit(
         Effect.gen(function* () {
-          const id = yield* Effect.tryPromise({
-            try: () =>
-              requiredInput(
-                testId,
-                { path: '<test-id>', question: 'Test id: ' },
-                promptContext(options, context.interaction),
-              ),
-            catch: (cause) => cause,
-          });
+          const id = yield* requiredInput(
+            testId,
+            { path: '<test-id>', question: 'Test id: ' },
+            promptContext(options, context.interaction),
+          );
 
           const result = yield* runTestCaseListCommand({
             project: options.project,
@@ -226,15 +215,17 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
         Effect.gen(function* () {
           const prompt = promptContext(options, context.interaction);
 
-          const resolvedTestId = yield* Effect.tryPromise({
-            try: () => requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-            catch: (cause) => cause,
-          });
+          const resolvedTestId = yield* requiredInput(
+            testId,
+            { path: '<test-id>', question: 'Test id: ' },
+            prompt,
+          );
 
-          const resolvedCaseId = yield* Effect.tryPromise({
-            try: () => requiredInput(caseId, { path: '<case-id>', question: 'Case id: ' }, prompt),
-            catch: (cause) => cause,
-          });
+          const resolvedCaseId = yield* requiredInput(
+            caseId,
+            { path: '<case-id>', question: 'Case id: ' },
+            prompt,
+          );
 
           const result = yield* runTestCaseShowCommand({
             caseId: resolvedCaseId,
@@ -275,25 +266,21 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('test.case.rename', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    case_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(caseId, { path: '<case-id>', question: 'Case id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    new_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(
-                          newId,
-                          { path: '<new-id>', question: 'New case id: ' },
-                          prompt,
-                        ),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
+                    case_id: yield* requiredInput(
+                      caseId,
+                      { path: '<case-id>', question: 'Case id: ' },
+                      prompt,
+                    ),
+                    new_id: yield* requiredInput(
+                      newId,
+                      { path: '<new-id>', question: 'New case id: ' },
+                      prompt,
+                    ),
                   };
                 }),
             });
@@ -332,26 +319,21 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 Effect.gen(function* () {
                   return {
                     ...mutationRequestFields('test.case.remove', options),
-                    test_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
-                    case_id: yield* Effect.tryPromise({
-                      try: () =>
-                        requiredInput(caseId, { path: '<case-id>', question: 'Case id: ' }, prompt),
-                      catch: (cause) => cause,
-                    }),
+                    test_id: yield* requiredInput(
+                      testId,
+                      { path: '<test-id>', question: 'Test id: ' },
+                      prompt,
+                    ),
+                    case_id: yield* requiredInput(
+                      caseId,
+                      { path: '<case-id>', question: 'Case id: ' },
+                      prompt,
+                    ),
                   };
                 }),
             });
 
-            if (
-              !(yield* Effect.tryPromise({
-                try: () => confirmRemoval(request, `case ${request.case_id}`, options, context),
-                catch: (cause) => cause,
-              }))
-            )
+            if (!(yield* confirmRemoval(request, `case ${request.case_id}`, options, context)))
               return;
             yield* runTestMutation(request, options, context);
           }),

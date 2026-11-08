@@ -102,15 +102,11 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
             options,
             build: () =>
               Effect.gen(function* () {
-                const id = yield* Effect.tryPromise({
-                  try: () =>
-                    requiredInput(
-                      metricId,
-                      { path: '<metric-id>', question: 'Metric id: ' },
-                      { interactive, prompt: context.interaction.prompt },
-                    ),
-                  catch: (cause) => cause,
-                });
+                const id = yield* requiredInput(
+                  metricId,
+                  { path: '<metric-id>', question: 'Metric id: ' },
+                  { interactive, prompt: context.interaction.prompt, signal: context.signal },
+                );
 
                 const selected = yield* selectGuidedMetricFields(options, interactive, context);
                 const guided = yield* fillGuidedMetricFields(selected, interactive, context);

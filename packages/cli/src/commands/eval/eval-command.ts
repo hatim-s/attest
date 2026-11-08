@@ -74,14 +74,10 @@ const readRunRequest = (
 ) =>
   Effect.gen(function* () {
     if (fields.fromJson === undefined) {
-      return yield* Effect.tryPromise({
-        try: () =>
-          createEvalRunRequest(fields, {
-            interactive: isInteractive(fields, context.interaction),
-            prompt: context.interaction.prompt,
-            signal,
-          }),
-        catch: (cause) => cause,
+      return yield* createEvalRunRequest(fields, {
+        interactive: isInteractive(fields, context.interaction),
+        prompt: context.interaction.prompt,
+        signal,
       });
     }
 
@@ -209,7 +205,7 @@ const executeEvalRun = (
       }
     }
 
-    if (final.data.exit_code !== 0) throw new CliExit(final.data.exit_code);
+    if (final.data.exit_code !== 0) return yield* Effect.die(new CliExit(final.data.exit_code));
   });
 
 /**

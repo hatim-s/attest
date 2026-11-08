@@ -29,7 +29,12 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
       context.submit(
         Effect.gen(function* () {
           const interactive = isInteractive(options, context.interaction, options.fromJson);
-          const prompt = { interactive, prompt: context.interaction.prompt };
+
+          const prompt = {
+            interactive,
+            prompt: context.interaction.prompt,
+            signal: context.signal,
+          };
 
           const request = yield* readOrBuildRequest({
             command: 'metric.import',
@@ -40,25 +45,17 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
               Effect.gen(function* () {
                 let request: Extract<CommandRequest, { command: 'metric.import' }> = {
                   ...mutationRequestFields('metric.import', options),
-                  source: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        source,
-                        { path: '<path|->', question: 'Metric JSON path or -: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  source: yield* requiredInput(
+                    source,
+                    { path: '<path|->', question: 'Metric JSON path or -: ' },
+                    prompt,
+                  ),
                   source_type: 'json',
-                  as: yield* Effect.tryPromise({
-                    try: () =>
-                      requiredInput(
-                        options.as,
-                        { path: '--as', question: 'Imported metric id: ' },
-                        prompt,
-                      ),
-                    catch: (cause) => cause,
-                  }),
+                  as: yield* requiredInput(
+                    options.as,
+                    { path: '--as', question: 'Imported metric id: ' },
+                    prompt,
+                  ),
                 };
 
                 if (options.name !== undefined) {
