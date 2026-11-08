@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect';
+import { tryPromiseClassify } from '@attest/contracts';
 import { LocalError } from '@attest/local';
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CliPrompt } from './cli-interaction.js';
@@ -35,16 +36,13 @@ const ask = Effect.fn('ask')(function* (context: PromptContext, question: string
 
   if (signal.aborted) return yield* new PromptCancelledError();
 
-  const answer = Effect.tryPromise({
-    try: (interruption) => prompt(question, { signal: interruption }),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      // Readline closes the question itself on Ctrl+C or Ctrl+D, without any process signal.
+  const answer = tryPromiseClassify(
+    (interruption) => prompt(question, { signal: interruption }),
+    // Readline closes the question itself on Ctrl+C or Ctrl+D, without any process signal.
+    (cause) =>
       signal.aborted || (cause instanceof Error && cause.name === 'AbortError')
-        ? Effect.fail(new PromptCancelledError())
-        : Effect.die(cause),
-    ),
+        ? new PromptCancelledError()
+        : undefined,
   );
 
   const cancellation = Effect.callback<never, PromptCancelledError>((resume) => {
