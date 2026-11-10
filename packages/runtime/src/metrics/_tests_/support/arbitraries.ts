@@ -1,8 +1,7 @@
-import type { JsonValue } from '@attest/contracts';
+import { isJsonValue, type JsonValue } from '@attest/contracts';
 import fc from 'fast-check';
 
 import type { EvaluationDocument } from '../../evaluation-document.js';
-import { isJsonValue } from '../../internal/json-value.js';
 
 // BOUNDARY: fast-check candidates must satisfy the JSON schema before generated documents consume them.
 const toJsonValue = (value: unknown): JsonValue => {
