@@ -10,20 +10,12 @@ type EvalSelectionOptions = {
 };
 
 /** Registers the same repeatable selection filters for local and hosted runs. */
-const addEvalSelectionOptions = (
-  command: Command,
-  descriptions: {
-    case: [string, string];
-    tag: [string, string];
-    folder: [string, string];
-    dataset: [string, string];
-  },
-): Command =>
+const addEvalSelectionOptions = (command: Command): Command =>
   command
-    .option(...descriptions.case, collect)
-    .option(...descriptions.tag, collect)
-    .option(...descriptions.folder, collect)
-    .option(...descriptions.dataset, collect);
+    .option('--case <case-id>', 'select an exact case id; repeatable', collect)
+    .option('--tag <tag>', 'select cases with every repeated tag; repeatable', collect)
+    .option('--folder <folder>', 'select a logical folder and descendants; repeatable', collect)
+    .option('--dataset <dataset-id>', 'select cases from an attached dataset; repeatable', collect);
 
 /** Translates Commander option names into the eval request field names. */
 const evalSelectionFields = (options: EvalSelectionOptions) => ({

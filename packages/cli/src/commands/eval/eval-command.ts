@@ -247,12 +247,6 @@ const registerEvalCommands = (context: CommandContext): void => {
       .description('Run selected tests and persist one immutable evaluation.')
       .argument('[test-id...]', 'test ids; pass --all to select every test')
       .option('--all', 'run every test'),
-    {
-      case: ['--case <case-id>', 'select an exact case id; repeatable'],
-      tag: ['--tag <tag>', 'select cases with every repeated tag; repeatable'],
-      folder: ['--folder <folder>', 'select a logical folder and descendants; repeatable'],
-      dataset: ['--dataset <dataset-id>', 'select cases from an attached dataset; repeatable'],
-    },
   )
     .option('--sample <n>', 'sample up to n matching cases across selected tests')
     .option(

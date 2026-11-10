@@ -6,8 +6,8 @@ import * as store from '@attest/local/store';
 import { describe, expect, it, vi } from 'vitest';
 import { createFixtureProject, runJson } from './support/cli-test-support.js';
 
-describe('S8b base error envelopes', () => {
-  it('B3 preserves StoreError cause_code and the generic base message', async () => {
+describe('CLI error envelopes', () => {
+  it('preserves StoreError cause_code and the public message', async () => {
     const root = await realpath(await createFixtureProject());
 
     const open = vi

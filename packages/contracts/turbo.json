@@ -7,6 +7,7 @@
         "src/**",
         "package.json",
         "$TURBO_ROOT$/packages/schemas/generated/**",
+        "$TURBO_ROOT$/conformance/src/load-fixtures.ts",
         "$TURBO_ROOT$/conformance/fixtures/**"
       ]
     }

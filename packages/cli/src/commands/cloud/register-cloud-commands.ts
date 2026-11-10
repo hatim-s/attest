@@ -285,12 +285,6 @@ const registerCloudCommands = ({
         .description('Submit a hosted evaluation against the linked revision.')
         .argument('[test-id...]'),
     ).option('--all', 'run all tests'),
-    {
-      case: ['--case <id>', 'case id filter; repeatable'],
-      tag: ['--tag <tag>', 'case tag filter; repeatable'],
-      folder: ['--folder <folder>', 'case folder filter; repeatable'],
-      dataset: ['--dataset <id>', 'dataset filter; repeatable'],
-    },
   )
     .option('--sample <count>', 'sample the matching cases')
     .option('--seed <seed>', 'sampling seed; requires --sample')
