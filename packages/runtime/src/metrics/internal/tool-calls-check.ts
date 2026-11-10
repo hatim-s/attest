@@ -1,10 +1,9 @@
-import { isString } from '@attest/contracts';
+import { isJsonValue, isString } from '@attest/contracts';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { JsonValue, Span, ToolArgumentMatcher, Trace } from '@attest/contracts';
 
 import { resolveValuePath } from '../evaluation-document.js';
-import { isJsonValue } from './json-value.js';
 import type { CheckEvaluation, LeafCheck } from './leaf-check.js';
 import { orderSpans } from './span-check.js';
 
