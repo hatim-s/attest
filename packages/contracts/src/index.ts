@@ -138,6 +138,9 @@ export {
   argvSchema,
   httpRequestTemplateSchema,
   agentTransportSchema,
+  jsonlBridgeTransportSchema,
+  streamIncrementalOutputModeSchema,
+  streamTransportSchema,
   vercelSandboxSchema,
 } from './project/resources/agent-transports.js';
 
