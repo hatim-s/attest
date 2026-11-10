@@ -4,7 +4,7 @@ import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '@attest/contracts';
 import { runTestDatasetRemovePreflight } from '@attest/local/test';
 import type { Command } from 'commander';
 
-import { setCliCommandHelpMetadata, setMutationHelp } from '../../../help/command-help.js';
+import { setMutationHelp } from '../../../help/command-help.js';
 import {
   addMutationOptions,
   collect,
@@ -380,14 +380,6 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
     );
 
   setMutationHelp(datasetRemove, { examples: ['attest test dataset remove regression --yes'] });
-
-  setCliCommandHelpMetadata(test, {
-    examples: [
-      'attest test add smoke --agent support',
-      'attest test case add smoke --input \'{"question":"ping"}\'',
-      'attest test dataset import smoke ./cases.jsonl --as regression',
-    ],
-  });
 };
 
 export { registerTestDatasetCommands };

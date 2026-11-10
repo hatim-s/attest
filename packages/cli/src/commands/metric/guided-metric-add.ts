@@ -5,8 +5,14 @@ import { loadCommandProject } from '@attest/local/project';
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { ask, type PromptContext } from '../shared/required-input.js';
-import { OPERATOR_PROMPTS, PRESET_PROMPTS, askGuidedPrompt } from './guided-metric-prompts.js';
-import type { MetricAddOptions } from './register-metric-add-command.js';
+import {
+  OPERATOR_PROMPTS,
+  PRESET_PROMPTS,
+  askGuidedPrompt,
+  type GuidedMetricFields,
+} from './guided-metric-prompts.js';
+
+type GuidedMetricOptions = GuidedMetricFields & { project?: string; dryRun?: boolean };
 
 const METRIC_KINDS = ['assertion', 'judge', 'command', 'http'] as const;
 
@@ -84,7 +90,7 @@ const traceSupport = (agent: { capabilities?: { trace?: boolean } }): string =>
 
 /** Shows which authored agents emit traces, so a trace metric is chosen knowingly. */
 const guidedTraceCapability = (
-  options: MetricAddOptions,
+  options: GuidedMetricOptions,
   prompt: PromptContext,
   context: CommandContext,
 ) =>
@@ -138,11 +144,11 @@ const presetCatalog = (): string =>
 
 /** Asks for the metric kind, assertion evidence, and operator before any operator value. */
 const selectGuidedMetricFields = (
-  options: MetricAddOptions,
+  options: GuidedMetricOptions,
   prompt: PromptContext,
   context: CommandContext,
 ): Effect.Effect<
-  MetricAddOptions,
+  GuidedMetricOptions,
   AttestCliError | Effect.Error<ReturnType<typeof loadCommandProject>>
 > =>
   Effect.gen(function* () {
@@ -192,7 +198,7 @@ const selectGuidedMetricFields = (
       path: 'operator',
     });
 
-    const guided: MetricAddOptions = {
+    const guided: GuidedMetricOptions = {
       ...options,
       path: `$.${evidence}`,
       preset: PRESET_BY_VALUE_OPERATOR[operator],
@@ -204,7 +210,7 @@ const selectGuidedMetricFields = (
   });
 
 /** Asks for whatever the chosen preset still needs, in the order the preset lists it. */
-const fillGuidedMetricFields = (options: MetricAddOptions, prompt: PromptContext) =>
+const fillGuidedMetricFields = (options: GuidedMetricOptions, prompt: PromptContext) =>
   Effect.gen(function* () {
     const preset = options.preset;
 
