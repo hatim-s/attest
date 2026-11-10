@@ -2,7 +2,7 @@ import { isJsonObject } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import type { DatasetResource, JsonValue, ProjectManifest } from '@attest/contracts';
-import { canonicalStringify, contentHash } from '../store/internal/canonical-json.js';
+import { canonicalStringify, contentHash } from '../internal/canonical-json.js';
 
 /** Serializes ordered JSONL records with one canonical newline separator and no trailing newline. */
 const serializeCanonicalJsonLines = (values: readonly unknown[]): string =>

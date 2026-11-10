@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { JsonValue, TestCase } from '@attest/contracts';
 
-import { canonicalStringify, contentHash } from '../store/internal/canonical-json.js';
+import { canonicalStringify, contentHash } from '../internal/canonical-json.js';
 
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
 

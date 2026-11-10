@@ -13,7 +13,7 @@ import {
 } from '@attest/contracts';
 
 import { selectCases, CaseSelectionError } from './select-cases.js';
-import { contentHash } from '../store/internal/canonical-json.js';
+import { contentHash } from '../internal/canonical-json.js';
 
 import { EvalResolutionError } from './resolution-project.js';
 import type { ResolutionProject } from './resolution-project.js';

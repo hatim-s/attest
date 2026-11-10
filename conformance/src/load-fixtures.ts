@@ -31,11 +31,10 @@ type FixtureEnvelope = typeof fixtureEnvelopeSchema.Type;
 
 type LoadedFixture = { contract: string; name: string; envelope: FixtureEnvelope };
 
-const fixtureRoot = join(import.meta.dirname, '../../../../../conformance/fixtures');
+const fixtureRoot = join(import.meta.dirname, '../fixtures');
 
 /**
  * Shares committed protocol inputs between public parser and emitted JSON Schema checks.
- * Conformance imports this loader directly, so moves must update both workspaces.
  */
 const loadFixtures = (): LoadedFixture[] =>
   readdirSync(fixtureRoot, { withFileTypes: true })
