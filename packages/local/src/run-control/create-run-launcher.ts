@@ -8,7 +8,7 @@ import { StoreError, type ProjectCatalog, type RunControl } from '@attest/core';
 
 import { LocalError } from '../errors/local-error.js';
 import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
-import { cancelConfiguration } from '../run/run-configuration.js';
+import { cancelConfiguration } from '../run/cancel-configuration.js';
 import { toEvalRunDocument } from './eval-run-document.js';
 import { listProjectTests } from './list-project-tests.js';
 import { spawnEvalRun, START_TIMEOUT_MS, type CliCommand } from './spawn-eval-run.js';

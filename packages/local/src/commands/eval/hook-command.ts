@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
-import { finishWithRelease } from '../agent/adapter/lifecycle-cause.js';
+import { finishWithRelease } from '../../internal/lifecycle-cause.js';
 import {
   killProcessTree,
   listDescendantProcesses,

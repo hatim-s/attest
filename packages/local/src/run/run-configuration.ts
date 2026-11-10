@@ -1,7 +1,7 @@
 import * as Deferred from 'effect/Deferred';
-import { PROJECT_STORE_PATH, projectStorePath } from '../project/project-store-path.js';
+import { PROJECT_STORE_PATH } from '../project/project-store-path.js';
 import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
-import { finishWithRelease } from '../commands/agent/adapter/lifecycle-cause.js';
+import { finishWithRelease } from '../internal/lifecycle-cause.js';
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import { execFile } from 'node:child_process';
@@ -11,7 +11,6 @@ import {
   parseWithSchemaSync,
   EVAL_RUN_SCHEMA_ID,
   evalRunSchema,
-  type EvalCancelRequest,
   type EvalEvent,
   type EvalRun,
   type EvalRunRequest,
@@ -19,18 +18,15 @@ import {
 import type { StoreError } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
-import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import * as Exit from 'effect/Exit';
 import { EvalApplication, applicationStore } from '../commands/eval/eval-application.js';
 import { LocalError } from '../errors/index.js';
 import type { AnchoredCleanupFailure, AnchoredFileFailure } from '../internal/open-anchored.js';
-import type { ProcessPresenceFailure } from '../internal/process-presence.js';
 import { createRunIdentity } from '../store/run-store.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
 import {
   detachEvalRun,
   registerEvalRun,
-  signalRegisteredEvalRun,
   unregisterEvalRun,
 } from '../commands/eval/eval-cancellation.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
@@ -43,7 +39,7 @@ import {
 import { resolveEvalRun } from '../commands/eval/eval-resolver.js';
 import { metricSandboxIsolation } from '../commands/eval/metric-sandbox.js';
 import { loadCommandProject } from '../commands/project/load-command-project.js';
-import { withRunNotFound } from '../commands/run-store/run-not-found.js';
+import { readStoredRun } from './read-stored-run.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,17 +49,6 @@ type RunConfigurationOptions = {
   signal: AbortSignal;
   terminalFailure: EvalTerminalFailureFactory;
   workingDirectory: string;
-};
-
-type CancelConfigurationOptions = {
-  project?: string;
-  workingDirectory: string;
-};
-
-type CancelConfigurationResult = {
-  projectHash: string;
-  runId: string;
-  status: 'cancellation_requested' | 'already_cancelled' | 'already_terminal';
 };
 
 /** Captures bounded Git metadata when the project is in a repository, otherwise omitting it. */
@@ -99,23 +84,6 @@ const readGitMetadata = Effect.fn('readGitMetadata')(function* (projectRoot: str
   if (branch !== undefined) metadata = { ...metadata, branch };
 
   return metadata;
-});
-
-/** Reads one run from a read-only store; a missing store or run is `resource_not_found`. */
-const readStoredRun = Effect.fn('readStoredRun')(function* (storePath: string, runId: string) {
-  const runNotFound = (cause?: unknown): LocalError =>
-    new LocalError('resource_not_found', `Eval run ${runId} was not found.`, {
-      path: runId,
-      cause,
-    });
-
-  const run = yield* withReadonlyRunStoreFile(storePath, (store) =>
-    withRunNotFound(() => store.getRun(runId), runNotFound),
-  );
-
-  if (run === undefined) return yield* runNotFound();
-
-  return run;
 });
 
 /** Runs one immutable snapshot through resolver, engine, adapters, store, artifacts, and events. */
@@ -239,35 +207,4 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
   return queue;
 });
 
-/** Requests cancellation through the active registry, then reports persisted terminal state. */
-const cancelConfiguration = Effect.fn('cancelConfiguration')(function* (
-  request: EvalCancelRequest,
-  options: CancelConfigurationOptions,
-): Effect.fn.Return<
-  CancelConfigurationResult,
-  LocalError | StoreError | AnchoredFileFailure | AnchoredCleanupFailure | ProcessPresenceFailure,
-  CancellationRegistry
-> {
-  const project = yield* loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
-
-  const result = { projectHash: project.projectHash, runId: request.run_id };
-  const requested = yield* signalRegisteredEvalRun(project.root, request.run_id);
-
-  if (requested === 'cancellation_requested') return { ...result, status: requested };
-  const run = yield* readStoredRun(projectStorePath(project.root), request.run_id);
-
-  return {
-    ...result,
-    status: run.status === 'cancelled' ? 'already_cancelled' : 'already_terminal',
-  };
-});
-
-export {
-  cancelConfiguration,
-  runConfiguration,
-  type CancelConfigurationOptions,
-  type RunConfigurationOptions,
-};
+export { runConfiguration, type RunConfigurationOptions };

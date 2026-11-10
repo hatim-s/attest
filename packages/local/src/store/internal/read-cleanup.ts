@@ -2,7 +2,7 @@ import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import { StoreError } from '@attest/core';
-import { finishStoreCleanup } from '../../store/internal/store-effect.js';
+import { finishStoreCleanup } from './store-effect.js';
 
 type CleanupStep = Effect.Effect<unknown, unknown>;
 

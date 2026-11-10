@@ -1,4 +1,4 @@
-import { finishWithRelease } from '../agent/adapter/lifecycle-cause.js';
+import { finishWithRelease } from '../../internal/lifecycle-cause.js';
 import * as Effect from 'effect/Effect';
 import { createHash, randomUUID } from 'node:crypto';
 import { open, rename, unlink } from 'node:fs/promises';

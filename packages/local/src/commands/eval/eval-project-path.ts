@@ -9,7 +9,7 @@ import { PROJECT_STORE_PATH } from '../../project/project-store-path.js';
 import { LocalError, type LocalErrorCode } from '../../errors/index.js';
 import { errnoCode } from '../../internal/errno-code.js';
 import { openStore, type StoreScope } from '../../store/index.js';
-import { runCleanupSteps } from '../run-store/cleanup.js';
+import { runCleanupSteps } from '../../store/internal/read-cleanup.js';
 import { resolveContainedPath } from '../../project/project-path.js';
 
 type CapturedAliases = {

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { errnoCode } from '../../internal/errno-code.js';
 import { anchoredCall } from '../../internal/open-anchored.js';
-import { withReadCleanup, runCleanupSteps } from './cleanup.js';
+import { withReadCleanup, runCleanupSteps } from '../../store/internal/read-cleanup.js';
 
 const COPY_BUFFER_BYTES = 64 * 1024;
 

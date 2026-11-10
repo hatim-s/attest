@@ -51,7 +51,8 @@ import { REDACTED } from '../../internal/redaction.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../project/transaction/transactional-writer.js';
 import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
-import { cancelConfiguration, runConfiguration } from '../run-configuration.js';
+import { cancelConfiguration } from '../cancel-configuration.js';
+import { runConfiguration } from '../run-configuration.js';
 
 type EvalProjectOptions = {
   /** Replaces the default agent, which echoes its input. */
