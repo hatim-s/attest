@@ -205,6 +205,8 @@ const pollingTransportSchema = Schema.Struct({
   }),
 );
 
+const streamIncrementalOutputModeSchema = Schema.Literals(['text', 'array']);
+
 const streamTransportSchema = Schema.Struct({
   kind: Schema.Literal('stream'),
   lifecycle: Schema.Literal('external'),
@@ -218,7 +220,7 @@ const streamTransportSchema = Schema.Struct({
   error_pointer: Schema.optional(jsonPointerSchema),
   trace_pointer: Schema.optional(jsonPointerSchema),
   incremental_output_pointer: Schema.optional(jsonPointerSchema),
-  incremental_output_mode: Schema.optional(Schema.Literals(['text', 'array'])),
+  incremental_output_mode: Schema.optional(streamIncrementalOutputModeSchema),
   heartbeat_resets_application_idle: Schema.optional(Schema.Boolean),
 }).check(
   Schema.makeFilter((stream) => {
@@ -320,6 +322,9 @@ export {
   argvSchema,
   httpRequestTemplateSchema,
   responseExtractionSchema,
+  jsonlBridgeTransportSchema,
+  streamIncrementalOutputModeSchema,
+  streamTransportSchema,
   vercelSandboxSchema,
   type AgentTransport,
   type Argv,

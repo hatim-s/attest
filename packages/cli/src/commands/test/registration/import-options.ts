@@ -1,5 +1,8 @@
 import {
-  caseImportOptionsSchema,
+  importConflictPolicySchema,
+  importDedupePolicySchema,
+  importFormatSchema,
+  importSyncPolicySchema,
   type CommandRequest,
   type DatasetImportMapping,
 } from '@attest/contracts';
@@ -21,8 +24,6 @@ type ImportCliOptions = MutationCliOptions & {
   sync?: ImportPolicy['sync'];
 };
 
-const IMPORT_POLICY = caseImportOptionsSchema.fields;
-
 /** Help defaults local applies when the import policy leaves them out. */
 const IMPORT_OPTION_HELP = {
   'on-conflict': { default: 'error' },
@@ -34,7 +35,7 @@ const addImportOptions = (command: Command): Command =>
   addMutationOptions(command)
     .addOption(
       new Option('--format <format>', 'stdin or explicit import format').choices(
-        IMPORT_POLICY.format.schema.members[0].literals,
+        importFormatSchema.literals,
       ),
     )
     .option('--map <destination=source>', 'explicit field mapping; repeatable', collect)
@@ -43,17 +44,17 @@ const addImportOptions = (command: Command): Command =>
     .option('--key <source>', 'stable source key for incremental imports')
     .addOption(
       new Option('--dedupe <basis>', 'within-import dedupe basis').choices(
-        IMPORT_POLICY.dedupe.schema.members[0].literals,
+        importDedupePolicySchema.literals,
       ),
     )
     .addOption(
       new Option('--on-conflict <policy>', 'existing-case conflict policy').choices(
-        IMPORT_POLICY.on_conflict.schema.members[0].literals,
+        importConflictPolicySchema.literals,
       ),
     )
     .addOption(
       new Option('--sync <policy>', 'incremental import policy').choices(
-        IMPORT_POLICY.sync.schema.members[0].literals,
+        importSyncPolicySchema.literals,
       ),
     );
 

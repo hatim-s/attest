@@ -3,7 +3,6 @@ import {
   METRIC_PRESETS,
   httpRequestTemplateSchema,
   metricPresetIdSchema,
-  spanFilterSchema,
   spanKindSchema,
   spanStatusSchema,
 } from '@attest/contracts';
@@ -65,7 +64,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--span-name <name>', 'trace span name')
     .addOption(
       new Option('--span-status <status>', 'trace span status').choices(
-        spanFilterSchema.fields.status.schema.members[0].literals,
+        spanStatusSchema.schema.fields.code.literals,
       ),
     )
     .option('--attribute <name=json>', 'trace span attribute matcher; repeatable', collect)

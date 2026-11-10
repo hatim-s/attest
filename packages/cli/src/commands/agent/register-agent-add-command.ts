@@ -1,6 +1,8 @@
 import * as Effect from 'effect/Effect';
 import {
-  agentTransportSchema,
+  jsonlBridgeTransportSchema,
+  streamIncrementalOutputModeSchema,
+  streamTransportSchema,
   webSocketConnectionModeSchema,
   webSocketTransportSchema,
 } from '@attest/contracts';
@@ -46,8 +48,6 @@ type AddOptions = MutationCliOptions &
     websocketLifecycle?: AgentAddFields['webSocketLifecycle'];
     websocketUrl?: string;
   };
-
-const [, , bridgeTransport, , , streamTransport] = agentTransportSchema.members;
 
 /** Help-only hints: these WebSocket and stream flags take effect only with the flag they imply. */
 const ADD_IMPLIES = new Map(
@@ -136,12 +136,12 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--query <name=value>', 'callback trigger query value; repeatable', collect)
     .addOption(
       new Option('--stream-framing <framing>', 'stream framing').choices(
-        streamTransport.fields.framing.literals,
+        streamTransportSchema.fields.framing.literals,
       ),
     )
     .addOption(
       new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices(
-        bridgeTransport.fields.concurrency.literals,
+        jsonlBridgeTransportSchema.fields.concurrency.literals,
       ),
     )
     .addOption(
@@ -180,7 +180,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--incremental-output-pointer <pointer>', 'stream incremental output JSON Pointer')
     .addOption(
       new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices(
-        streamTransport.fields.incremental_output_mode.schema.members[0].literals,
+        streamIncrementalOutputModeSchema.literals,
       ),
     )
     .option('--env <target=source>', 'environment secret reference', collect)
