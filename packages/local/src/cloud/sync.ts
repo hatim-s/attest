@@ -122,6 +122,7 @@ const pushCloudProject = Effect.fn('pushCloudProject')(function* (
   },
 ) {
   const { root } = yield* discoverProject(options);
+
   return yield* withProjectLock(
     root,
     (lock) =>
@@ -236,6 +237,7 @@ const pullCloudProject = Effect.fn('pullCloudProject')(function* (
   },
 ) {
   const { root } = yield* discoverProject(options);
+
   return yield* withProjectLock(
     root,
     (lock) =>

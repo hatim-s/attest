@@ -132,6 +132,7 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const error = cleanCloudFailure(cause);
+
           if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device')
             return yield* Effect.failCause(cause);
 
@@ -185,6 +186,7 @@ const logoutCloud = Effect.fn('logoutCloud')(function* (credentialPath: string) 
     Effect.catchCause((cause) =>
       Effect.gen(function* () {
         const error = cleanCloudFailure(cause);
+
         if (!(error instanceof LocalError) || error.code !== 'cloud_auth_required')
           return yield* Effect.failCause(cause);
       }),

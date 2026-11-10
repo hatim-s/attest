@@ -47,6 +47,7 @@ describe('cloud trust boundaries', () => {
       .mockImplementationOnce(() => {
         throw cleanup;
       });
+
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -64,6 +65,7 @@ describe('cloud trust boundaries', () => {
       .mockResolvedValueOnce(
         Response.json({ access_token: 'token', token_type: 'Bearer', expires_in: 600 }),
       );
+
     const exit = await Effect.runPromiseExit(
       loginCloud({
         baseUrl: 'https://cloud.example.test',
@@ -76,9 +78,11 @@ describe('cloud trust boundaries', () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
+
     if (Exit.isFailure(exit)) {
       const retained = Context.getOrUndefined(Cause.annotations(exit.cause), OperationCleanup);
       expect(retained).toBeDefined();
+
       if (retained !== undefined) expect(Cause.squash(retained)).toBe(cleanup);
     }
   });

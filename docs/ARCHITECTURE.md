@@ -249,6 +249,33 @@ run control under the CLI application scope. Migration SQL and driver callbacks 
 
 ## Native Effect ownership
 
+Shared helpers follow their consumers rather than the first feature that used them.
+Core canonical JSON lives in `core/internal`; the conformance fixture loader lives
+beside its fixtures and participates in contracts' test cache inputs. Contracts
+owns named schema choices and the default agent request size. The callback client
+can configure its receiver limit to match a larger authored sender limit.
+
+Local project paths have one owner in `project/project-store-path`. Store read
+cleanup lives in `store/internal`, and shared release-cause composition lives in
+`local/internal`. Cancellation reads stored state without importing run execution
+composition. Cloud link and synchronization use the project lock owner, preserving
+the primary outcome and every failed release. Device polling and logout recover
+only a single typed failure with confirmed cleanup.
+
+```mermaid
+flowchart TD
+  CLI[CLI registrars] --> Choices[Named contract schemas]
+  CLI --> Selection[Shared eval selection flags]
+  CLI --> Mutation[Test mutation execution]
+  Launcher[Dashboard run launcher] --> Cancel[Cancel configuration]
+  Cancel --> Stored[Read stored run]
+  Execution[Run configuration] --> Stored
+  Stored --> Read[Readonly store and store-owned cleanup]
+  Cloud[Cloud link, push and pull] --> Lock[Project lock owner]
+  Lock --> Work[Operation and completion evidence]
+  Work --> Release[Release or retain primary and cleanup Causes]
+```
+
 Operations return native Effect 4.1.2 programs with tagged errors. Pure domain
 algorithms remain synchronous. Core storage and run-control contracts describe
 Effect operations without importing local infrastructure. Executor owns transport
