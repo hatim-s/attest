@@ -1,11 +1,12 @@
 import { tryPromiseClassify } from '@attest/contracts';
 import * as Effect from 'effect/Effect';
 import { mkdir, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 import { createSingleProjectCatalog, type RunControl, type ProjectCatalog } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
+import { PROJECT_STORE_PATH, projectStorePath } from '../project/project-store-path.js';
 import { describeStoreProject } from '../project/describe-store-project.js';
 import { createRegistryCatalog, readRegistry } from '../registry/index.js';
 import { createRunLauncher, type CliCommand } from '../run-control/index.js';
@@ -50,7 +51,7 @@ const openViewCatalog = Effect.fn('openViewCatalog')(function* (
     return { catalog, control: yield* createRunLauncher({ catalog, command }) };
   }
 
-  const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
+  const storePath = resolve(workingDirectory, scope.storePath ?? PROJECT_STORE_PATH);
   const project = yield* describeStoreProject(storePath);
   yield* anchoredCall('mkdir', dirname(storePath), () =>
     mkdir(dirname(storePath), { recursive: true }),
@@ -58,8 +59,7 @@ const openViewCatalog = Effect.fn('openViewCatalog')(function* (
   const store = yield* openStore(storePath, owner);
   const catalog = createSingleProjectCatalog(project, store.runs);
 
-  const ownStore =
-    project.root !== undefined && storePath === join(project.root, '.attest', 'runs.db');
+  const ownStore = project.root !== undefined && storePath === projectStorePath(project.root);
 
   return {
     catalog,

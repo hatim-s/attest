@@ -8,7 +8,8 @@ import { readProjectIdentity } from './read-project-identity.js';
 
 /**
  * Describes the project that owns one run store, for hosts that serve a single store. A store
- * at `<root>/.attest/runs.db` belongs to `<root>`; any other store belongs to its directory.
+ * inside `<root>/.attest` belongs to `<root>` regardless of filename; other stores belong
+ * to their directory.
  * The manifest supplies the name and id when the root has one, else the directory name is used.
  */
 const describeStoreProject = Effect.fn('describeStoreProject')(function* (

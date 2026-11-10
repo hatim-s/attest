@@ -1,9 +1,10 @@
 import * as Effect from 'effect/Effect';
 import { lstat, realpath, type FileHandle } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
 import { StoreError, type RunStore } from '@attest/core';
 
+import { projectStorePath } from '../../project/project-store-path.js';
 import { anchoredCall, openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
 import { openReadonlyRunStore, withStoreScope } from '../../store/index.js';
@@ -15,10 +16,6 @@ import {
   removeRunStoreSnapshot,
   type RunStoreSnapshot,
 } from './run-store-snapshot.js';
-
-const RUN_STORE_DIRECTORY = '.attest';
-
-const RUN_STORE_FILE = 'runs.db';
 
 type ReadonlyRunStoreFileOptions = {
   containmentRoot?: string;
@@ -161,7 +158,7 @@ const withReadonlyRunStore = <T, E, R>(
   root: string,
   operation: (store: RunStore) => Effect.Effect<T, E, R>,
 ) =>
-  withReadonlyRunStoreFile(join(root, RUN_STORE_DIRECTORY, RUN_STORE_FILE), operation, {
+  withReadonlyRunStoreFile(projectStorePath(root), operation, {
     containmentRoot: root,
   });
 

@@ -5,6 +5,7 @@ import * as Scope from 'effect/Scope';
 import * as Exit from 'effect/Exit';
 import * as Cause from 'effect/Cause';
 import { StoreError } from '@attest/core';
+import { PROJECT_STORE_PATH } from '../../project/project-store-path.js';
 import { LocalError } from '../../errors/index.js';
 import * as Semaphore from 'effect/Semaphore';
 import { withStoreScope, type StoreScope } from '../../store/index.js';
@@ -79,7 +80,7 @@ const withEvalApplication = <A, E, R>(
     Effect.mapError((error) =>
       error instanceof StoreError
         ? new LocalError('run_failed', 'The eval store boundary changed during opening.', {
-            path: '.attest/runs.db',
+            path: PROJECT_STORE_PATH,
             cause: error,
           })
         : error,

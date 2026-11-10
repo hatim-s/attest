@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { diffRuns } from '@attest/core';
 
+import { PROJECT_STORE_PATH } from '../project/project-store-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 import { LocalError } from '../errors/index.js';
@@ -18,7 +19,7 @@ type CompareLocalRunsOptions = {
 const compareLocalRuns = Effect.fn('compareLocalRuns')(function* (
   options: CompareLocalRunsOptions,
 ) {
-  const configuredStorePath = options.storePath ?? '.attest/runs.db';
+  const configuredStorePath = options.storePath ?? PROJECT_STORE_PATH;
   const storePath = resolve(options.workingDirectory, configuredStorePath);
 
   const diff = yield* withRunNotFound(
