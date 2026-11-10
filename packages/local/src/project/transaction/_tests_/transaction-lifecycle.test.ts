@@ -267,12 +267,15 @@ it.each(['failure', 'defect', 'success'] as const)(
 
       if (kind === 'defect') expect(Cause.hasDies(exit.cause)).toBe(true);
 
-      if (kind === 'success')
+      if (kind === 'success') {
         expect(Cause.squash(exit.cause)).toMatchObject({
           code: 'project_saved_cleanup_failed',
           details: { committed: true, transaction_id: 'verified-transaction' },
+          cause: {
+            primary: Exit.succeed({ committed: true, transaction_id: 'verified-transaction' }),
+          },
         });
-      else
+      } else
         expect(
           Context.getOrUndefined(Cause.annotations(exit.cause), ProjectLockCleanup)?.reasons
             .length ?? 0,

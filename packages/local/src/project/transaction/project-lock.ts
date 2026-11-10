@@ -424,7 +424,10 @@ const withProjectLock = Effect.fn('withProjectLock')(function* <A, E extends Err
       new ProjectTransactionError(
         details.committed === true ? 'project_saved_cleanup_failed' : 'project_transaction_failed',
         'Project operation completed but lock release failed.',
-        { details: { ...details, lock_released: false }, cause: cleanup.cause },
+        {
+          details: { ...details, lock_released: false },
+          cause: { primary, cleanup: cleanup.cause },
+        },
       ),
     );
   }

@@ -1,5 +1,7 @@
-import { withOperationCleanup } from '../internal/operation-cleanup.js';
+import { OperationCleanup, withOperationCleanup } from '../internal/operation-cleanup.js';
 import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
 import { createHash, randomBytes } from 'node:crypto';
 
 import {
@@ -29,6 +31,17 @@ import {
   type LoginNotice,
   type CloudEventPage,
 } from './protocol.js';
+
+/** Recovery is safe only for one typed failure with confirmed request cleanup. */
+const cleanCloudFailure = (cause: Cause.Cause<LocalError>): LocalError | undefined => {
+  const reason = cause.reasons.length === 1 ? cause.reasons[0] : undefined;
+
+  return reason !== undefined &&
+    Cause.isFailReason(reason) &&
+    Context.getOrUndefined(Cause.reasonAnnotations(reason), OperationCleanup) === undefined
+    ? reason.error
+    : undefined;
+};
 
 /** Rejects malformed caller input before opening a network request. */
 // BOUNDARY: Cloud command inputs are validated by the supplied native schema before network submission.
@@ -116,10 +129,11 @@ const loginCloud = Effect.fn('loginCloud')(function* (options: {
 
       return { base_url: client.baseUrl, authenticated: true as const };
     }).pipe(
-      Effect.catch((error) =>
+      Effect.catchCause((cause) =>
         Effect.gen(function* () {
+          const error = cleanCloudFailure(cause);
           if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device')
-            return yield* error;
+            return yield* Effect.failCause(cause);
 
           if (error.outcome.code === 'slow_down') interval += 5000;
           else if (error.outcome.code === 'expired_token') {
@@ -168,10 +182,11 @@ const logoutCloud = Effect.fn('logoutCloud')(function* (credentialPath: string) 
   yield* Effect.gen(function* () {
     yield* client.request('DELETE', '/v1/auth/session', { schema: emptyResponseSchema });
   }).pipe(
-    Effect.catch((error) =>
+    Effect.catchCause((cause) =>
       Effect.gen(function* () {
+        const error = cleanCloudFailure(cause);
         if (!(error instanceof LocalError) || error.code !== 'cloud_auth_required')
-          return yield* error;
+          return yield* Effect.failCause(cause);
       }),
     ),
   );
