@@ -62,6 +62,12 @@ type MutationBuildResult = {
   warnings?: CliWarning[];
 };
 
+/** Replaces an existing test after a command updates its cases or dataset attachments. */
+const replaceTest = (candidate: ProjectResources, test: ProjectResources['tests'][number]) => ({
+  ...candidate,
+  tests: candidate.tests.map((entry) => (entry.id === test.id ? test : entry)),
+});
+
 /** Builds the complete candidate for one test/case/dataset command before any write occurs. */
 const buildMutation = Effect.fn('buildMutation')(function* (
   loaded: LoadedProject,
@@ -114,10 +120,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
       let test = yield* findResource('test', candidate.tests, request.test_id);
       const testCase = caseWithGeneratedId(request.case);
       test = { ...test, cases: [...test.cases, testCase] };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       return {
         candidate,
@@ -141,10 +144,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
       });
 
       test = { ...test, cases: imported.cases };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       const warnings: CliWarning[] =
         imported.counts.read > 100
@@ -175,10 +175,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
         ...test,
         cases: test.cases.map((entry) => (entry.id === request.case_id ? testCase : entry)),
       };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       return {
         candidate,
@@ -194,10 +191,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
       }
 
       test = { ...test, cases: test.cases.filter(({ id }) => id !== request.case_id) };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       return {
         candidate,
@@ -217,10 +211,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
         datasets: [...candidate.datasets, { cases: [], metadata: request.dataset }],
       };
       test = { ...test, datasets: [...test.datasets, { dataset_id: request.dataset.id }] };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       return {
         candidate,
@@ -316,10 +307,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
 
       if (!test.datasets.some(({ dataset_id }) => dataset_id === request.as)) {
         test = { ...test, datasets: [...test.datasets, { dataset_id: request.as }] };
-        candidate = {
-          ...candidate,
-          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-        };
+        candidate = replaceTest(candidate, test);
       }
 
       return {
@@ -339,10 +327,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
 
       if (request.tags !== undefined) attachment = { ...attachment, tags: request.tags };
       test = { ...test, datasets: [...test.datasets, attachment] };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       return {
         candidate,
@@ -361,10 +346,7 @@ const buildMutation = Effect.fn('buildMutation')(function* (
         ...test,
         datasets: test.datasets.filter(({ dataset_id }) => dataset_id !== request.dataset_id),
       };
-      candidate = {
-        ...candidate,
-        tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
-      };
+      candidate = replaceTest(candidate, test);
 
       return {
         candidate,
