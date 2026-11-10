@@ -15,8 +15,8 @@ const createLock = (): PromiseLock => {
         release = resolve;
       });
 
-      tail = previous.catch(() => undefined).then(() => current);
-      await previous.catch(() => undefined);
+      tail = previous.then(() => current);
+      await previous;
 
       return release;
     },
