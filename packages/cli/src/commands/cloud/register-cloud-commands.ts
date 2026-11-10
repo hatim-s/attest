@@ -2,14 +2,14 @@ import * as Effect from 'effect/Effect';
 import { randomUUID } from 'node:crypto';
 import * as cloudAdapter from '@attest/local/cloud';
 import { createEvalRunRequest, type EvalRunRequestFields } from '../eval/eval-request.js';
+import {
+  addEvalSelectionOptions,
+  evalSelectionFields,
+  type EvalSelectionOptions,
+} from '../eval/eval-selection-options.js';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { renderResult } from '../shared/command-result.js';
-import {
-  addCommonOptions,
-  collect,
-  promptContext,
-  type CommonCliOptions,
-} from '../shared/cli-options.js';
+import { addCommonOptions, promptContext, type CommonCliOptions } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 
 type LoginOptions = CommonCliOptions & {
@@ -25,11 +25,8 @@ type PushOptions = CommonCliOptions & {
 };
 
 type RunOptions = PullOptions &
-  Pick<EvalRunRequestFields, 'all' | 'sample' | 'seed' | 'concurrency' | 'timeout'> & {
-    case?: EvalRunRequestFields['caseIds'];
-    tag?: EvalRunRequestFields['tags'];
-    folder?: EvalRunRequestFields['folders'];
-    dataset?: EvalRunRequestFields['datasetIds'];
+  Pick<EvalRunRequestFields, 'all' | 'sample' | 'seed' | 'concurrency' | 'timeout'> &
+  EvalSelectionOptions & {
     idempotencyKey?: Parameters<typeof cloudAdapter.runCloud>[0]['idempotencyKey'];
   };
 
@@ -281,17 +278,20 @@ const registerCloudCommands = ({
         }),
       ),
     );
-  addCommonOptions(
-    cloud
-      .command('run')
-      .description('Submit a hosted evaluation against the linked revision.')
-      .argument('[test-id...]'),
+  addEvalSelectionOptions(
+    addCommonOptions(
+      cloud
+        .command('run')
+        .description('Submit a hosted evaluation against the linked revision.')
+        .argument('[test-id...]'),
+    ).option('--all', 'run all tests'),
+    {
+      case: ['--case <id>', 'case id filter; repeatable'],
+      tag: ['--tag <tag>', 'case tag filter; repeatable'],
+      folder: ['--folder <folder>', 'case folder filter; repeatable'],
+      dataset: ['--dataset <id>', 'dataset filter; repeatable'],
+    },
   )
-    .option('--all', 'run all tests')
-    .option('--case <id>', 'case id filter; repeatable', collect)
-    .option('--tag <tag>', 'case tag filter; repeatable', collect)
-    .option('--folder <folder>', 'case folder filter; repeatable', collect)
-    .option('--dataset <id>', 'dataset filter; repeatable', collect)
     .option('--sample <count>', 'sample the matching cases')
     .option('--seed <seed>', 'sampling seed; requires --sample')
     .option('--concurrency <count>', 'parallel cases')
@@ -329,10 +329,7 @@ const registerCloudCommands = ({
             {
               all: options.all,
               testIds,
-              caseIds: options.case,
-              tags: options.tag,
-              folders: options.folder,
-              datasetIds: options.dataset,
+              ...evalSelectionFields(options),
               sample: options.sample,
               seed: options.seed,
               concurrency: options.concurrency,
