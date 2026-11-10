@@ -3,10 +3,11 @@ import * as Cause from 'effect/Cause';
 import * as Exit from 'effect/Exit';
 import { finishWithRelease } from './adapter/lifecycle-cause.js';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 
 import type { JsonValue } from '@attest/contracts';
 
+import { projectStorePath } from '../../project/project-store-path.js';
 import { LocalError, classifyForeignFailure } from '../../errors/index.js';
 import { anchoredCall } from '../../internal/open-anchored.js';
 import { parseJsonText, readSourceText } from '../../internal/source-text.js';
@@ -84,10 +85,11 @@ const runAgentTestCommand = Effect.fn('runAgentTestCommand')(function* (
       ? yield* probe()
       : yield* withStoreScope((owner) =>
           Effect.gen(function* () {
-            yield* anchoredCall('mkdir', join(loaded.root, '.attest'), () =>
-              mkdir(join(loaded.root, '.attest'), { recursive: true }),
+            const storePath = projectStorePath(loaded.root);
+            yield* anchoredCall('mkdir', dirname(storePath), () =>
+              mkdir(dirname(storePath), { recursive: true }),
             );
-            const store = yield* openStore(join(loaded.root, '.attest', 'runs.db'), owner);
+            const store = yield* openStore(storePath, owner);
 
             return yield* Effect.uninterruptibleMask((restore) =>
               Effect.gen(function* () {

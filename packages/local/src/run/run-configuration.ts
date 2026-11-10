@@ -1,10 +1,10 @@
 import * as Deferred from 'effect/Deferred';
+import { PROJECT_STORE_PATH, projectStorePath } from '../project/project-store-path.js';
 import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
 import { finishWithRelease } from '../commands/agent/adapter/lifecycle-cause.js';
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
@@ -148,9 +148,7 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
   if (git !== undefined) runCandidate = { ...runCandidate, git: git };
   const run = parseWithSchemaSync(evalRunSchema, runCandidate);
 
-  const configuredStorePath = join('.attest', 'runs.db');
-
-  const storePath = yield* prepareEvalProjectFile(project.root, configuredStorePath, {
+  const storePath = yield* prepareEvalProjectFile(project.root, PROJECT_STORE_PATH, {
     errorCode: 'run_failed',
     message: 'The eval run store is not a safe project file.',
   });
@@ -259,7 +257,7 @@ const cancelConfiguration = Effect.fn('cancelConfiguration')(function* (
   const requested = yield* signalRegisteredEvalRun(project.root, request.run_id);
 
   if (requested === 'cancellation_requested') return { ...result, status: requested };
-  const run = yield* readStoredRun(join(project.root, '.attest', 'runs.db'), request.run_id);
+  const run = yield* readStoredRun(projectStorePath(project.root), request.run_id);
 
   return {
     ...result,

@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { StoreError } from '@attest/core';
 
+import { PROJECT_STORE_PATH } from '../../project/project-store-path.js';
 import { LocalError, type LocalErrorCode } from '../../errors/index.js';
 import { errnoCode } from '../../internal/errno-code.js';
 import { openStore, type StoreScope } from '../../store/index.js';
@@ -73,7 +74,7 @@ const removeStorePlaceholder = Effect.fn('removeStorePlaceholder')(function* (
     return yield* Effect.fail(
       boundaryFailure(
         new LocalError('run_failed', 'The eval store boundary changed during opening.', {
-          path: '.attest/runs.db',
+          path: PROJECT_STORE_PATH,
         }),
       ),
     );
@@ -87,7 +88,7 @@ const openEvalProjectStore = Effect.fn('openEvalProjectStore')(function* (
   projectRoot: string,
   owner: StoreScope,
 ) {
-  const storePath = yield* prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
+  const storePath = yield* prepareEvalProjectFile(projectRoot, PROJECT_STORE_PATH, {
     createDirectories: true,
     errorCode: 'run_failed',
     message: 'The eval run store is not a safe project file.',
@@ -168,7 +169,7 @@ const openEvalProjectStore = Effect.fn('openEvalProjectStore')(function* (
       if (!sameDirectoryIdentity(identity, yield* boundaryCall(() => lstat(capturedDirectory)))) {
         return yield* Effect.fail(
           new LocalError('run_failed', 'The eval store boundary changed before opening.', {
-            path: '.attest/runs.db',
+            path: PROJECT_STORE_PATH,
           }),
         );
       }
