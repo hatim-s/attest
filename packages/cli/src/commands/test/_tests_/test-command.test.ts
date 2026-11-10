@@ -368,6 +368,121 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     expect(guided?.cases).toHaveLength(1);
   });
 
+  it.each(['case', 'dataset'] as const)(
+    'commits the previewed %s import bytes even if the source changes at confirmation',
+    async (kind) => {
+      const root = await createFixtureProject();
+      const source = join(root, 'preview.jsonl');
+      await writeFile(source, '{"id":"previewed","input":"original"}\n');
+
+      const result = await runCommand(
+        root,
+        [
+          'test',
+          kind,
+          'import',
+          'refund',
+          source,
+          ...(kind === 'dataset' ? ['--as', 'previewed'] : []),
+        ],
+        {
+          interaction: {
+            ...promptingTerminal(() => 'yes'),
+            prompt: async () => {
+              await writeFile(source, '{"id":"changed","input":"replacement"}\n');
+
+              return 'yes';
+            },
+          },
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toHaveLength(2);
+      expect(result.output[0]).toContain('Dry run:');
+      expect(result.output[1]).toContain('Updated');
+      const loaded = valueFromExit(await Effect.runPromiseExit(loadProject({ project: root })));
+
+      const cases =
+        kind === 'case'
+          ? loaded.tests.find(({ id }) => id === 'refund')?.cases
+          : loaded.datasets.find(({ metadata }) => metadata.id === 'previewed')?.cases;
+
+      expect(cases).toContainEqual({ id: 'previewed', input: 'original' });
+      expect(cases?.some(({ id }) => id === 'changed')).toBe(false);
+    },
+  );
+
+  it('rejects a guided import when the project changes after its preview', async () => {
+    const root = await createFixtureProject();
+    const source = join(root, 'stale.jsonl');
+    await writeFile(source, '{"id":"stale","input":"value"}\n');
+    let afterConcurrentChange: Record<string, string> = {};
+
+    const result = await runCommand(root, ['test', 'case', 'import', 'refund', source], {
+      interaction: {
+        ...promptingTerminal(() => 'yes'),
+        prompt: async () => {
+          expect(
+            (await runJson(root, ['test', 'add', 'concurrent', '--agent', 'support'])).exitCode,
+          ).toBe(0);
+          afterConcurrentChange = await snapshotTree(root);
+
+          return 'yes';
+        },
+      },
+    });
+
+    expect(result.exitCode).toBe(3);
+    expect(result.output).toHaveLength(1);
+    expect(result.output[0]).toContain('Dry run:');
+    expect(result.errors.join('\n')).toContain('project_changed');
+    expect(await snapshotTree(root)).toEqual(afterConcurrentChange);
+  });
+
+  it('reads confirmed dataset import stdin once and emits one JSON result', async () => {
+    const root = await createFixtureProject();
+    let reads = 0;
+
+    const result = await runJson(
+      root,
+      [
+        'test',
+        'dataset',
+        'import',
+        'refund',
+        '-',
+        '--format',
+        'jsonl',
+        '--as',
+        'stdin-preview',
+        '--yes',
+      ],
+      {
+        interaction: {
+          readImportStdin: async function* () {
+            reads += 1;
+            yield await Promise.resolve('{"id":"once","input":"value"}\n');
+          },
+        },
+      },
+    );
+
+    expect(reads).toBe(1);
+    expect(result).toMatchObject({
+      exitCode: 0,
+      document: {
+        ok: true,
+        command: 'test.dataset.import',
+        result: { committed: true, imported_case_count: 1 },
+      },
+    });
+    const loaded = valueFromExit(await Effect.runPromiseExit(loadProject({ project: root })));
+    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'stdin-preview')?.cases).toEqual([
+      { id: 'once', input: 'value' },
+    ]);
+  });
+
   it('prints the shared dataset preview with a confirmed shared update', async () => {
     const root = await createFixtureProject();
 

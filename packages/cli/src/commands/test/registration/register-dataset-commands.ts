@@ -9,11 +9,13 @@ import {
   addMutationOptions,
   collect,
   mutationRequestFields,
+  outputFormat,
   promptContext,
   type MutationCliOptions,
 } from '../../shared/cli-options.js';
 import type { CommandContext } from '../../shared/command-context.js';
 import { readOrBuildRequest } from '../../shared/command-request.js';
+import { renderCommandResult } from '../../shared/command-result.js';
 import { requiredInput } from '../../shared/required-input.js';
 import { confirmRemoval } from './confirm-removal.js';
 import { runConfirmedDatasetImport, runGuidedImport } from './dataset-import-flow.js';
@@ -83,7 +85,9 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 }),
             });
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -146,7 +150,11 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             });
 
             if (request.dry_run === true) {
-              yield* runTestMutation(request, options, context);
+              const result = yield* runTestMutation(request, options, context);
+
+              context.io.output(
+                renderCommandResult(request.command, outputFormat(options), result),
+              );
 
               return;
             }
@@ -163,7 +171,9 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
               return;
             }
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -229,7 +239,9 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 }),
             });
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -275,7 +287,9 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 }),
             });
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -321,7 +335,9 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
                 }),
             });
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -374,7 +390,9 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             return;
           }
 
-          yield* runTestMutation(request, options, context);
+          const result = yield* runTestMutation(request, options, context);
+
+          context.io.output(renderCommandResult(request.command, outputFormat(options), result));
         }),
       ),
     );
