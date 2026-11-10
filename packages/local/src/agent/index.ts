@@ -18,7 +18,7 @@ export { runAgentRenameCommand } from '../commands/agent/rename.js';
 
 export { readAgentTestInput, runAgentTestCommand } from '../commands/agent/test.js';
 
-export { parseDuration } from '../commands/agent/authoring/input-parsers.js';
+export { parseDuration } from '../commands/shared/authoring-parsing.js';
 
 export {
   agentAddFlagConflicts,
