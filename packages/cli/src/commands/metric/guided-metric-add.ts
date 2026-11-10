@@ -57,9 +57,7 @@ const PRESET_BY_VALUE_OPERATOR: Partial<Record<ValueOperator, MetricPresetId>> =
 type GuidedChoice<Choice extends string> = {
   question: string;
   choices: readonly Choice[];
-  /** Answer used for an empty reply. */
   fallback: Choice;
-  /** Names the choice in the unknown-choice error. */
   path: string;
 };
 

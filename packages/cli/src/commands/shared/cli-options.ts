@@ -31,14 +31,19 @@ const commonOption = (option: Option): Option => {
   return option;
 };
 
-/** Options every command request carries, so they never count as authored fields. */
-const REQUEST_CONTROL_OPTIONS: ReadonlySet<string> = new Set([
-  'dry-run',
+/** Context flags that can accompany a resource mutation request. */
+const REQUEST_CONTEXT_OPTIONS: ReadonlySet<string> = new Set([
   'from-json',
-  'if-project-hash',
   'non-interactive',
   'output',
   'project',
+]);
+
+/** Mutation controls are carried by the document but are not resource authoring fields. */
+const REQUEST_CONTROL_OPTIONS: ReadonlySet<string> = new Set([
+  ...REQUEST_CONTEXT_OPTIONS,
+  'dry-run',
+  'if-project-hash',
   'yes',
 ]);
 
@@ -53,12 +58,7 @@ const authoredFieldNames = (command: Command): string[] => [
 /** Commander retains authored arguments, including empty strings, separately from defaults. */
 const authoredFieldPresence = (
   command: Command,
-  excludedOptions: ReadonlySet<string> = new Set([
-    'from-json',
-    'non-interactive',
-    'output',
-    'project',
-  ]),
+  excludedOptions: ReadonlySet<string> = REQUEST_CONTEXT_OPTIONS,
 ): ReadonlySet<string> => {
   const fields = new Set<string>();
 

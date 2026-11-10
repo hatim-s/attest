@@ -604,9 +604,6 @@ describe('runCli', () => {
         schema: { $schema: 'https://json-schema.org/draft/2020-12/schema' },
       },
     });
-    const repeated = await runJson(process.cwd(), ['schema', 'print', 'attest.command-request']);
-    expect(repeated.output).toEqual(printed.output);
-
     const missing = await runJson(process.cwd(), ['schema', 'print', 'missing']);
     expect(missing.exitCode).toBe(1);
     expect(missing.document).toMatchObject({

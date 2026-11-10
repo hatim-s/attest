@@ -16,3 +16,4 @@ tools/anti-slop/
 
 # Local evidence is not repository source.
 .notes/
+.agent-sources/

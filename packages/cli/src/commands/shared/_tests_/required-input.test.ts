@@ -7,7 +7,6 @@ import { ask } from '../required-input.js';
 
 /** A terminal prompt that settles only when its own signal aborts, like readline. */
 const pendingQuestion = (onAsk: () => void) => {
-  // Every signal a question was asked with, in order.
   const signals: AbortSignal[] = [];
 
   const prompt: CliInteraction['prompt'] = (_question, options) => {

@@ -598,6 +598,7 @@ export default tseslint.config(
   ...antiSlopConfig,
   {
     ignores: [
+      '.agent-sources/**',
       '**/dist/**',
       '**/.turbo/**',
       '**/node_modules/**',
