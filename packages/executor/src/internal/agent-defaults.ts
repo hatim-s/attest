@@ -1,3 +1,5 @@
+import { DEFAULT_REQUEST_BYTES } from '@attest/contracts';
+
 /** Limits applied when an agent resource leaves the corresponding timeout or cap unset. */
 const DEFAULT_ATTEMPT_MS = 60_000;
 
@@ -6,8 +8,6 @@ const DEFAULT_CONNECT_MS = 10_000;
 const DEFAULT_FIRST_BYTE_MS = 30_000;
 
 const DEFAULT_IDLE_MS = 30_000;
-
-const DEFAULT_REQUEST_BYTES = 10 * 1024 * 1024;
 
 const DEFAULT_RESPONSE_BYTES = 10 * 1024 * 1024;
 
