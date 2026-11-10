@@ -2,7 +2,6 @@ import * as Effect from 'effect/Effect';
 import type { DatasetImportMapping } from '@attest/contracts';
 import {
   prepareImportSource,
-  runTestMutationCommand,
   validateCommandRequest,
   type TestAuthoringCommand,
 } from '@attest/local/test';
@@ -21,22 +20,6 @@ type ImportRequest = Extract<
 
 type DatasetImportRequest = Extract<TestAuthoringCommand, { command: 'test.dataset.import' }>;
 
-/** Runs one import mutation against a source that was already read once. */
-const runPreparedImport = (
-  request: ImportRequest,
-  options: MutationCliOptions,
-  context: CommandContext,
-  preparedImportSource: Uint8Array,
-) =>
-  runTestMutationCommand({
-    preparedImportSource,
-    project: options.project,
-    readImportStdin: context.interaction.readImportStdin,
-    readStdin: context.interaction.readStdin,
-    request,
-    workingDirectory: context.workingDirectory,
-  });
-
 /**
  * Applies a `--yes` dataset import bound to its own dry run: the commit must match the previewed
  * project hash. When the dataset is shared by two or more tests, the preview is printed with it.
@@ -54,7 +37,7 @@ const runConfirmedDatasetImport = (
       request.import.format,
     );
 
-    const preview = yield* runPreparedImport(
+    const preview = yield* runTestMutation(
       yield* validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
       options,
       context,
@@ -81,7 +64,7 @@ const runConfirmedDatasetImport = (
       yes: true,
     });
 
-    const committed = yield* runPreparedImport(confirmed, options, context, prepared.source);
+    const committed = yield* runTestMutation(confirmed, options, context, prepared.source);
     const affectedTests = preview.result.affected_tests ?? [];
 
     const result =
@@ -194,7 +177,7 @@ const runGuidedImport = (
 
     if (guided === null) return;
 
-    const preview = yield* runPreparedImport(
+    const preview = yield* runTestMutation(
       yield* validateCommandRequest(guided.command, { ...guided, dry_run: true }),
       options,
       context,
@@ -216,7 +199,9 @@ const runGuidedImport = (
       yes: true,
     });
 
-    yield* runTestMutation(applied, options, context, prepared.source);
+    const result = yield* runTestMutation(applied, options, context, prepared.source);
+
+    context.io.output(renderCommandResult(applied.command, outputFormat(options), result));
   });
 
 export { runConfirmedDatasetImport, runGuidedImport };

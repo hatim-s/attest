@@ -111,7 +111,9 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
               }),
           });
 
-          yield* runTestMutation(request, options, context);
+          const result = yield* runTestMutation(request, options, context);
+
+          context.io.output(renderCommandResult(request.command, outputFormat(options), result));
         }),
       ),
     );
@@ -166,7 +168,9 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
               return;
             }
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -282,7 +286,9 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
                 }),
             });
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -339,7 +345,9 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
               }))
             )
               return;
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
