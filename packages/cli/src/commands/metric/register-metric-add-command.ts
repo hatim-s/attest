@@ -7,7 +7,7 @@ import {
   spanKindSchema,
   spanStatusSchema,
 } from '@attest/contracts';
-import { createMetricResource, type MetricAddFields } from '@attest/local/metric';
+import { createMetricResource } from '@attest/local/metric';
 import { Option, type Command } from 'commander';
 
 import { setMutationHelp } from '../../help/command-help.js';
@@ -22,10 +22,10 @@ import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
 import { requiredInput } from '../shared/required-input.js';
 import { fillGuidedMetricFields, selectGuidedMetricFields } from './guided-metric-add.js';
+import type { GuidedMetricFields } from './guided-metric-prompts.js';
 import { runMetricMutation } from './run-metric-mutation.js';
 
-type MetricAddOptions = MutationCliOptions &
-  Omit<MetricAddFields, 'metricId' | 'readStdin' | 'workingDirectory'>;
+type MetricAddOptions = MutationCliOptions & GuidedMetricFields;
 
 /** Registers assertion, judge, executable, and HTTP metric authoring. */
 const registerMetricAddCommand = (metric: Command, context: CommandContext): void => {
@@ -137,4 +137,4 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
   });
 };
 
-export { registerMetricAddCommand, type MetricAddOptions };
+export { registerMetricAddCommand };

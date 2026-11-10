@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { Command, CommanderError } from 'commander';
 
 import { withCommandSignals } from './commands/shared/process-signals.js';
+import { registerAgentCommands } from './commands/agent/register-agent-commands.js';
 import { registerCloudCommands } from './commands/cloud/register-cloud-commands.js';
 import { registerEvalCommands } from './commands/eval/eval-command.js';
 import { renderEvalFailureEvent, renderEvalResultLine } from './commands/eval/eval-output.js';
@@ -93,6 +94,7 @@ const createProgram = (
   registerRootCommands(commandContext);
   registerCloudCommands(commandContext);
   registerProjectResourceCommands(commandContext);
+  registerAgentCommands(commandContext);
   registerProjectsCommands(commandContext);
   registerMetricCommands(commandContext);
   registerTestCommands(commandContext);

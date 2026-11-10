@@ -2,16 +2,18 @@ import * as Effect from 'effect/Effect';
 import type { MetricPresetId } from '@attest/contracts';
 
 import { ask, requiredInput, type PromptContext } from '../shared/required-input.js';
-import type { MetricAddOptions } from './register-metric-add-command.js';
+import type { MetricAddFields } from '@attest/local/metric';
+
+type GuidedMetricFields = Omit<MetricAddFields, 'metricId' | 'readStdin' | 'workingDirectory'>;
 
 /** One guided question: when to ask it and how its answer changes the options. */
 type GuidedPrompt = {
-  apply: (options: MetricAddOptions, answer: string) => MetricAddOptions;
+  apply: (options: GuidedMetricFields, answer: string) => GuidedMetricFields;
   /** Answer used for an empty reply; without one an empty reply is missing input. */
   fallback?: string;
-  needed: (options: MetricAddOptions) => boolean;
+  needed: (options: GuidedMetricFields) => boolean;
   path: string;
-  question: (options: MetricAddOptions) => string;
+  question: (options: GuidedMetricFields) => string;
 };
 
 const always = (): boolean => true;
@@ -151,7 +153,7 @@ const PRESET_PROMPTS: Partial<Record<MetricPresetId, readonly GuidedPrompt[]>> =
 /** Asks one guided question and applies its answer. */
 const askGuidedPrompt = Effect.fn('askGuidedPrompt')(function* (
   step: GuidedPrompt,
-  options: MetricAddOptions,
+  options: GuidedMetricFields,
   prompt: PromptContext,
 ) {
   const question = step.question(options);
@@ -164,4 +166,4 @@ const askGuidedPrompt = Effect.fn('askGuidedPrompt')(function* (
   return step.apply(options, answer);
 });
 
-export { OPERATOR_PROMPTS, PRESET_PROMPTS, askGuidedPrompt };
+export { OPERATOR_PROMPTS, PRESET_PROMPTS, askGuidedPrompt, type GuidedMetricFields };
