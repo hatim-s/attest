@@ -3,6 +3,7 @@ import {
   foreignMessage,
   parseWithSchema,
   AGENT_COMPLETION_PROTOCOL,
+  DEFAULT_REQUEST_BYTES,
   agentCompletionSchema,
   parseAgentRequest,
   type AgentCallback,
@@ -18,9 +19,6 @@ import { deliverCompletion, type DeliveryOutcome } from './deliver-completion.js
 import { readBoundedText } from './read-bounded-text.js';
 import { AgentHandlerError, AgentRunnerError, RunnerIoError } from './runner-errors.js';
 import { tokensMatch } from './tokens-match.js';
-
-// Matches the executor's default request_bytes limit, the largest envelope attest sends.
-const REQUEST_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 
 /** A validated trigger. The runner only accepts requests that say where to post the result. */
 type AgentInvocation = AgentRequest & { callback: AgentCallback };
@@ -57,6 +55,8 @@ type RunnerFailure = {
 
 type AgentRunnerOptions = {
   handler: AgentHandler;
+  /** Maximum trigger body size in bytes. Defaults to 10 MiB. */
+  requestBodyLimitBytes?: number;
   /** Posts completions. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
   /** Receives background failures. Defaults to one line on stderr. */
@@ -118,6 +118,7 @@ const parseTrigger = (text: string): ReturnType<typeof parseAgentRequest> | unde
  */
 const createAgentRunner = ({
   handler,
+  requestBodyLimitBytes = DEFAULT_REQUEST_BYTES,
   fetch: fetchImpl = globalThis.fetch,
   onError = reportToStderr,
   triggerToken,
@@ -130,6 +131,10 @@ const createAgentRunner = ({
     const tokenMissing = typeof triggerToken !== 'string' || triggerToken === '';
 
     if (tokenMissing) return yield* new AgentRunnerError({ reason: 'missing_trigger_token' });
+
+    // BOUNDARY: JavaScript callers can pass invalid configuration.
+    if (!Number.isSafeInteger(requestBodyLimitBytes) || requestBodyLimitBytes <= 0)
+      return yield* new AgentRunnerError({ reason: 'invalid_request_body_limit' });
     const fibers = yield* FiberSet.make<void>();
     const inFlight = new Map<string, Fiber.Fiber<void>>();
     const receipts = new Map<string, InvocationReceipt>();
@@ -350,7 +355,7 @@ const createAgentRunner = ({
             return Response.json({ error: 'unsupported_media_type' }, { status: 415 });
           }
 
-          const text = yield* readBoundedText(request, REQUEST_BODY_LIMIT_BYTES);
+          const text = yield* readBoundedText(request, requestBodyLimitBytes);
 
           if (text === undefined) return Response.json({ error: 'too_large' }, { status: 413 });
           const parsed = parseTrigger(text);

@@ -18,7 +18,7 @@ export {
 
 export { type CacheKind, type CacheStore } from './cache.js';
 
-export { canonicalStringify, contentHash } from './internal/canonical-json.js';
+export { canonicalStringify, contentHash } from '../internal/canonical-json.js';
 
 export { parseRecord } from './internal/record-validation.js';
 

@@ -1,9 +1,9 @@
 import * as Effect from 'effect/Effect';
 import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
 
 import { StoreError, type ProjectCatalog, type RunSource } from '@attest/core';
 
+import { projectStorePath } from '../project/project-store-path.js';
 import { storeDecode } from '../store/internal/store-effect.js';
 import { activityBounds } from '@attest/core/records';
 import { anchoredCall } from '../internal/open-anchored.js';
@@ -80,7 +80,7 @@ const createRegistryCatalog = (
         return yield* Effect.fail(
           new StoreError('PROJECT_NOT_FOUND', `Project ${key} is not registered.`),
         );
-      const path = join(entry.root, '.attest', 'runs.db');
+      const path = projectStorePath(entry.root);
 
       // Only absence observed before opening is empty. Failed opens retain schema and release evidence.
       const exists = yield* anchoredCall('lstat', path, () => lstat(path)).pipe(

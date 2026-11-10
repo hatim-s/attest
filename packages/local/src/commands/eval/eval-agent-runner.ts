@@ -3,7 +3,8 @@ import * as Fiber from 'effect/Fiber';
 import * as Scope from 'effect/Scope';
 import * as Exit from 'effect/Exit';
 import * as Cause from 'effect/Cause';
-import { recoverOrdinary, finishWithRelease } from '../agent/adapter/lifecycle-cause.js';
+import { recoverOrdinary } from '../agent/adapter/lifecycle-cause.js';
+import { finishWithRelease } from '../../internal/lifecycle-cause.js';
 import * as Effect from 'effect/Effect';
 import { performance } from 'node:perf_hooks';
 

@@ -14,7 +14,7 @@ import {
   type RunStore,
 } from '@attest/core';
 import { storeCall, storeDecode } from './internal/store-effect.js';
-import { withReadCleanup } from '../commands/run-store/cleanup.js';
+import { withReadCleanup } from './internal/read-cleanup.js';
 
 /** Exports canonical bytes after reading the aggregate from the caller's store owner. */
 const exportRunBundle = Effect.fn('exportRunBundle')(function* (

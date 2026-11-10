@@ -206,7 +206,6 @@ const reportResolvedCases = (check: TestReferenceCheck): void => {
     attached.dataset.cases.forEach((testCase, caseIndex) => {
       const tags = new Set(testCase.tags ?? []);
 
-      // Only rows carrying every attachment tag are attached.
       if (datasetAttachment.tags?.some((tag) => !tags.has(tag)) === true) {
         return;
       }

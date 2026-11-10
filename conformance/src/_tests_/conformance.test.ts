@@ -7,11 +7,7 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import {
-  loadFixtures,
-  type FixtureEnvelope,
-  type LoadedFixture,
-} from '../../../packages/contracts/src/_tests_/support/load-fixtures.js';
+import { loadFixtures, type FixtureEnvelope, type LoadedFixture } from '../load-fixtures.js';
 
 type FixtureParseResult =
   | { ok: true; value: unknown; warningCodes: string[] }

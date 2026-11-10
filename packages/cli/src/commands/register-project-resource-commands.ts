@@ -13,7 +13,6 @@ import {
 import { Argument, type Command } from 'commander';
 
 import { setCliCommandHelpMetadata } from '../help/command-help.js';
-import { registerAgentCommands } from './agent/register-agent-commands.js';
 import {
   renderSchemaList,
   renderSchemaPrint,
@@ -233,8 +232,6 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
       `attest schema print ${COMMAND_REQUEST_SCHEMA_ID} --output json`,
     ],
   });
-
-  registerAgentCommands(context);
 };
 
 export { registerProjectResourceCommands };

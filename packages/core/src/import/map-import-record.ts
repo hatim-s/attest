@@ -16,7 +16,7 @@ import {
   type TestCase,
 } from '@attest/contracts';
 
-import { contentHash } from '../store/internal/canonical-json.js';
+import { contentHash } from '../internal/canonical-json.js';
 import {
   createContentCaseId,
   createKeyedCaseId,

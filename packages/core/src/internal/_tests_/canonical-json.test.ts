@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { StoreError } from '../../store-error.js';
+import { StoreError } from '../../store/store-error.js';
 import { canonicalStringify, contentHash } from '../canonical-json.js';
 
 type CyclicFixture = { self?: CyclicFixture };

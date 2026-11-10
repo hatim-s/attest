@@ -3,7 +3,6 @@ import { AttestCliError } from '../../errors/cli-error.js';
 import { ask, type PromptContext } from '../shared/required-input.js';
 
 type DefaultPrompt = {
-  /** A flag value that, when present, is used without asking. */
   value?: string;
   question: string;
   /** Shown in brackets and used for an empty answer or a non-interactive command. */
@@ -14,7 +13,6 @@ type ChoicePrompt<Choice extends string> = {
   question: string;
   choices: readonly [Choice, ...Choice[]];
   fallback: Choice;
-  /** Names the choice in the unknown-choice error. */
   path: string;
 };
 

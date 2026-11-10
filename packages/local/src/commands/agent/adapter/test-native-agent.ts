@@ -1,6 +1,6 @@
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
-import { finishWithRelease } from './lifecycle-cause.js';
+import { finishWithRelease } from '../../../internal/lifecycle-cause.js';
 import {
   AGENT_PROTOCOL,
   type AgentRequest,

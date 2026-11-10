@@ -8,7 +8,7 @@ type CreateBundleResult = { lines: string[]; manifest: BundleManifest };
 import { createHash } from 'node:crypto';
 import * as Schema from 'effect/Schema';
 
-import { canonicalStringify } from './internal/canonical-json.js';
+import { canonicalStringify } from '../internal/canonical-json.js';
 import { caseRecordSchema, runRecordSchema } from './internal/record-schema.js';
 import { formatRecordIssues } from './internal/record-validation.js';
 import { StoreError } from './store-error.js';

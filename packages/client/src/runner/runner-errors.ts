@@ -9,14 +9,15 @@ class AgentHandlerError extends Data.TaggedError('AgentHandlerError')<{
   cause?: unknown;
 }> {}
 
-type AgentRunnerReason = 'missing_trigger_token' | 'drain_timed_out';
+type AgentRunnerReason = 'missing_trigger_token' | 'invalid_request_body_limit' | 'drain_timed_out';
 
 const AGENT_RUNNER_MESSAGES = {
   missing_trigger_token: 'createAgentRunner needs a non-empty triggerToken.',
+  invalid_request_body_limit: 'requestBodyLimitBytes must be a positive safe integer.',
   drain_timed_out: 'Runner drain timed out; accepted work remains owned.',
 } as const satisfies Record<AgentRunnerReason, string>;
 
-/** A runner refused to start without a trigger token, or its drain timed out. */
+/** A runner configuration or drain failure. */
 class AgentRunnerError extends Data.TaggedError('AgentRunnerError')<{
   reason: AgentRunnerReason;
 }> {

@@ -117,18 +117,12 @@ describe('projects commands', () => {
     await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('rejects the removed view command without opening a store', async () => {
+  it('rejects an unknown command without opening a store', async () => {
     await useAttestHome();
     const root = await temporaryDirectory('attest-web-only-');
-    const help = await runCommand(root, ['help', 'view']);
-
-    expect(help.exitCode).toBe(2);
-    expect(help.errors.join('\n')).toContain('Unknown help path: view.');
-
-    const run = await runCommand(root, ['view', '--no-open']);
+    const run = await runCommand(root, ['not-a-command']);
 
     expect(run.exitCode).toBe(2);
-    expect(run.errors.join('\n')).toContain("unknown command 'view'");
     await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

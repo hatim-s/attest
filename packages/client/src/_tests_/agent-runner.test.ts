@@ -277,6 +277,40 @@ describe('createAgentRunner', () => {
     expect(completions.received).toEqual([]);
   });
 
+  it('enforces the configured receiver byte limit at the request boundary', async () => {
+    const completions = await receiver();
+
+    const body = JSON.stringify({
+      protocol: AGENT_PROTOCOL,
+      run_id: RUN_ID,
+      case_id: 'case-1',
+      input: 'é',
+      callback: { url: completions.url, token: 'secret-token' },
+    });
+
+    const bytes = new TextEncoder().encode(body).length;
+
+    const accepted = await createRunner({
+      handler: echo,
+      triggerToken: TRIGGER_TOKEN,
+      requestBodyLimitBytes: bytes,
+    });
+
+    const rejected = await createRunner({
+      handler: echo,
+      triggerToken: TRIGGER_TOKEN,
+      requestBodyLimitBytes: bytes - 1,
+    });
+
+    expect((await rejected.fetch(trigger(completions.url, { body }))).status).toBe(413);
+    expect((await accepted.fetch(trigger(completions.url, { body }))).status).toBe(202);
+    await accepted.drain();
+    expect(completions.received).toHaveLength(1);
+    await expect(
+      createRunner({ handler: echo, triggerToken: TRIGGER_TOKEN, requestBodyLimitBytes: 0 }),
+    ).rejects.toMatchObject({ reason: 'invalid_request_body_limit' });
+  });
+
   it('refuses to start when an untyped caller omits the trigger token', async () => {
     // @ts-expect-error JavaScript callers can omit the token; `Bearer undefined` must not authenticate.
     await expect(createRunner({ handler: echo })).rejects.toMatchObject({

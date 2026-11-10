@@ -1,5 +1,4 @@
 import { anchoredCall } from '../internal/open-anchored.js';
-import { withOperationCleanup } from '../internal/operation-cleanup.js';
 import * as Effect from 'effect/Effect';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -14,7 +13,7 @@ import { LocalError } from '../errors/index.js';
 import { schemaIssueDiagnostics } from '../internal/schema-issue-diagnostics.js';
 import { discoverProject } from '../project/discover-project.js';
 import { loadProject, type LoadedProject } from '../project/project-loader/index.js';
-import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
+import { withProjectLock } from '../project/transaction/project-lock.js';
 import { resolveSafeProjectPath } from '../project/transaction/project-path.js';
 import {
   prepareTransaction,
@@ -123,70 +122,68 @@ const pushCloudProject = Effect.fn('pushCloudProject')(function* (
   },
 ) {
   const { root } = yield* discoverProject(options);
-  const lock = yield* acquireProjectLock(root);
 
-  return yield* withOperationCleanup(
-    Effect.gen(function* () {
-      yield* recoverProjectTransactions(root, lock);
-      const { link, projectId } = yield* resolveCloudProject(options);
-      const bundle = yield* createCloudBundle(yield* loadProject({ project: root }));
-      const hashes = fileHashes(bundle.files);
+  return yield* withProjectLock(
+    root,
+    (lock) =>
+      Effect.gen(function* () {
+        yield* recoverProjectTransactions(root, lock);
+        const { link, projectId } = yield* resolveCloudProject(options);
+        const bundle = yield* createCloudBundle(yield* loadProject({ project: root }));
+        const hashes = fileHashes(bundle.files);
 
-      const unchanged =
-        JSON.stringify(Object.entries(hashes).sort()) ===
-        JSON.stringify(Object.entries(link.file_hashes).sort());
+        const unchanged =
+          JSON.stringify(Object.entries(hashes).sort()) ===
+          JSON.stringify(Object.entries(link.file_hashes).sort());
 
-      if (options.acknowledgeNoSecrets !== true && !unchanged) {
-        return yield* new LocalError(
-          'cli_usage',
-          'Cloud push requires confirmation that changed authored files contain no secrets.',
-          {
-            hint: 'Inspect project resources, case data, and metric code, then pass --no-secrets.',
-          },
+        if (options.acknowledgeNoSecrets !== true && !unchanged) {
+          return yield* new LocalError(
+            'cli_usage',
+            'Cloud push requires confirmation that changed authored files contain no secrets.',
+            {
+              hint: 'Inspect project resources, case data, and metric code, then pass --no-secrets.',
+            },
+          );
+        }
+
+        const payload = { bundle, parent_revision_id: link.revision_id ?? null };
+
+        if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > PORTABLE_MAX_UPLOAD_BYTES) {
+          return yield* new LocalError(
+            'project_invalid',
+            `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
+            {
+              hint: 'Reduce authored dataset or metric source size before pushing.',
+            },
+          );
+        }
+
+        const response = yield* options.client.request(
+          'POST',
+          `/v1/projects/${encodeURIComponent(projectId)}/revisions`,
+          { schema: revisionResponseSchema, body: payload },
         );
-      }
 
-      const payload = { bundle, parent_revision_id: link.revision_id ?? null };
+        if (response.revision.project_id !== projectId) {
+          return yield* new LocalError(
+            'project_invalid',
+            'Cloud returned a revision for another project.',
+          );
+        }
 
-      if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > PORTABLE_MAX_UPLOAD_BYTES) {
-        return yield* new LocalError(
-          'project_invalid',
-          `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
-          {
-            hint: 'Reduce authored dataset or metric source size before pushing.',
-          },
-        );
-      }
+        yield* writeCloudLink(root, {
+          ...link,
+          revision_id: response.revision.id,
+          file_hashes: hashes,
+        });
 
-      const response = yield* options.client.request(
-        'POST',
-        `/v1/projects/${encodeURIComponent(projectId)}/revisions`,
-        { schema: revisionResponseSchema, body: payload },
-      );
-
-      if (response.revision.project_id !== projectId) {
-        return yield* new LocalError(
-          'project_invalid',
-          'Cloud returned a revision for another project.',
-        );
-      }
-
-      yield* writeCloudLink(root, {
-        ...link,
-        revision_id: response.revision.id,
-        file_hashes: hashes,
-      });
-
-      return {
-        project_id: projectId,
-        revision_id: response.revision.id,
-        file_count: Object.keys(bundle.files).length,
-      };
-    }),
-    Effect.gen(function* () {
-      yield* releaseProjectLock(lock);
-    }),
-    'project_saved_cleanup_failed',
+        return {
+          project_id: projectId,
+          revision_id: response.revision.id,
+          file_count: Object.keys(bundle.files).length,
+        };
+      }),
+    () => ({ committed: true }),
   );
 }, Effect.uninterruptible);
 
@@ -240,81 +237,79 @@ const pullCloudProject = Effect.fn('pullCloudProject')(function* (
   },
 ) {
   const { root } = yield* discoverProject(options);
-  const lock = yield* acquireProjectLock(root);
 
-  return yield* withOperationCleanup(
-    Effect.gen(function* () {
-      yield* recoverProjectTransactions(root, lock);
-      const { link, projectId } = yield* resolveCloudProject(options);
+  return yield* withProjectLock(
+    root,
+    (lock) =>
+      Effect.gen(function* () {
+        yield* recoverProjectTransactions(root, lock);
+        const { link, projectId } = yield* resolveCloudProject(options);
 
-      const selected =
-        options.revisionId === undefined ? 'current' : encodeURIComponent(options.revisionId);
+        const selected =
+          options.revisionId === undefined ? 'current' : encodeURIComponent(options.revisionId);
 
-      const response = yield* options.client.request(
-        'GET',
-        `/v1/projects/${encodeURIComponent(projectId)}/revisions/${selected}`,
-        { schema: revisionBundleSchema },
-      );
-
-      if (
-        response.revision.project_id !== projectId ||
-        (options.revisionId !== undefined && response.revision.id !== options.revisionId)
-      ) {
-        return yield* new LocalError(
-          'project_invalid',
-          'Cloud returned a different project or revision.',
+        const response = yield* options.client.request(
+          'GET',
+          `/v1/projects/${encodeURIComponent(projectId)}/revisions/${selected}`,
+          { schema: revisionBundleSchema },
         );
-      }
 
-      yield* tryOwned(EvalResolutionError, () => resolvePortableProject(response.bundle));
-      const changes = yield* planPullChanges(root, link.file_hashes, response.bundle.files);
+        if (
+          response.revision.project_id !== projectId ||
+          (options.revisionId !== undefined && response.revision.id !== options.revisionId)
+        ) {
+          return yield* new LocalError(
+            'project_invalid',
+            'Cloud returned a different project or revision.',
+          );
+        }
 
-      const prepared = yield* prepareTransaction(root, changes, {
-        completion: {
-          path: '.attest/cloud.json',
-          contents: serializeCloudLink({
-            ...link,
-            revision_id: response.revision.id,
-            file_hashes: fileHashes(response.bundle.files),
-          }),
-        },
-      });
+        yield* tryOwned(EvalResolutionError, () => resolvePortableProject(response.bundle));
+        const changes = yield* planPullChanges(root, link.file_hashes, response.bundle.files);
 
-      yield* runPreparedTransaction({
-        root,
-        prepared,
-        beforePublish: () =>
-          Effect.gen(function* () {
-            // A non-Attest editor may write after conflict planning but before staging.
-            for (const entry of prepared.journal.entries) {
-              const incoming = response.bundle.files[entry.path];
-              const nextHash = incoming === undefined ? null : byteHash(incoming);
+        const prepared = yield* prepareTransaction(root, changes, {
+          completion: {
+            path: '.attest/cloud.json',
+            contents: serializeCloudLink({
+              ...link,
+              revision_id: response.revision.id,
+              file_hashes: fileHashes(response.bundle.files),
+            }),
+          },
+        });
 
-              if (
-                entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
-                entry.original_hash !== nextHash
-              ) {
-                return yield* new LocalError(
-                  'project_changed',
-                  'A local file changed while cloud pull was staging.',
-                  { path: entry.path },
-                );
+        yield* runPreparedTransaction({
+          root,
+          prepared,
+          beforePublish: () =>
+            Effect.gen(function* () {
+              // A non-Attest editor may write after conflict planning but before staging.
+              for (const entry of prepared.journal.entries) {
+                const incoming = response.bundle.files[entry.path];
+                const nextHash = incoming === undefined ? null : byteHash(incoming);
+
+                if (
+                  entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
+                  entry.original_hash !== nextHash
+                ) {
+                  return yield* new LocalError(
+                    'project_changed',
+                    'A local file changed while cloud pull was staging.',
+                    { path: entry.path },
+                  );
+                }
               }
-            }
-          }),
-        verify: () => loadProject({ project: root }),
-      });
+            }),
+          verify: () => loadProject({ project: root }),
+        });
 
-      return {
-        project_id: projectId,
-        revision_id: response.revision.id,
-        file_count: Object.keys(response.bundle.files).length,
-      };
-    }),
-    Effect.gen(function* () {
-      yield* releaseProjectLock(lock);
-    }),
-    'project_saved_cleanup_failed',
+        return {
+          project_id: projectId,
+          revision_id: response.revision.id,
+          file_count: Object.keys(response.bundle.files).length,
+        };
+      }),
+    () => ({ committed: true }),
   );
 }, Effect.uninterruptible);
 

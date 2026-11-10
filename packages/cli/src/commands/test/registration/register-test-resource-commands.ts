@@ -73,7 +73,9 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
               }),
           });
 
-          yield* runTestMutation(request, options, context);
+          const result = yield* runTestMutation(request, options, context);
+
+          context.io.output(renderCommandResult(request.command, outputFormat(options), result));
         }),
       ),
     );
@@ -158,7 +160,9 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
                 }),
             });
 
-            yield* runTestMutation(request, options, context);
+            const result = yield* runTestMutation(request, options, context);
+
+            context.io.output(renderCommandResult(request.command, outputFormat(options), result));
           }),
         ),
     );
@@ -197,7 +201,9 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
             }))
           )
             return;
-          yield* runTestMutation(request, options, context);
+          const result = yield* runTestMutation(request, options, context);
+
+          context.io.output(renderCommandResult(request.command, outputFormat(options), result));
         }),
       ),
     );

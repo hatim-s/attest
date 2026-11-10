@@ -65,7 +65,6 @@ it('retains the safe public store code after native error migration', () => {
   });
 });
 
-// Each command failure family keeps the envelope it had while the error channel was `unknown`.
 it.each([
   [
     'a local error by its catalog code',

@@ -138,6 +138,9 @@ export {
   argvSchema,
   httpRequestTemplateSchema,
   agentTransportSchema,
+  jsonlBridgeTransportSchema,
+  streamIncrementalOutputModeSchema,
+  streamTransportSchema,
   vercelSandboxSchema,
 } from './project/resources/agent-transports.js';
 
@@ -270,3 +273,5 @@ export type {
 export { looseStruct, stripStruct } from './schema/objects.js';
 
 export type { SchemaDiagnostic } from './internal/issues.js';
+
+export { DEFAULT_REQUEST_BYTES } from './agent/request-limits.js';

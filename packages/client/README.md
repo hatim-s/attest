@@ -76,3 +76,7 @@ unconfirmed, so the runner reports `handler_failed` even if Pi completed success
 The [integration guide](../../docs/integrations/attest-client.md) covers the trigger and completion
 contract, limits, error codes and the trace mapping. `examples/` has a runnable Pi runner and a Pi
 extension that posts the completion from inside Pi.
+
+The runner accepts trigger bodies up to 10 MiB by default. If an agent resource sets
+`limits.request_bytes` higher, set `requestBodyLimitBytes` on `createAgentRunner` to a
+matching or larger byte count. The receiver limit must be a positive safe integer.

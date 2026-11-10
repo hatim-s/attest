@@ -5,7 +5,7 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { contentHash } from '../store/internal/canonical-json.js';
+import { contentHash } from '../internal/canonical-json.js';
 
 import { EvalResolutionError } from './resolution-project.js';
 import type { ResolutionProject } from './resolution-project.js';

@@ -1,5 +1,4 @@
 import {
-  argvSchema,
   isJsonObject,
   parseWithSchema,
   tryOwned,
@@ -40,25 +39,6 @@ const tokenizeCommand = Effect.fn('tokenizeCommand')(function* (value: string) {
   return tokens;
 });
 
-/** Parses an unambiguous JSON argv array. */
-const parseArgvJson = Effect.fn('parseArgvJson')(function* (value: string) {
-  const parsed = yield* parseJsonText(value, {
-    path: '--argv-json',
-    hint: 'Pass a JSON array of strings.',
-  });
-
-  const argv = parseWithSchema(argvSchema, parsed);
-
-  if (!argv.ok) {
-    return yield* new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
-      path: '--argv-json',
-      hint: 'Pass a JSON array containing at least one string.',
-    });
-  }
-
-  return argv.value;
-});
-
 /** Parses and validates one Vercel sandbox definition. */
 const parseSandboxJson = Effect.fn('parseSandboxJson')(function* (value: string) {
   const parsed = yield* parseJsonText(value, {
@@ -81,24 +61,6 @@ const parseSandboxJson = Effect.fn('parseSandboxJson')(function* (value: string)
   }
 
   return sandbox.value;
-});
-
-/** Parses a positive duration expressed as milliseconds, seconds, or minutes. */
-const parseDuration = Effect.fn('parseDuration')(function* (value: string, path: string) {
-  const match = /^(\d+)(ms|s|m)$/u.exec(value);
-  const amount = match?.[1] === undefined ? 0 : Number(match[1]);
-  const unit = match?.[2];
-  const multiplier = unit === 'm' ? 60_000 : unit === 's' ? 1_000 : 1;
-  const milliseconds = amount * multiplier;
-
-  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
-    return yield* new LocalError('cli_usage', 'Duration must be a positive value.', {
-      path,
-      hint: 'Use an integer followed by ms, s, or m, such as `60s`.',
-    });
-  }
-
-  return milliseconds;
 });
 
 /** Parses repeatable JSON-valued command options, failing on the first invalid value. */
@@ -148,8 +110,6 @@ const parseTcpReadiness = Effect.fn('parseTcpReadiness')(function* (value: strin
 });
 
 export {
-  parseArgvJson,
-  parseDuration,
   parseJsonValues,
   parseRequestTemplate,
   parseSandboxJson,

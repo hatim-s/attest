@@ -18,7 +18,6 @@ import {
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import { createCliSuccessResult, serializeCliResult } from '../../output/cli-protocol.js';
 import {
-  collect,
   commonOption,
   nonInteractiveOption,
   outputOption,
@@ -26,6 +25,11 @@ import {
   promptContext,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
+import {
+  addEvalSelectionOptions,
+  evalSelectionFields,
+  type EvalSelectionOptions,
+} from './eval-selection-options.js';
 import { collectEvalEvents } from './eval-event-stream.js';
 import { failedRunResult, renderHumanFinalResult } from './eval-output.js';
 import {
@@ -46,13 +50,8 @@ type CommonEvalOptions = {
 };
 
 type EvalRunCliOptions = CommonEvalOptions &
-  Omit<EvalRunRequestFields, 'caseIds' | 'datasetIds' | 'folders' | 'tags' | 'testIds'> & {
-    case?: string[];
-    dataset?: string[];
-    folder?: string[];
-    tag?: string[];
-    upload?: boolean;
-  };
+  Omit<EvalRunRequestFields, 'caseIds' | 'datasetIds' | 'folders' | 'tags' | 'testIds'> &
+  EvalSelectionOptions & { upload?: boolean };
 
 type EvalCancelCliOptions = CommonEvalOptions & Omit<EvalCancelRequestFields, 'runId'>;
 
@@ -242,15 +241,13 @@ const readCancelRequest = (
 const registerEvalCommands = (context: CommandContext): void => {
   const evalCommand = context.program.command('eval').description('Run and cancel evaluations.');
 
-  const run = evalCommand
-    .command('run')
-    .description('Run selected tests and persist one immutable evaluation.')
-    .argument('[test-id...]', 'test ids; pass --all to select every test')
-    .option('--all', 'run every test')
-    .option('--case <case-id>', 'select an exact case id; repeatable', collect)
-    .option('--tag <tag>', 'select cases with every repeated tag; repeatable', collect)
-    .option('--folder <folder>', 'select a logical folder and descendants; repeatable', collect)
-    .option('--dataset <dataset-id>', 'select cases from an attached dataset; repeatable', collect)
+  const run = addEvalSelectionOptions(
+    evalCommand
+      .command('run')
+      .description('Run selected tests and persist one immutable evaluation.')
+      .argument('[test-id...]', 'test ids; pass --all to select every test')
+      .option('--all', 'run every test'),
+  )
     .option('--sample <n>', 'sample up to n matching cases across selected tests')
     .option(
       '--seed <seed>',
@@ -273,10 +270,7 @@ const registerEvalCommands = (context: CommandContext): void => {
         Effect.gen(function* () {
           const fields = {
             ...options,
-            caseIds: options.case,
-            datasetIds: options.dataset,
-            folders: options.folder,
-            tags: options.tag,
+            ...evalSelectionFields(options),
             testIds,
           };
 

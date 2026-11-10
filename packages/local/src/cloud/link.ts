@@ -11,7 +11,7 @@ import { errnoCode } from '../internal/errno-code.js';
 import { syncPath } from '../internal/sync-path.js';
 import { discoverProject, type DiscoverProjectOptions } from '../project/discover-project.js';
 import { resolveContainedPath } from '../project/project-path.js';
-import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
+import { withProjectLock } from '../project/transaction/project-lock.js';
 import type { CloudClient } from './client.js';
 import { linkedProjectSchema } from './protocol.js';
 
@@ -165,42 +165,39 @@ const linkCloudProject = Effect.fn('linkCloudProject')(function* (
     );
   }
 
-  const lock = yield* acquireProjectLock(root);
+  return yield* withProjectLock(
+    root,
+    () =>
+      Effect.gen(function* () {
+        const current = yield* readCloudLink(root);
 
-  return yield* withOperationCleanup(
-    Effect.gen(function* () {
-      const current = yield* readCloudLink(root);
+        if (
+          current !== undefined &&
+          (current.project_id !== options.projectId || current.base_url !== options.client.baseUrl)
+        ) {
+          return yield* Effect.fail(
+            new LocalError(
+              'project_changed',
+              'This directory is already linked to another cloud project.',
+              {
+                hint: 'Use a separate project directory to avoid replacing synchronization history.',
+              },
+            ),
+          );
+        }
 
-      if (
-        current !== undefined &&
-        (current.project_id !== options.projectId || current.base_url !== options.client.baseUrl)
-      ) {
-        return yield* Effect.fail(
-          new LocalError(
-            'project_changed',
-            'This directory is already linked to another cloud project.',
-            {
-              hint: 'Use a separate project directory to avoid replacing synchronization history.',
-            },
-          ),
-        );
-      }
+        const link: CloudLink = current ?? {
+          schema: 'attest.cloud-link.v1',
+          base_url: options.client.baseUrl,
+          project_id: options.projectId,
+          file_hashes: {},
+        };
 
-      const link: CloudLink = current ?? {
-        schema: 'attest.cloud-link.v1',
-        base_url: options.client.baseUrl,
-        project_id: options.projectId,
-        file_hashes: {},
-      };
+        yield* writeCloudLink(root, link);
 
-      yield* writeCloudLink(root, link);
-
-      return { project_id: link.project_id, revision_id: link.revision_id ?? null };
-    }),
-    Effect.gen(function* () {
-      yield* releaseProjectLock(lock);
-    }),
-    'project_saved_cleanup_failed',
+        return { project_id: link.project_id, revision_id: link.revision_id ?? null };
+      }),
+    () => ({ committed: true }),
   );
 }, Effect.uninterruptible);
 

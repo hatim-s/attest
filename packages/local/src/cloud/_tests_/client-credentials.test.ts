@@ -1,5 +1,7 @@
 import * as Exit from 'effect/Exit';
 import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import { OperationCleanup } from '../../internal/operation-cleanup.js';
 import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
@@ -36,6 +38,54 @@ const temporaryPath = async (): Promise<string> => {
 };
 
 describe('cloud trust boundaries', () => {
+  it('does not resume device polling after request cleanup fails', async () => {
+    const signal = new AbortController().signal;
+    const cleanup = new Error('listener release failed');
+    const removeListener = signal.removeEventListener.bind(signal);
+    vi.spyOn(signal, 'removeEventListener')
+      .mockImplementationOnce(removeListener)
+      .mockImplementationOnce(() => {
+        throw cleanup;
+      });
+
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          device_code: 'device',
+          user_code: 'ABCD',
+          verification_uri: 'https://cloud.example.test/approve',
+          expires_in: 600,
+          interval: 1,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ access_token: 'token', token_type: 'Bearer', expires_in: 600 }),
+      );
+
+    const exit = await Effect.runPromiseExit(
+      loginCloud({
+        baseUrl: 'https://cloud.example.test',
+        credentialPath: await temporaryPath(),
+        fetch: fetcher,
+        signal,
+        onDevice: () => undefined,
+      }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    if (Exit.isFailure(exit)) {
+      const retained = Context.getOrUndefined(Cause.annotations(exit.cause), OperationCleanup);
+      expect(retained).toBeDefined();
+
+      if (retained !== undefined) expect(Cause.squash(retained)).toBe(cleanup);
+    }
+  });
   it('keeps bearer tokens on the configured origin and rejects redirects', async () => {
     const fetcher = vi
       .fn<typeof fetch>()
