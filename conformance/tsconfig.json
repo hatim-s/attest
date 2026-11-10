@@ -5,5 +5,5 @@
     "types": ["node"],
     "rootDir": ".."
   },
-  "include": ["src/**/*.ts", "../packages/contracts/src/_tests_/support/load-fixtures.ts"]
+  "include": ["src/**/*.ts"]
 }

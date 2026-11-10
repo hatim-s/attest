@@ -11,7 +11,7 @@ import {
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { loadFixtures } from '../../../../packages/contracts/src/_tests_/support/load-fixtures.js';
+import { loadFixtures } from '../../load-fixtures.js';
 
 const iterationCount = Number.parseInt(process.env.FUZZ_ITERATIONS ?? '200', 10);
 

@@ -16,7 +16,7 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { contentHash } from '../../store/internal/canonical-json.js';
+import { contentHash } from '../../internal/canonical-json.js';
 import { hashCanonicalJsonLines } from '../canonical-project.js';
 import { resolveEvalRun } from '../eval-resolver.js';
 import { EvalResolutionError, type ResolutionProject } from '../resolution-project.js';

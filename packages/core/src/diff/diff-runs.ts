@@ -6,7 +6,7 @@ import {
   type EvalRun,
 } from '@attest/contracts';
 
-import { canonicalStringify } from '../store/internal/canonical-json.js';
+import { canonicalStringify } from '../internal/canonical-json.js';
 import { StoreError } from '../store/store-error.js';
 import type { RunRecord, RunSource } from '../store/types.js';
 import type { RunDiff } from './types.js';

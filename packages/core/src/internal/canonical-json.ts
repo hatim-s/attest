@@ -1,7 +1,7 @@
 import type { JsonValue } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
-import { StoreError } from '../store-error.js';
+import { StoreError } from '../store/store-error.js';
 
 const compareKeys = ([left]: [string, unknown], [right]: [string, unknown]): number =>
   left < right ? -1 : 1;

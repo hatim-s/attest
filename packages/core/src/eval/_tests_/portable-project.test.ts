@@ -6,7 +6,7 @@ import {
   COMMAND_REQUEST_SCHEMA_ID,
   type PortableProjectBundle,
 } from '@attest/contracts';
-import { contentHash } from '../../store/internal/canonical-json.js';
+import { contentHash } from '../../internal/canonical-json.js';
 import { resolvePortableProject } from '../portable-project.js';
 import { resolveEvalRun } from '../eval-resolver.js';
 

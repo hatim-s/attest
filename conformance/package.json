@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "@attest/contracts": "workspace:*",
-    "fast-check": "^4"
+    "fast-check": "^4",
+    "effect": "4.1.2"
   }
 }

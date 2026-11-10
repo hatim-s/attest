@@ -8,7 +8,7 @@ import {
 
 import { validatePortableMetricSource } from './portable-metric-source.js';
 
-import { canonicalStringify, contentHash } from '../store/internal/canonical-json.js';
+import { canonicalStringify, contentHash } from '../internal/canonical-json.js';
 import { hashCanonicalJsonLines, hashProjectManifest } from './canonical-project.js';
 import { EvalResolutionError, type ResolutionProject } from './resolution-project.js';
 

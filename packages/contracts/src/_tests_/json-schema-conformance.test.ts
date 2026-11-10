@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as Schema from 'effect/Schema';
 
 import { CONTRACT_JSON_SCHEMAS } from '../schema/json-schema.js';
-import { loadFixtures } from './support/load-fixtures.js';
+import { loadFixtures } from '../../../../conformance/src/load-fixtures.js';
 import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 import {
   AGENT_COMPLETION_PROTOCOL,
