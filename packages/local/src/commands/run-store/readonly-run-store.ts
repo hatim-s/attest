@@ -9,7 +9,7 @@ import { anchoredCall, openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
 import { openReadonlyRunStore, withStoreScope } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
-import { withReadCleanup } from './cleanup.js';
+import { withReadCleanup } from '../../store/internal/read-cleanup.js';
 import { storeCall } from '../../store/internal/store-effect.js';
 import {
   captureRunStoreSnapshot,

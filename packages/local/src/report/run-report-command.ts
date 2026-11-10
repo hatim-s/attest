@@ -8,7 +8,7 @@ import { summarizeCaseRecord } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
 import { PROJECT_STORE_PATH } from '../project/project-store-path.js';
-import { withReadCleanup } from '../commands/run-store/cleanup.js';
+import { withReadCleanup } from '../store/internal/read-cleanup.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';

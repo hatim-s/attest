@@ -1,4 +1,4 @@
-import { finishWithRelease } from '../agent/adapter/lifecycle-cause.js';
+import { finishWithRelease } from '../../internal/lifecycle-cause.js';
 import * as Context from 'effect/Context';
 import * as Fiber from 'effect/Fiber';
 import type * as Scope from 'effect/Scope';

@@ -9,7 +9,7 @@ import { StoreError } from '@attest/core';
 import { expect, it } from 'vitest';
 import { run } from '../../../store/_tests_/store-fixture.js';
 import { StoreCleanup } from '../../../store/internal/store-effect.js';
-import { withReadCleanup } from '../cleanup.js';
+import { withReadCleanup } from '../../../store/internal/read-cleanup.js';
 import { captureRunStoreSnapshot, removeRunStoreSnapshot } from '../run-store-snapshot.js';
 
 it('attempts every release and retains all failures beside a primary typed error', async () => {

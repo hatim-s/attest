@@ -1,7 +1,7 @@
 import * as Effect from 'effect/Effect';
 import * as Cause from 'effect/Cause';
 import * as Exit from 'effect/Exit';
-import { finishWithRelease } from './adapter/lifecycle-cause.js';
+import { finishWithRelease } from '../../internal/lifecycle-cause.js';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
