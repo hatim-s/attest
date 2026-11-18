@@ -149,6 +149,48 @@ describe('cloud link state', () => {
 });
 
 describe('cloud revision synchronization', () => {
+  it('keeps a UTF-8 metric script byte-for-byte in the portable revision', async () => {
+    const root = await createDirectory();
+    const script = 'attest/metrics/code/score.ts';
+    const contents = '\uFEFFexport const score = 1;\n';
+
+    const metric = {
+      schema: 'attest.metric',
+      id: 'custom',
+      name: 'Custom',
+      definition: { kind: 'exec', argv: ['bun', script] },
+    };
+
+    await mkdir(join(root, 'attest/metrics/code'), { recursive: true });
+    await writeFile(join(root, script), contents);
+    await writeFile(join(root, 'attest/metrics/custom.json'), JSON.stringify(metric));
+    await writeFile(
+      join(root, 'attest.project.json'),
+      JSON.stringify({
+        schema: PROJECT_SCHEMA_ID,
+        project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
+        name: 'Local',
+        resources: {
+          agents: [],
+          tests: [],
+          datasets: [],
+          metrics: [
+            {
+              id: metric.id,
+              schema: metric.schema,
+              path: 'attest/metrics/custom.json',
+              content_hash: contentHash(metric),
+            },
+          ],
+        },
+      }),
+    );
+
+    const project = await Effect.runPromiseExit(loadProject({ project: root })).then(valueFromExit);
+    const bundle = await Effect.runPromiseExit(createCloudBundle(project)).then(valueFromExit);
+    expect(bundle.files[script]).toBe(contents);
+  });
+
   it('rejects a missing metric entrypoint as a typed validation failure before dispatch', async () => {
     const root = await createDirectory();
 

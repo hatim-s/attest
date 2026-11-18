@@ -40,6 +40,7 @@ const annotateProjectCleanup = <E>(primary: Cause.Cause<E>, cleanup: Cause.Cause
         cleanup,
       ),
     ),
+    { overwrite: true },
   );
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';

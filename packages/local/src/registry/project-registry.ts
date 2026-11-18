@@ -84,24 +84,30 @@ const readRegistry = Effect.fn('readRegistry')(function* (registryPath: string) 
   });
 });
 
-/** Replaces the registry atomically with a private temporary file and a rename. */
+/** Validates the replacement before atomically publishing it as a private file. */
 const writeRegistry = Effect.fn('writeRegistry')(function* (
   registryPath: string,
   registry: ProjectRegistry,
 ) {
-  return yield* Effect.gen(function* () {
-    yield* writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`);
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.gen(function* () {
-        return yield* Effect.fail(
-          new LocalError('registry_write_failed', 'Could not save the project registry.', {
-            path: registryPath,
-            hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
-            cause,
-          }),
-        );
-      }),
+  const encoded = yield* Schema.encodeEffect(registrySchema)(registry).pipe(
+    Effect.mapError(
+      (cause) =>
+        new LocalError('registry_write_failed', 'Could not save an invalid project registry.', {
+          path: registryPath,
+          hint: 'Provide a non-empty project name and project ID if specified, then retry.',
+          cause,
+        }),
+    ),
+  );
+
+  yield* writePrivateFile(registryPath, `${JSON.stringify(encoded, undefined, 2)}\n`).pipe(
+    Effect.mapError(
+      (cause) =>
+        new LocalError('registry_write_failed', 'Could not save the project registry.', {
+          path: registryPath,
+          hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
+          cause,
+        }),
     ),
   );
 });

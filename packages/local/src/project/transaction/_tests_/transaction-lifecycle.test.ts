@@ -371,7 +371,7 @@ it('reports restored state when writing the commit journal fails', async () => {
   expect(await readdir(join(root, '.attest/transactions'))).toEqual([]);
 });
 
-it('keeps a verification defect when compensation fails', async () => {
+it('keeps a verification defect and both failed recovery steps', async () => {
   const root = await createRoot();
 
   const prepared = valueFromExit(
@@ -384,11 +384,23 @@ it('keeps a verification defect when compensation fails', async () => {
   await writeFile(join(prepared.directory, 'backups/0'), 'tampered');
 
   const exit = await Effect.runPromiseExit(
-    runPreparedTransaction({
-      root,
-      prepared,
-      verify: () => Effect.die(defect),
-    }),
+    withProjectLock(root, (lock) =>
+      runPreparedTransaction({
+        root,
+        prepared,
+        verify: () =>
+          Effect.gen(function* () {
+            yield* Effect.tryPromise(() =>
+              writeFile(
+                lock.path,
+                JSON.stringify({ ...lock.metadata, owner_token: 'replacement' }),
+              ),
+            );
+
+            return yield* Effect.die(defect);
+          }),
+      }),
+    ),
   );
 
   expect(Exit.isFailure(exit)).toBe(true);
@@ -396,6 +408,10 @@ it('keeps a verification defect when compensation fails', async () => {
   if (Exit.isFailure(exit)) {
     expect(Cause.hasDies(exit.cause)).toBe(true);
     expect(Cause.squash(exit.cause)).toBe(defect);
-    expect(Context.getOrUndefined(Cause.annotations(exit.cause), ProjectLockCleanup)).toBeDefined();
+    const cleanup = Context.getOrUndefined(Cause.annotations(exit.cause), ProjectLockCleanup);
+    expect(cleanup?.reasons).toHaveLength(2);
+    expect(cleanup?.reasons[1]).toMatchObject({
+      error: { message: 'Project lock ownership changed.' },
+    });
   }
 });

@@ -73,7 +73,8 @@ const createCloudBundle = Effect.fn('createCloudBundle')(function* (project: Loa
     const bytes = yield* anchoredCall('readFile', destination, () => readFile(destination));
 
     const contents = yield* Effect.try({
-      try: () => new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      // Preserve a leading byte-order mark so the bundle's hash matches the on-disk file.
+      try: () => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
       catch: () =>
         new LocalError('project_invalid', 'Cloud revisions support UTF-8 text files only.', {
           path,

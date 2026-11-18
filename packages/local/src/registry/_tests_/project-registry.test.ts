@@ -140,6 +140,23 @@ describe('project registry', () => {
       projectId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     });
   });
+  it('rejects an empty name override and keeps the existing registry readable', async () => {
+    const home = await temporaryDirectory('attest-registry-');
+    const registryPath = join(home, 'projects.json');
+
+    const existing = await executeB1(
+      registerProject({ registryPath, root: await projectDirectory(home, 'existing') }),
+    );
+
+    await projectDirectory(home, 'new-project');
+
+    await expect(
+      executeB1(
+        addProject({ registryPath, directory: 'new-project', workingDirectory: home, name: '' }),
+      ),
+    ).rejects.toMatchObject({ code: 'registry_write_failed' });
+    expect((await executeB1(readRegistry(registryPath))).projects).toEqual([existing]);
+  });
   it('keeps both of two concurrent registrations', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
