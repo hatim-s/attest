@@ -108,6 +108,7 @@ const EvalRunPage = () => {
         </div>
         <div className="attest-page-end">
           <CancelRun
+            key={`${projectKey}/${run.data.id}`}
             projectKey={projectKey}
             run={run.data}
             evalCount={suites.data?.suites.length ?? 1}

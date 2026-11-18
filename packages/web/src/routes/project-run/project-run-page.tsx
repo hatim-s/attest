@@ -55,7 +55,12 @@ const ProjectRunPage = () => {
           </p>
         </div>
         <div className="attest-page-end">
-          <CancelRun projectKey={projectKey} run={run.data} evalCount={evals.length} />
+          <CancelRun
+            key={`${projectKey}/${run.data.id}`}
+            projectKey={projectKey}
+            run={run.data}
+            evalCount={evals.length}
+          />
         </div>
       </div>
       {suites.data === undefined ? (
