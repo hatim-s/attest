@@ -195,12 +195,6 @@ const executeOwned = <Payload, BaselineDiff>(
     }
 
     const deadline = new AbortController();
-    let timedOut = false;
-
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      deadline.abort(new EvalEngineError({ reason: 'deadline_exceeded' }));
-    }, run.effective_command.resolved.timeout_ms);
 
     const signal = options.signal
       ? AbortSignal.any([options.signal, deadline.signal])
@@ -210,26 +204,40 @@ const executeOwned = <Payload, BaselineDiff>(
     let casePersistenceConfirmed = true;
     yield* attempt(
       () =>
-        Effect.gen(function* () {
-          yield* Effect.suspend(() => runner.beforeRun?.(run.run_id, signal) ?? Effect.void);
+        Effect.scoped(
+          Effect.gen(function* () {
+            // The Effect clock supports delays beyond the native timer limit. The scope stops the
+            // deadline before runner cleanup even if admission or scheduling fails.
+            yield* Effect.forkScoped(
+              Effect.sleep(run.effective_command.resolved.timeout_ms).pipe(
+                Effect.andThen(
+                  Effect.sync(() =>
+                    deadline.abort(new EvalEngineError({ reason: 'deadline_exceeded' })),
+                  ),
+                ),
+              ),
+              { startImmediately: true, uninterruptible: false },
+            );
+            yield* Effect.suspend(() => runner.beforeRun?.(run.run_id, signal) ?? Effect.void);
 
-          const state = yield* executeCases(
-            run,
-            plan.cases,
-            runner,
-            persistence,
-            signal,
-            collector.emit,
-          );
+            const state = yield* executeCases(
+              run,
+              plan.cases,
+              runner,
+              persistence,
+              signal,
+              collector.emit,
+            );
 
-          records = state.records;
-          causes.push(...state.causes);
-          errors.push(...state.infrastructureErrors);
-          casePersistenceConfirmed = state.persistenceConfirmed;
-        }),
+            records = state.records;
+            causes.push(...state.causes);
+            errors.push(...state.infrastructureErrors);
+            casePersistenceConfirmed = state.persistenceConfirmed;
+          }),
+        ),
       'Eval orchestration failed.',
     );
-    clearTimeout(timeout);
+    const timedOut = deadline.signal.aborted;
 
     const cleanup = yield* attempt(
       () => runner.cleanup?.(run.run_id) ?? Effect.void,

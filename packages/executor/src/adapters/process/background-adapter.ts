@@ -1,6 +1,7 @@
 import type { AgentRequest, AgentResource } from '@attest/contracts';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
+import * as Fiber from 'effect/Fiber';
 import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
 import * as Deferred from 'effect/Deferred';
@@ -43,22 +44,18 @@ class BackgroundAgentSession {
 
   private readonly cleanup = Deferred.makeUnsafe<void, AgentInvocationError>();
   private cleanupStarted = false;
-  private readonly callerAbort = (): void => this.runController.abort();
+  private readonly abortRun = (): void => this.runController.abort();
   private readonly runController = new AbortController();
-  private runTimer?: NodeJS.Timeout;
+  private runTimer?: Fiber.Fiber<void>;
 
   private constructor(
     readonly agent: BackgroundAgentResource,
     private readonly process: ManagedChild,
     private readonly options: BackgroundSessionOptions,
   ) {
-    if (agent.timeouts?.run_ms !== undefined) {
-      this.runTimer = setTimeout(() => this.runController.abort(), agent.timeouts.run_ms);
-    }
+    options.signal?.addEventListener('abort', this.abortRun, { once: true });
 
-    options.signal?.addEventListener('abort', this.callerAbort, { once: true });
-
-    if (options.signal?.aborted) this.callerAbort();
+    if (options.signal?.aborted) this.abortRun();
   }
 
   /** Starts argv directly and blocks until the configured readiness contract succeeds. */
@@ -105,6 +102,14 @@ class BackgroundAgentSession {
     const session = new BackgroundAgentSession(agent, process, options);
     yield* Effect.addFinalizer(() => Effect.asVoid(Effect.exit(session.close())));
 
+    if (agent.timeouts?.run_ms !== undefined) {
+      // The Effect clock splits delays that exceed the native timer range.
+      session.runTimer = yield* Effect.forkScoped(
+        Effect.andThen(Effect.sleep(agent.timeouts.run_ms), Effect.sync(session.abortRun)),
+        { startImmediately: true, uninterruptible: false },
+      );
+    }
+
     const primary = yield* Effect.exit(
       Effect.interruptible(session.waitForReadiness()).pipe(
         Effect.mapError((error) => error.copyWith({ diagnostics: session.startupDiagnostics() })),
@@ -147,17 +152,25 @@ class BackgroundAgentSession {
     return diagnostics;
   }
 
-  private waitForReadiness() {
-    return waitForReadiness(this.agent.transport.readiness, {
+  /** Keeps the connect deadline alive until the readiness probe releases its resources. */
+  private waitForReadiness = Effect.fn('BackgroundAgentSession.waitForReadiness')(function* (
+    this: BackgroundAgentSession,
+  ) {
+    const deadline = new AbortController();
+    yield* Effect.forkScoped(
+      Effect.sleep(this.agent.timeouts?.connect_ms ?? DEFAULT_STARTUP_MS).pipe(
+        Effect.andThen(Effect.sync(() => deadline.abort())),
+      ),
+      { startImmediately: true },
+    );
+
+    return yield* waitForReadiness(this.agent.transport.readiness, {
       process: this.process,
       cleanupExits: this.readinessCleanupExits,
-      signal: AbortSignal.any([
-        this.runController.signal,
-        AbortSignal.timeout(this.agent.timeouts?.connect_ms ?? DEFAULT_STARTUP_MS),
-      ]),
+      signal: AbortSignal.any([this.runController.signal, deadline.signal]),
       abortError: () => abortedError(this.options.signal, 'Background agent startup'),
     });
-  }
+  }, Effect.scoped);
 
   /** Invokes the ready service through the existing mapped HTTP retry and evidence boundary. */
   private invokeNow = Effect.fn('BackgroundAgentSession.invoke')(function* (
@@ -318,10 +331,12 @@ class BackgroundAgentSession {
     yield* Effect.all([...this.active].map((done) => Deferred.await(done)));
 
     const detached = yield* Effect.exit(
-      Effect.sync(() => {
-        if (this.runTimer !== undefined) clearTimeout(this.runTimer);
-        this.options.signal?.removeEventListener('abort', this.callerAbort);
-      }),
+      Effect.gen(
+        function* (this: BackgroundAgentSession) {
+          if (this.runTimer !== undefined) yield* Fiber.interrupt(this.runTimer);
+          this.options.signal?.removeEventListener('abort', this.abortRun);
+        }.bind(this),
+      ),
     );
 
     const snapshot = yield* Effect.exit(this.process.snapshotDescendants());

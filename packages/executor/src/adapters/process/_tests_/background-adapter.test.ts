@@ -146,6 +146,31 @@ describe('background process adapter', () => {
     ).rejects.toMatchObject({ code: 'network' });
   });
 
+  it.each(['connect_ms', 'run_ms'] as const)(
+    'supports a %s deadline beyond the native timer range',
+    async (field) => {
+      const port = await freePort();
+      const configured = agent(port, { kind: 'stderr', pattern: `READY ${String(port)}` });
+
+      const session = await startBackgroundAgent(
+        { ...configured, timeouts: { ...configured.timeouts, [field]: 2 ** 32 } },
+        { cwd: process.cwd(), env: { PATH: process.env.PATH ?? '' } },
+      );
+
+      const warnings = vi.spyOn(process, 'emitWarning');
+
+      try {
+        expect(await session.invoke(request)).toMatchObject({ status: 'ok' });
+        expect(warnings.mock.calls.map(([message]) => String(message))).not.toContainEqual(
+          expect.stringContaining('does not fit into a 32-bit signed integer'),
+        );
+      } finally {
+        warnings.mockRestore();
+        await session.close();
+      }
+    },
+  );
+
   it('classifies the run deadline as timeout and still cleans up the service', async () => {
     const port = await freePort();
 

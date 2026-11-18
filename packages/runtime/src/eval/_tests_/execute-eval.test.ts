@@ -245,6 +245,25 @@ describe('executeResolvedEvalPlan', () => {
     });
     expect(cleanup).toHaveBeenCalledOnce();
   });
+  it('does not expire a deadline beyond the native timer range', async () => {
+    const result = await Effect.runPromise(
+      executeResolvedEvalPlan(
+        createPlan(['case-zero'], { timeoutMs: 2 ** 31 }),
+        {
+          executeCase: (_runId, resolvedCase, signal) =>
+            Effect.gen(function* () {
+              yield* Effect.sleep(25);
+              expect(signal.aborted).toBe(false);
+
+              return completedExecution(resolvedCase);
+            }),
+        },
+        createPersistence().adapter,
+      ),
+    );
+
+    expect(result.status).toBe('completed');
+  });
   it('keeps runner and invocation failures distinct from completed cases', async () => {
     const plan = createPlan(['runner-rejects', 'invocation-fails', 'passes'], { concurrency: 3 });
 

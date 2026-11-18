@@ -362,13 +362,22 @@ describe('native process ownership', () => {
             terminationGraceMs: 20,
           });
 
+          // A spawn event confirms process creation. A round trip confirms the fixture is reading
+          // frames before the cancellation grace starts.
+          expect((yield* session.invoke(request('ready', 0))).status).toBe('ok');
+
           const slow = yield* session.invoke(request('slow', 500)).pipe(Effect.forkChild);
           const fast = yield* session.invoke(request('fast', 5)).pipe(Effect.forkChild);
           yield* Effect.sleep(10);
           yield* Fiber.interrupt(slow);
           const interrupted = yield* Fiber.await(slow);
           expect(Exit.isFailure(interrupted) && Cause.hasInterrupts(interrupted.cause)).toBe(true);
-          expect((yield* Fiber.join(fast)).status).toBe('ok');
+          const sibling = yield* Fiber.join(fast);
+
+          expect(
+            sibling.status,
+            sibling.status === 'invocation_error' ? sibling.error.message : undefined,
+          ).toBe('ok');
           // A confirmed in-band acknowledgement leaves the bridge usable.
           expect((yield* session.invoke(request('after', 0))).status).toBe('ok');
           yield* session.close();

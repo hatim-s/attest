@@ -97,9 +97,16 @@ const openPinnedRequest = (
       const abort = (): void => failWith(errors.aborted());
 
       const { connectTimeout } = errors;
+      const { connectTimeoutMs, firstByteTimeoutMs } = options;
 
-      if (options.connectTimeoutMs !== undefined && connectTimeout !== undefined) {
-        request.setTimeout(options.connectTimeoutMs, () => failWith(connectTimeout()));
+      // The first-byte deadline already bounds this wait when it expires before the socket timer.
+      // Avoid handing Node a redundant inactivity timeout that it may truncate.
+      if (
+        connectTimeout !== undefined &&
+        connectTimeoutMs !== undefined &&
+        connectTimeoutMs <= firstByteTimeoutMs
+      ) {
+        request.setTimeout(connectTimeoutMs, () => failWith(connectTimeout()));
       }
 
       request.once('socket', (socket) => {
