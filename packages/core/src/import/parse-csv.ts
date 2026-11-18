@@ -1,5 +1,3 @@
-type ParseCsvRecordsResult = { diagnostics: ImportDiagnostic[]; records: CsvRecord[] };
-
 import { decodeSource } from './decode-source.js';
 import { importDiagnostic } from './import-diagnostics.js';
 import {
@@ -14,6 +12,8 @@ interface CsvRecord {
   line: number;
 }
 
+type ParseCsvRecordsResult = { diagnostics: ImportDiagnostic[]; records: CsvRecord[] };
+
 const malformedCsv = (message: string, hint: string, line: number): ImportDiagnostic =>
   importDiagnostic({ code: 'malformed_csv', message, hint, location: { line } });
 
@@ -25,6 +25,7 @@ const parseCsvRecords = (text: string, maxRecords: number): ParseCsvRecordsResul
   let field = '';
   let line = 1;
   let recordLine = 1;
+  let recordStart = 0;
   let quoted = false;
   let closedQuote = false;
 
@@ -33,7 +34,6 @@ const parseCsvRecords = (text: string, maxRecords: number): ParseCsvRecordsResul
     records.push({ fields, line: recordLine });
     fields = [];
     field = '';
-    recordLine = line + 1;
     closedQuote = false;
   };
 
@@ -84,12 +84,15 @@ const parseCsvRecords = (text: string, maxRecords: number): ParseCsvRecordsResul
       field = '';
       closedQuote = false;
     } else if (character === '\n' || character === '\r') {
-      if (character === '\r' && text[index + 1] === '\n') index += 1;
-      finishRecord();
+      // Always read the header. For data rows, raw width distinguishes blank lines from `""`.
+      if (records.length === 0 || index > recordStart) finishRecord();
 
-      if (records.length >= maxRecords) break;
+      if (records.length >= maxRecords) return { diagnostics, records };
+
+      if (character === '\r' && text[index + 1] === '\n') index += 1;
       line += 1;
       recordLine = line;
+      recordStart = index + 1;
     } else if (!closedQuote) {
       field += character;
     }
@@ -105,10 +108,7 @@ const parseCsvRecords = (text: string, maxRecords: number): ParseCsvRecordsResul
     );
   }
 
-  if (field.length > 0 || fields.length > 0 || (text.length > 0 && !/[\r\n]$/u.test(text))) {
-    fields.push(field);
-    records.push({ fields, line: recordLine });
-  }
+  if (text.length > recordStart) finishRecord();
 
   return { diagnostics, records };
 };
@@ -160,9 +160,6 @@ const parseCsvSource = (text: string, maxRows: number): ParsedRecords => {
   const records: SourceRecord[] = [];
 
   for (const { fields, line } of dataRecords) {
-    // Ignore a physically blank trailing/data row, but retain authored empty comma-delimited rows.
-    if (fields.length === 1 && fields[0] === '') continue;
-
     if (fields.length !== headers.length) {
       diagnostics.push(
         importDiagnostic({

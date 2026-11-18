@@ -26,7 +26,9 @@ describe('convertOtlpJson', () => {
     { attributes: {} },
     { events: [{ name: 'event', timeUnixNano: '1000000000', attributes: null }] },
     { events: [{ name: 'event', timeUnixNano: '1000000000', attributes: {} }] },
-  ])('accepts root spans and degrades malformed attributes: %j', (extra) => {
+    { status: { code: { valueOf: null, toString: null } } },
+    { status: { code: [2] } },
+  ])('accepts root spans and degrades malformed metadata: %j', (extra) => {
     const [trace] = convertOtlpJson({
       resourceSpans: [
         {
@@ -51,6 +53,7 @@ describe('convertOtlpJson', () => {
     expect(trace?.spans).toHaveLength(1);
     expect(trace?.spans[0]?.parent_span_id).toBeNull();
     expect(trace?.spans[0]?.attributes).toBeUndefined();
+    expect(trace?.spans[0]?.status).toEqual({ code: 'ok' });
 
     if ('events' in extra) expect(trace?.spans[0]?.events?.[0]?.attributes).toBeUndefined();
   });

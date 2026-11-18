@@ -186,6 +186,18 @@ describe('tabular import validation and identity', () => {
     expect(csvDiagnostics('prompt\nabc"def\n')).toMatchObject([{ code: 'malformed_csv', line: 2 }]);
   });
 
+  it('preserves an explicit empty CSV field without counting blank lines against the row limit', () => {
+    const result = importTabularCases({
+      format: 'csv',
+      limits: { maxRows: 1 },
+      mappings: [{ destination: 'input', source: 'prompt' }],
+      source: 'prompt\r\n\r\n""\r\n\r\n',
+    });
+
+    expect(result.cases).toMatchObject([{ input: '' }]);
+    expect(result.counts.read).toBe(1);
+  });
+
   it('reports authored mapping provenance without exposing source record values', () => {
     const diagnostics = diagnosticsFrom(() =>
       importTabularCases({

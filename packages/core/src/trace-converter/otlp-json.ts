@@ -133,7 +133,7 @@ const inferSpanKind = (name: string, attributes: Attributes): SpanKind => {
 
 const mapStatus = (status: OtlpSpan['status']): Span['status'] => {
   // OTLP STATUS_CODE_ERROR is 2; unset and ok both mean the span did not fail.
-  if (Number(status?.code) !== 2) return { code: 'ok' };
+  if (status?.code !== 2 && status?.code !== '2') return { code: 'ok' };
 
   if (status?.message === undefined) return { code: 'error' };
 

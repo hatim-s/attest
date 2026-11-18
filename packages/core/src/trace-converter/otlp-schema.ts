@@ -51,7 +51,7 @@ const parentSpanIdSchema = Schema.Union([Schema.Literal(''), hexIdSchema(16)]).p
 
 const statusSchema = Schema.optional(
   looseStruct({
-    code: Schema.Unknown,
+    code: Schema.Literals([0, 1, 2, '0', '1', '2']),
     message: Schema.optional(Schema.String).pipe(
       Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
     ),
