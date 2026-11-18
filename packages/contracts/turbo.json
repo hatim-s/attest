@@ -2,7 +2,12 @@
   "$schema": "https://turbo.build/schema.json",
   "extends": ["//"],
   "tasks": {
+    "typecheck": {
+      "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/conformance/src/load-fixtures.ts"]
+    },
     "test": {
+      "dependsOn": ["build"],
       "inputs": [
         "src/**",
         "package.json",
