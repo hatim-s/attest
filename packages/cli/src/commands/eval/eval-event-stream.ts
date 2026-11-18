@@ -82,7 +82,11 @@ const recoverFailedJsonlStream = (
 ): EvalEventStream => {
   const alreadyComplete = parseWithSchema(evalEventStreamSchema, events);
 
-  if (alreadyComplete.ok) return alreadyComplete.value;
+  const final = alreadyComplete.ok ? alreadyComplete.value.at(-1) : undefined;
+
+  // The producer can fail after yielding a success. Keep an earlier reported failure primary.
+  if (alreadyComplete.ok && final?.event === 'result' && !final.data.result.ok)
+    return alreadyComplete.value;
   const started = events[0];
 
   if (started?.event !== 'run_started') throw cause;
@@ -93,6 +97,7 @@ const recoverFailedJsonlStream = (
   );
 
   const openCases = new Map<string, Extract<EvalEvent, { event: 'case_started' }>['data']>();
+  const completed = alreadyComplete.ok ? alreadyComplete.value.at(-2) : undefined;
 
   const summary = {
     // Counts only emitted case completions; the selection size stays on run_started.
@@ -100,7 +105,8 @@ const recoverFailedJsonlStream = (
     passed_cases: 0,
     failed_cases: 0,
     error_cases: 0,
-    metric_error_count: 0,
+    metric_error_count:
+      completed?.event === 'run_completed' ? completed.data.summary.metric_error_count : 0,
   };
 
   for (const event of recovered) {

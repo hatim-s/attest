@@ -52,7 +52,10 @@ type ServedAgentRunner = {
  * Streams a Node request body into a Web stream, pausing the socket while the stream is full so
  * the runner's byte cap stops reading early.
  */
-const toWebBody = (incoming: IncomingMessage): ReadableStream<Uint8Array> => {
+const toWebBody = (
+  incoming: IncomingMessage,
+  outgoing: ServerResponse,
+): ReadableStream<Uint8Array> => {
   let ended = false;
 
   return new ReadableStream({
@@ -81,13 +84,19 @@ const toWebBody = (incoming: IncomingMessage): ReadableStream<Uint8Array> => {
     },
     cancel: () => {
       ended = true;
-      incoming.destroy();
+      // Stop consuming the body, but leave the socket open until the rejection is sent.
+      incoming.pause();
+      outgoing.setHeader('connection', 'close');
     },
   });
 };
 
 /** Bridges a Node request to a Web `Request`. */
-const toWebRequest = (incoming: IncomingMessage, origin: string): Request => {
+const toWebRequest = (
+  incoming: IncomingMessage,
+  outgoing: ServerResponse,
+  origin: string,
+): Request => {
   const headers = new Headers();
 
   for (const [name, value] of Object.entries(incoming.headers)) {
@@ -103,7 +112,7 @@ const toWebRequest = (incoming: IncomingMessage, origin: string): Request => {
   const init: RequestInit & { duplex: 'half' } = {
     method,
     headers,
-    body: hasBody ? toWebBody(incoming) : null,
+    body: hasBody ? toWebBody(incoming, outgoing) : null,
     duplex: 'half',
   };
 
@@ -130,7 +139,9 @@ const serveAgentRunner = (
 
     const respond = async (incoming: IncomingMessage, outgoing: ServerResponse): Promise<void> => {
       try {
-        const exit = await Effect.runPromiseExit(runner.fetch(toWebRequest(incoming, origin)));
+        const exit = await Effect.runPromiseExit(
+          runner.fetch(toWebRequest(incoming, outgoing, origin)),
+        );
 
         if (Exit.isFailure(exit)) {
           outgoing.writeHead(500);

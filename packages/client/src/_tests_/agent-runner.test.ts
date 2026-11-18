@@ -1,4 +1,5 @@
 import { Effect } from 'effect';
+import { request } from 'node:http';
 import { createRunner, serveRunner } from './support/native-owner.js';
 import {
   parseWithSchemaSync,
@@ -65,6 +66,41 @@ const trigger = (
 const echo: AgentHandler = (invocation) => Effect.succeed({ output: { echoed: invocation.input } });
 
 describe('createAgentRunner', () => {
+  it('returns 413 when a chunked Node trigger exceeds the body limit', async () => {
+    const runner = await createRunner({
+      handler: echo,
+      triggerToken: TRIGGER_TOKEN,
+      requestBodyLimitBytes: 8,
+    });
+
+    const served = await serveRunner(runner, { port: 0 });
+
+    const response = await new Promise<number | undefined>((resolve, reject) => {
+      const incoming = request(
+        served.url,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${TRIGGER_TOKEN}`,
+            'content-type': 'application/json',
+            'transfer-encoding': 'chunked',
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on('end', () => resolve(response.statusCode));
+        },
+      );
+
+      incoming.on('error', reject);
+      // Keep uploading until the server responds, so the body cannot have ended at cancellation.
+      incoming.write('123456789');
+    });
+
+    expect(response).toBe(413);
+    expect(runner.pending()).toBe(0);
+  });
+
   it('accepts a trigger with 202 and posts the completion with the bearer token', async () => {
     const completions = await receiver();
     const runner = await createRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });

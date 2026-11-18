@@ -549,6 +549,28 @@ describe('eval output and sequencing', () => {
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(harness.exitCode).toBe(4);
   });
+  it('reports a JSONL source failure after the producer yields a successful result', async () => {
+    const events = async function* (): AsyncGenerator<EvalEvent> {
+      yield* completedEvents();
+      await Promise.resolve();
+      throw new Error('producer failed while finishing');
+    };
+
+    run.mockReturnValue(Effect.succeed(events()));
+    const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
+
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      harness.output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
+    );
+
+    expect(stream.at(-2)).toMatchObject({ event: 'run_completed', data: { status: 'failed' } });
+    expect(stream.at(-1)).toMatchObject({
+      event: 'result',
+      data: { exit_code: 4, result: { ok: false, error: { code: 'run_failed' } } },
+    });
+    expect(harness.exitCode).toBe(4);
+  });
   it.each([1, 3, 6])('repairs a JSONL source that ends after %i events', async (length) => {
     run.mockReturnValue(Effect.succeed(eventSource(completedEvents().slice(0, length))));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
